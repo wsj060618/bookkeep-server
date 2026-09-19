@@ -1,0 +1,96 @@
+-- ============================================================
+-- bookkeep-server 数据库初始化脚本
+-- 适用：MySQL 8.x（本机为 MySQL Server 8.4）
+-- 说明：重复执行会因「表已存在」报错（CREATE TABLE 未加 IF NOT EXISTS）
+-- ============================================================
+
+-- 1) 建库：utf8mb4，中文/emoji 不乱码。已存在则跳过
+CREATE DATABASE IF NOT EXISTS bookkeep DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+
+-- 2) 切到 bookkeep 库，后续建表都在这里
+USE bookkeep;
+
+-- ------------------------------------------------------------
+-- 3) user 用户表
+--    current_book_id：当前打开的账本 id，逻辑关联 book.id（无外键）
+--    deleted：逻辑删除，0=正常 1=已删（MyBatis-Plus 全局逻辑删除会用到）
+-- ------------------------------------------------------------
+CREATE TABLE `user` (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  username        VARCHAR(50)  NOT NULL UNIQUE COMMENT '登录名，唯一',
+  password        VARCHAR(100) NOT NULL COMMENT 'BCrypt 密文，禁止存明文',
+  nickname        VARCHAR(50)  COMMENT '昵称',
+  email           VARCHAR(100) COMMENT '邮箱',
+  avatar          VARCHAR(500) COMMENT '头像 URL，可空',
+  current_book_id BIGINT       COMMENT '当前账本 id，可空（删除账本时会重指）',
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  deleted         TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删'
+) COMMENT='用户表';
+
+-- ------------------------------------------------------------
+-- 4) book 账本表：一本账本 = 一套独立数据（分类/流水/预算）
+--    type：personal 个人 / merchant 商家，决定统计口径
+-- ------------------------------------------------------------
+CREATE TABLE book (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  user_id     BIGINT NOT NULL COMMENT '归属用户 user.id',
+  name        VARCHAR(50) NOT NULL COMMENT '账本名',
+  type        VARCHAR(10) NOT NULL COMMENT '账本类型 personal个人 merchant商家',
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删'
+) COMMENT='账本表';
+
+-- ------------------------------------------------------------
+-- 5) category 分类表：按账本隔离；注册/新建账本时按 type 预置模板
+--    type：income 收入 / expense 支出
+-- ------------------------------------------------------------
+CREATE TABLE category (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  book_id     BIGINT NOT NULL COMMENT '归属账本 book.id',
+  name        VARCHAR(50) NOT NULL COMMENT '分类名，如 餐饮/工资',
+  type        VARCHAR(10) NOT NULL COMMENT '收支类型 income收入 expense支出',
+  icon        VARCHAR(100) COMMENT '图标（前端用）',
+  color       VARCHAR(20)  COMMENT '颜色（前端用）',
+  sort_order  INT DEFAULT 0 COMMENT '排序，越小越靠前',
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删'
+) COMMENT='分类表（按账本隔离）';
+
+-- ------------------------------------------------------------
+-- 6) transaction 流水表（表名是 SQL 关键字，故用反引号）
+--    amount：金额必须 DECIMAL，禁止 double/float
+--    trans_date：业务日期（只到天），统计按 DATE_FORMAT(trans_date,'%Y-%m') 比月
+-- ------------------------------------------------------------
+CREATE TABLE `transaction` (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  book_id     BIGINT NOT NULL COMMENT '归属账本 book.id',
+  category_id BIGINT NOT NULL COMMENT '归属分类 category.id',
+  type        VARCHAR(10) NOT NULL COMMENT '收支类型 income收入 expense支出（冗余，便于统计）',
+  amount      DECIMAL(12,2) NOT NULL COMMENT '金额，两位小数',
+  note        VARCHAR(255) COMMENT '备注',
+  trans_date  DATE NOT NULL COMMENT '交易日期 yyyy-MM-dd',
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删'
+) COMMENT='流水表（按账本隔离）';
+
+-- ------------------------------------------------------------
+-- 7) budget 预算表：某账本、某分类、某月一条
+--    month：'2026-08' 格式（字符串，非 date）
+--    uk_book_cat_month：同账本+同分类+同月唯一，防重复
+--    注意：本表【没有】deleted 列，预算用物理删除（deleteById 真删）。
+--          若加逻辑删除，会和 uk_book_cat_month 唯一键冲突（删了还想重建）。
+-- ------------------------------------------------------------
+CREATE TABLE budget (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  book_id     BIGINT NOT NULL COMMENT '归属账本 book.id',
+  category_id BIGINT NOT NULL COMMENT '归属分类 category.id',
+  month       VARCHAR(7) NOT NULL COMMENT '预算月份 YYYY-MM',
+  amount      DECIMAL(12,2) NOT NULL COMMENT '预算金额，两位小数',
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  UNIQUE KEY uk_book_cat_month (book_id, category_id, month)
+) COMMENT='预算表（物理删除，无 deleted 列）';

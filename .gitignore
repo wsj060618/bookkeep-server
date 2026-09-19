@@ -1,0 +1,21 @@
+# ---- build output ----
+target/
+*.class
+
+# ---- logs ----
+logs/
+*.log
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- local secrets / config (never commit) ----
+application-local.yml
+application-local.yaml
+.env
