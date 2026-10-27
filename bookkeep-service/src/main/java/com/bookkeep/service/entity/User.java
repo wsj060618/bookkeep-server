@@ -23,7 +23,7 @@ public class User {
 
     private String email;
 
-    private String avatar;
+    private String avatar; // 头像
 
     private Long currentBookId;
 
