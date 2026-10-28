@@ -1,7 +1,9 @@
 package com.bookkeep.common.exception;
 
 import com.bookkeep.common.result.ResultCode;
+import lombok.Getter;
 
+@Getter
 public class BusinessException extends RuntimeException {
 
     private final ResultCode resultCode;
@@ -22,10 +24,6 @@ public class BusinessException extends RuntimeException {
     public BusinessException(ResultCode resultCode, String message) {
         super(message);
         this.resultCode = resultCode;
-    }
-
-    public ResultCode getResultCode() {
-        return resultCode;
     }
 
     public Integer getCode() {
