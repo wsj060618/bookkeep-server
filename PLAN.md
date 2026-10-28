@@ -278,12 +278,12 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 
 - **第 0 天 ✅ 已完成**：建库建表 + `application.yml`（UTF-8 + 环境变量 `${DB_USER}/${DB_PWD}`）+ `ResultCode`/`Result`/`PageResult`/`BusinessException`/`JwtUtil` + `BookkeepApplication(scanBasePackages)` + `DataSourceConnectionTest`
 - **第 1 天 ✅ 已完成**：`User` 实体 + `UserMapper` + `UserMapperTest`（持久层 + 逻辑删除验证，测试通过）
-- **第 2 天**：`Book`/`Category` 实体 + `BookMapper`/`CategoryMapper` + `BookType`/`CategoryType`/`CategoryTemplate`
-- **第 3 天**：最小 `SecurityConfig`（先 `permitAll`，提供 `BCryptPasswordEncoder`）+ `GlobalExceptionHandler`
+- **第 2 天 ✅ 已完成**：`Book`/`Category` 实体 + `BookMapper`/`CategoryMapper` + `CategoryTemplate`（用 `BOOK_PERSONAL`/`BOOK_MERCHANT`、`TYPE_INCOME`/`TYPE_EXPENSE` 常量代替原计划的 `BookType`/`CategoryType` 两个类）+ `BookMapperTest`/`CategoryMapperTest`
+- **第 3 天 ✅ 已完成**：最小 `SecurityConfig`（先 `permitAll`，提供 `BCryptPasswordEncoder`）+ `GlobalExceptionHandler` + `GlobalExceptionHandlerTest`（6 个用例：2 个主动抛出、4 个由校验/JSON/404 等框架行为产生）
 - **第 4 天**：注册接口（`RegisterReq`/`UserResp`/`BookResp` + `AuthService.register` + `AuthController.register`）
 - **第 5 天**：登录发 token（`LoginReq`/`LoginResp` + `AuthService.login` + `AuthController.login`）
 - **第 6 天**：`SecurityUtil` + `JwtAuthenticationFilter` + 收紧 `SecurityConfig`（放行 auth，其余需认证）+ `/api/auth/me`
-- **第 7 天**：401/403 JSON 处理器 + P1 全量验收（PLAN §7）
+- **第 7 天**：401/403 JSON 处理器 + 统一「HTTP 状态码 vs body.code」策略（业务错误沿用 200 + body.code，仅 401/403 用真实状态码）+ P1 全量验收（PLAN §7）
 - **缓冲（可选）**：`JacksonConfig`（LocalDate/LocalDateTime 格式），等响应含日期字段再加
 
 > 说明：`SecurityConfig` 会在第 3 天（临时放行）和第 6 天（收紧）各改一次，以便第 4–5 天的接口在认证做完前就能调通。

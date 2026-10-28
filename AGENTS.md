@@ -4,10 +4,12 @@ Multi-module Spring Boot 3.3.5 / JDK 17 / Maven backend for a bookkeeping web ap
 
 ## Current state (important)
 
-- P1 in progress. `bookkeep-common` has `Result`/`ResultCode`/`PageResult`/`BusinessException`/`JwtUtil`; `bookkeep-service` has only `entity/User` + `mapper/UserMapper`; `bookkeep-web` has `BookkeepApplication`, `aspect/LogAspect`, `config/StartupInfoRunner` and tests (`DataSourceConnectionTest`, `UserMapperTest`).
+- P1 in progress (days 0–3 done, day 4 = register API). `bookkeep-common` has `Result`/`ResultCode`/`PageResult`/`BusinessException`/`JwtUtil`; `bookkeep-service` has `entity/{User,Book,Category}`, `mapper/{User,Book,Category}Mapper`, `constant/CategoryTemplate`; `bookkeep-web` has `BookkeepApplication`, `aspect/LogAspect`, `config/StartupInfoRunner`, `config/SecurityConfig`, `handler/GlobalExceptionHandler`, plus tests (`DataSourceConnectionTest`, `UserMapperTest`, `BookMapperTest`, `CategoryMapperTest`, `GlobalExceptionHandlerTest`).
 - No services/controllers/DTOs yet beyond the above. Treat `PLAN.md` as the spec — do not assume code referenced there already exists.
+- `SecurityConfig` is the **day-3 temporary** version (`anyRequest().permitAll()`, stateless, only exposes `BCryptPasswordEncoder`); it gets tightened on day 6 with `JwtAuthenticationFilter` + 401/403 JSON handlers. `JwtUtil.generateToken` exists but **nothing calls it yet** — token issuance lands in `AuthService.login` (day 5).
+- Exception responses are currently **HTTP 200 with the business code in `body.code`** (see `GlobalExceptionHandler` javadoc). This conflicts with PLAN §5 ("HTTP status = code"); PLAN day 7 now records the decision: business errors stay 200 + body.code, only 401/403 use real status codes.
 - SQL lives in `sql/`: `schema.sql` (full schema, for fresh installs) and `migration_add_user_avatar.sql` (one-off `ALTER` for an already-built DB).
-- No commits yet. A root `.gitignore` now exists (`target/`, `logs/`, `.idea/`, `.env`, `application-local.yml`) — still be deliberate about what you stage.
+- Commits exist now (latest: `P1：SecurityConfig + 全局异常处理（第 3 天）`). A root `.gitignore` covers `target/`, `logs/`, `.idea/`, `.env`, `application-local.yml` — still be deliberate about what you stage.
 
 ## Modules
 
@@ -44,4 +46,5 @@ Multi-module Spring Boot 3.3.5 / JDK 17 / Maven backend for a bookkeeping web ap
 
 - Tests live in each module's own `src/test/java`; `@SpringBootTest` + MockMvc integration tests go in `bookkeep-web` (full context, needs MySQL + env vars). Test classes must end in `Test` (Surefire default). `spring-security-test` is already declared in `bookkeep-web`.
 - `DataSourceConnectionTest` is the current smoke test (connection validity, `SELECT 1`, table count); it reads `application.yml`, so `DB_USER`/`DB_PWD` must be set or it fails with an unresolved-placeholder error.
+- `GlobalExceptionHandlerTest` deliberately defines its own throw-away endpoints in a nested `@TestConfiguration` + `@RestController` (never in `src/main`, or they would ship as public endpoints). It asserts HTTP 200 + `body.code`/`message`. **When day 6 tightens `SecurityConfig`, all of its cases will return 401** — add `@WithMockUser` (keeps the filter chain) or `@AutoConfigureMockMvc(addFilters = false)` (cleanest when only testing exception mapping).
 - Tests that write data (e.g. `UserMapperTest`) put `@Transactional` on the test class, so Spring rolls back after each method — the rows are **never persisted**, so do not go looking for test data in MySQL. `-DskipTests` also skips nothing but compilation, so "green build" alone means tests were not run; use `mvn -pl bookkeep-web -am test` with env vars set.
