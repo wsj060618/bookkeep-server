@@ -1,4 +1,4 @@
-package com.bookkeep.service.entity;
+package com.bookkeep.model.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;

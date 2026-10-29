@@ -19,6 +19,11 @@
             <groupId>com.bookkeep</groupId>
             <artifactId>bookkeep-service</artifactId>
         </dependency>
+        <!-- controller 直接收发 DTO，所以显式依赖 model，不靠 service 传递 -->
+        <dependency>
+            <groupId>com.bookkeep</groupId>
+            <artifactId>bookkeep-model</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

@@ -1,0 +1,34 @@
+package com.bookkeep.web.controller;
+
+import com.bookkeep.common.result.Result;
+import com.bookkeep.service.AuthService;
+import com.bookkeep.model.dto.req.RegisterReq;
+import com.bookkeep.model.dto.resp.UserResp;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * 认证接口
+ * <p>日志由 {@code LogAspect} 统一记录（password 会被脱敏），这里不再重复打日志；
+ * 异常交给 {@code GlobalExceptionHandler} 转成统一的 {@code {code, message, data}}。
+ */
+@RestController
+@RequestMapping("/api/auth")
+@RequiredArgsConstructor
+public class AuthController {
+
+    private final AuthService authService;
+
+    /**
+     * 注册并创建第一本账本
+     * <p>成功返回用户信息（含 currentBookId），不含 token；前端注册成功后调 {@code /api/auth/login} 拿 token。
+     */
+    @PostMapping("/register")
+    public Result<UserResp> register(@Valid @RequestBody RegisterReq req) {
+        return Result.success(authService.register(req));
+    }
+}

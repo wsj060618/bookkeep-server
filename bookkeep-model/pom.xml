@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.bookkeep</groupId>
+        <artifactId>bookkeep-server</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>bookkeep-model</artifactId>
+    <name>bookkeep-model</name>
+    <description>数据模型模块：实体 + 请求/响应 DTO（只有数据形状，不含业务逻辑）</description>
+
+    <dependencies>
+        <!-- 实体上的 @TableName/@TableId/@TableLogic 需要它；只会传递一个 mybatis 核心包，不是整个 MyBatis-Plus 栈 -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-annotation</artifactId>
+        </dependency>
+        <!-- DTO 上的 @NotBlank/@Size/@Email 需要校验注解本身，校验实现由 web 模块的 starter-validation 提供 -->
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

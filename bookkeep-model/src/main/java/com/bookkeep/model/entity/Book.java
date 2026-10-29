@@ -1,4 +1,4 @@
-package com.bookkeep.service.entity;
+package com.bookkeep.model.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -9,23 +9,18 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("user")
-public class User {
+@TableName("book")
+public class Book {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private String username;
+    private Long userId;
 
-    private String password;
+    private String name;
 
-    private String nickname;
-
-    private String email;
-
-    private String avatar; // 头像
-
-    private Long currentBookId;
+    /** 账本类型：personal / merchant（常量见 {@code CategoryTemplate}）。 */
+    private String type;
 
     private LocalDateTime createdAt;
 

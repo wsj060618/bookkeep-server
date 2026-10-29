@@ -1,6 +1,6 @@
 package com.bookkeep.web;
 
-import com.bookkeep.service.entity.User;
+import com.bookkeep.model.entity.User;
 import com.bookkeep.service.mapper.UserMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

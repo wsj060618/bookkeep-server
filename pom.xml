@@ -20,6 +20,7 @@
 
     <modules>
         <module>bookkeep-common</module>
+        <module>bookkeep-model</module>
         <module>bookkeep-service</module>
         <module>bookkeep-web</module>
     </modules>
@@ -39,6 +40,11 @@
             </dependency>
             <dependency>
                 <groupId>com.bookkeep</groupId>
+                <artifactId>bookkeep-model</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.bookkeep</groupId>
                 <artifactId>bookkeep-service</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -50,6 +56,12 @@
             <dependency>
                 <groupId>com.baomidou</groupId>
                 <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
+            <!-- 只含注解，供 bookkeep-model 的实体使用（避免 model 拖进整个 MP 栈） -->
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-annotation</artifactId>
                 <version>${mybatis-plus.version}</version>
             </dependency>
             <dependency>

@@ -2,7 +2,7 @@ package com.bookkeep.web;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bookkeep.service.constant.CategoryTemplate;
-import com.bookkeep.service.entity.Category;
+import com.bookkeep.model.entity.Category;
 import com.bookkeep.service.mapper.CategoryMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
