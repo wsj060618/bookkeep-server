@@ -1,11 +1,11 @@
 # AGENTS.md
 
-Multi-module Spring Boot 3.3.5 / JDK 17 / Maven backend for a bookkeeping web app. `PLAN.md` (in Chinese) is the authoritative design doc — read it before writing code. This file only captures what is not obvious from the repo.
+Multi-module Spring Boot 3.3.5 / JDK 17 / Maven backend for a bookkeeping web app. Four modules: `bookkeep-common` (Result/exceptions/JWT), `bookkeep-model` (entities + DTOs), `bookkeep-service` (mappers/services), `bookkeep-web` (controllers/config). `PLAN.md` (in Chinese) is the authoritative design doc — read it before writing code. This file only captures what is not obvious from the repo.
 
 ## Current state (important)
 
-- P1 in progress (days 0–3 done, day 4 = register API). `bookkeep-common` has `Result`/`ResultCode`/`PageResult`/`BusinessException`/`JwtUtil`; `bookkeep-service` has `entity/{User,Book,Category}`, `mapper/{User,Book,Category}Mapper`, `constant/CategoryTemplate`; `bookkeep-web` has `BookkeepApplication`, `aspect/LogAspect`, `config/StartupInfoRunner`, `config/SecurityConfig`, `handler/GlobalExceptionHandler`, plus tests (`DataSourceConnectionTest`, `UserMapperTest`, `BookMapperTest`, `CategoryMapperTest`, `GlobalExceptionHandlerTest`).
-- No services/controllers/DTOs yet beyond the above. Treat `PLAN.md` as the spec — do not assume code referenced there already exists.
+- P1 in progress (days 0–4 done, day 5 = login API). `bookkeep-common` has `Result`/`ResultCode`/`PageResult`/`BusinessException`/`JwtUtil`; `bookkeep-model` has `entity/{User,Book,Category}`, `dto/req/RegisterReq`, `dto/resp/{UserResp,BookResp}`; `bookkeep-service` has `mapper/{User,Book,Category}Mapper`, `constant/CategoryTemplate`, `AuthService` + `impl/AuthServiceImpl`; `bookkeep-web` has `BookkeepApplication`, `aspect/LogAspect`, `config/StartupInfoRunner`, `config/SecurityConfig`, `handler/GlobalExceptionHandler`, `controller/AuthController`, plus tests (`DataSourceConnectionTest`, `UserMapperTest`, `BookMapperTest`, `CategoryMapperTest`, `GlobalExceptionHandlerTest`, `AuthRegisterTest`).
+- Only `POST /api/auth/register` exists so far. `UserResp`/`BookResp` are ready for login//me/books, but `AuthService.login`, `SecurityUtil`, and every other controller/service are still to be written. Treat `PLAN.md` as the spec — do not assume code referenced there already exists.
 - `SecurityConfig` is the **day-3 temporary** version (`anyRequest().permitAll()`, stateless, only exposes `BCryptPasswordEncoder`); it gets tightened on day 6 with `JwtAuthenticationFilter` + 401/403 JSON handlers. `JwtUtil.generateToken` exists but **nothing calls it yet** — token issuance lands in `AuthService.login` (day 5).
 - Exception responses are currently **HTTP 200 with the business code in `body.code`** (see `GlobalExceptionHandler` javadoc). This conflicts with PLAN §5 ("HTTP status = code"); PLAN day 7 now records the decision: business errors stay 200 + body.code, only 401/403 use real status codes.
 - SQL lives in `sql/`: `schema.sql` (full schema, for fresh installs) and `migration_add_user_avatar.sql` (one-off `ALTER` for an already-built DB).
@@ -13,9 +13,10 @@ Multi-module Spring Boot 3.3.5 / JDK 17 / Maven backend for a bookkeeping web ap
 
 ## Modules
 
-- Dependency direction is one-way: `bookkeep-web → bookkeep-service → bookkeep-common`. Never reverse it.
-- Parent pom (packaging=pom) holds `dependencyManagement`; submodules declare dependencies **without versions**.
+- Dependency direction is one-way: `bookkeep-web → bookkeep-service → bookkeep-model`, and `bookkeep-service → bookkeep-common`. `bookkeep-model` and `bookkeep-common` are leaves that must **not** depend on each other, on service, or on web (model = data shapes only, common = envelope + utilities).
+- Parent pom (packaging=pom) holds `dependencyManagement`; submodules declare dependencies **without versions**. Do **not** add a `<dependencies>` block to the parent (the reference project VirtueEdu does that and ends up polluting every leaf module with `spring-boot-starter-web`).
 - All modules share package root `com.bookkeep`, but the app class lives in `com.bookkeep.web` — default component scan would only cover `com.bookkeep.web`, so `BookkeepApplication` **must** keep `scanBasePackages = "com.bookkeep"` or `@Component`/`@Service` beans in `common`/`service` will not be found. Keep `@MapperScan("com.bookkeep.service.mapper")` as well.
+- `bookkeep-model` depends only on `mybatis-plus-annotation` + `jakarta.validation-api` + lombok: entities carry `@TableName/@TableId/@TableLogic`, DTOs carry `@NotBlank/@Size/@Email`. Changing a table's columns means editing an entity here, not in `service`.
 - `application.yml` and `logback-spring.xml` live **only** in `bookkeep-web`, which is the only runnable module (it owns `spring-boot-maven-plugin` + `build-info`).
 
 ## Build / run
@@ -32,7 +33,10 @@ Multi-module Spring Boot 3.3.5 / JDK 17 / Maven backend for a bookkeeping web ap
 
 - API prefix `/api`, envelope `{code, message, data}` (`Result`/`ResultCode`/`PageResult`/`BusinessException` belong in `common`), `code=200` success, 401 JSON on bad token.
 - Data isolation: front-end never sends `book_id`; backend derives it from `user.current_book_id` and reads the user via `SecurityUtil.getUserId()` (not by re-parsing the token). Every query must enforce book ownership.
-- Service layer is interface + `impl` (e.g. `AuthService`/`AuthServiceImpl`). Entities/mappers/dtos live in `bookkeep-service`.
+- Service layer is interface + `impl` (e.g. `AuthService`/`AuthServiceImpl`, interface in `com.bookkeep.service`, impl in `com.bookkeep.service.impl`). Entities/DTOs live in `bookkeep-model` (`com.bookkeep.model.entity`, `com.bookkeep.model.dto.req|resp`); mappers live in `bookkeep-service`.
+- `bookkeep-service` has no `spring-security` dependency of its own — `PasswordEncoder` reaches it transitively via `bookkeep-common`'s `spring-security-core`, and the only bean is declared in `bookkeep-web`'s `SecurityConfig`. Inject the interface, not `BCryptPasswordEncoder`.
+- Batch inserts use MyBatis-Plus `Db.saveBatch(list)` (JDBC batch, joins the ambient Spring transaction) rather than hand-written `<foreach>` SQL. It does **not** back-fill generated ids.
+- `AuthServiceImpl.register` deliberately pre-checks the username **and** catches `DuplicateKeyException`: MP's logic-delete filter hides soft-deleted users from the pre-check, but they still occupy the `user.username` unique index.
 - Money is `BigDecimal` with `DECIMAL(12,2)` columns — never `double`.
 - Logic delete is configured globally but **only applies to MyBatis-Plus generated SQL** — handwritten `@Select`/statistics SQL must add `deleted=0` itself.
 - `budget` has **no `deleted` column** (see PLAN §3): do not put `@TableLogic` on the `Budget` entity; budgets are hard-deleted so the `(book_id, category_id, month)` unique key doesn't collide on re-create.

@@ -9,7 +9,7 @@
   - MyBatis-Plus（`mybatis-plus-spring-boot3-starter`）+ MySQL 8
   - Lombok + spring-boot-starter-validation
   - Spring Security + JWT（jjwt 0.12.x）
-- 工程结构：**Maven 父子工程（多模块）**，父工程 `bookkeep-server` 下拆三个子模块
+- 工程结构：**Maven 父子工程（多模块）**，父工程 `bookkeep-server` 下拆四个子模块（`common` / `model` / `service` / `web`，见 §4）
 
 ## 2. 核心设计
 
@@ -112,25 +112,29 @@ CREATE TABLE budget (
 
 ## 4. 工程与包结构（Maven 多模块）
 
-依赖方向：`web → service → common`（单向，不反向依赖）
+依赖方向：`web → service → model / common`（单向，不反向依赖；`model` 与 `common` 互不依赖）
+> 模块划分参考 VirtueEdu 的 `model` / `utils` / `web` 三段式，但**不照搬父 pom 的 `<dependencies>` 全局注入** —— 父 pom 只用 `dependencyManagement`，谁用谁声明。
 
 ```
 D:\coding\bookkeep-server\                父工程（packaging=pom，只管模块聚合与依赖管理）
 ├── pom.xml                               spring-boot-starter-parent + 统一依赖版本管理
-├── bookkeep-common\                      公共模块：纯工具 + 统一返回，不依赖业务
+├── bookkeep-common\                      公共模块：统一返回 + 工具，不依赖业务，也不依赖 model
 │   └── com.bookkeep.common
 │       ├── Result、ResultCode、PageResult
 │       ├── BusinessException
 │       ├── JwtUtil、SecurityUtil
 │       └── constant...
-├── bookkeep-service\                     业务模块：实体 + 数据访问 + 业务逻辑
-│   └── com.bookkeep.service
+├── bookkeep-model\                       数据模型模块：实体 + 请求/响应 DTO（只有数据形状，无业务逻辑）
+│   └── com.bookkeep.model
 │       ├── entity       User、Book、Category、Transaction、Budget
+│       └── dto
+│           ├── req      RegisterReq、LoginReq、BookReq、CategoryReq、TransactionReq、BudgetReq、UserUpdateReq
+│           └── resp     LoginResp、UserResp、BookResp、TransactionResp、SummaryResp、CategoryStatResp、AnalysisReportResp ...
+├── bookkeep-service\                     业务模块：数据访问 + 业务逻辑（mapper / service + impl）
+│   └── com.bookkeep.service
 │       ├── mapper       UserMapper、BookMapper、CategoryMapper、TransactionMapper、BudgetMapper、StatisticMapper
-│       ├── dto
-│       │   ├── req      RegisterReq、LoginReq、BookReq、CategoryReq、TransactionReq、BudgetReq、UserUpdateReq
-│       │   └── resp     LoginResp、BookResp、TransactionResp、SummaryResp、CategoryStatResp、AnalysisReportResp ...
-│       ├── impl 与接口  AuthService、BookService、CategoryService、TransactionService、BudgetService、StatisticService
+│       ├── 接口与 impl   AuthService、BookService、CategoryService、TransactionService、BudgetService、StatisticService（impl 放 impl 子包）
+│       ├── constant     CategoryTemplate
 │       ├── file
 │       │   ├── FileService                  （接口：上传返回 URL）
 │       │   ├── AliyunOssFileServiceImpl     （阿里云 OSS 实现）
@@ -159,8 +163,9 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 模块 | 依赖 | 说明 |
 |---|---|---|
 | `bookkeep-common` | lombok、jjwt、spring-security-core | 轻依赖，JwtUtil/SecurityUtil 用 |
-| `bookkeep-service` | spring-boot-starter、mybatis-plus-spring-boot3-starter、mysql-connector-j、spring-boot-starter-validation、bookkeep-common、aliyun-sdk-oss（+ JDK17 所需 jaxb-api/jaxb-runtime/activation） | 实体/mapper/service/file |
-| `bookkeep-web` | spring-boot-starter-web、spring-boot-starter-security、spring-boot-starter-aop、bookkeep-service | 启动/控制器/配置 |
+| `bookkeep-model` | lombok、mybatis-plus-annotation、jakarta.validation-api | 实体 + DTO；只引注解包（会传递一个 mybatis 核心包），不拖整个 MyBatis-Plus 栈 |
+| `bookkeep-service` | spring-boot-starter、mybatis-plus-spring-boot3-starter、mysql-connector-j、spring-boot-starter-validation、bookkeep-model、bookkeep-common、aliyun-sdk-oss（+ JDK17 所需 jaxb-api/jaxb-runtime/activation） | mapper/service+impl/file/analysis |
+| `bookkeep-web` | spring-boot-starter-web、spring-boot-starter-security、spring-boot-starter-aop、bookkeep-service、bookkeep-model | 启动/控制器/配置（controller 直接收发 DTO，故显式依赖 model） |
 | 各模块 | spring-boot-starter-test(test) | 每模块自带单测；web 额外 spring-security-test |
 
 ### 日志功能
@@ -172,7 +177,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 - 业务代码里直接用 Lombok `@Slf4j` 打日志
 
 ### 多模块注意点
-- 三个子模块包名统一在 `com.bookkeep` 下，但启动类在 `com.bookkeep.web`，默认组件扫描只覆盖 `com.bookkeep.web`，**必须**给 `BookkeepApplication` 加 `scanBasePackages = "com.bookkeep"`，否则 common/service 的 Bean 扫不到
+- 四个子模块包名统一在 `com.bookkeep` 下，但启动类在 `com.bookkeep.web`，默认组件扫描只覆盖 `com.bookkeep.web`，**必须**给 `BookkeepApplication` 加 `scanBasePackages = "com.bookkeep"`，否则 model/service 的 Bean 扫不到
 - `@MapperScan("com.bookkeep.service.mapper")` 加在主启动类或 MybatisPlusConfig
 - `application.yml` 只在 web 模块，服务启动入口是 `bookkeep-web`
 - 测试按标准约定放各模块 `src/test`，`@SpringBootTest` 集成测试放 web 模块
@@ -280,7 +285,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 - **第 1 天 ✅ 已完成**：`User` 实体 + `UserMapper` + `UserMapperTest`（持久层 + 逻辑删除验证，测试通过）
 - **第 2 天 ✅ 已完成**：`Book`/`Category` 实体 + `BookMapper`/`CategoryMapper` + `CategoryTemplate`（用 `BOOK_PERSONAL`/`BOOK_MERCHANT`、`TYPE_INCOME`/`TYPE_EXPENSE` 常量代替原计划的 `BookType`/`CategoryType` 两个类）+ `BookMapperTest`/`CategoryMapperTest`
 - **第 3 天 ✅ 已完成**：最小 `SecurityConfig`（先 `permitAll`，提供 `BCryptPasswordEncoder`）+ `GlobalExceptionHandler` + `GlobalExceptionHandlerTest`（6 个用例：2 个主动抛出、4 个由校验/JSON/404 等框架行为产生）
-- **第 4 天**：注册接口（`RegisterReq`/`UserResp`/`BookResp` + `AuthService.register` + `AuthController.register`）
+- **第 4 天 ✅ 已完成**：注册接口（`RegisterReq`/`UserResp`/`BookResp` + `AuthService.register` + `AuthController.register`）——事务内「归一化并校验 bookType → 用户名查重 → 建用户（BCrypt）→ 建首本账本 → `Db.saveBatch` 写入 12 条模板分类 → 回写 `current_book_id`」；用户名唯一先预检、再靠 `user.username` 唯一索引 `DuplicateKeyException` 兜并发注册与逻辑删除的历史用户；`AuthRegisterTest` 6 个用例（成功 / 商家模板 / 重名 / 软删重名 / 非法类型 / 参数校验）；同日把实体与 DTO 从 `bookkeep-service` 拆到新建的 `bookkeep-model` 模块（见 §4），包名 `com.bookkeep.model.entity` / `com.bookkeep.model.dto.req|resp`
 - **第 5 天**：登录发 token（`LoginReq`/`LoginResp` + `AuthService.login` + `AuthController.login`）
 - **第 6 天**：`SecurityUtil` + `JwtAuthenticationFilter` + 收紧 `SecurityConfig`（放行 auth，其余需认证）+ `/api/auth/me`
 - **第 7 天**：401/403 JSON 处理器 + 统一「HTTP 状态码 vs body.code」策略（业务错误沿用 200 + body.code，仅 401/403 用真实状态码）+ P1 全量验收（PLAN §7）
