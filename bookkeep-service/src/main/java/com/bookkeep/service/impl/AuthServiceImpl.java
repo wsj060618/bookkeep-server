@@ -4,9 +4,13 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.toolkit.Db;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
+import com.bookkeep.common.util.JwtUtil;
 import com.bookkeep.service.AuthService;
 import com.bookkeep.service.constant.CategoryTemplate;
+import com.bookkeep.model.dto.req.LoginReq;
 import com.bookkeep.model.dto.req.RegisterReq;
+import com.bookkeep.model.dto.resp.BookResp;
+import com.bookkeep.model.dto.resp.LoginResp;
 import com.bookkeep.model.dto.resp.UserResp;
 import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.Category;
@@ -38,10 +42,13 @@ public class AuthServiceImpl implements AuthService {
     private final UserMapper userMapper;
     private final BookMapper bookMapper;
     private final PasswordEncoder passwordEncoder;
+    private final JwtUtil jwtUtil;
 
     /**
      * 注册：建用户 → 建首本账本 → 预置分类 → 回写 current_book_id
      * <p>全部写操作在同一个事务里，任一步失败整单回滚——绝不能出现「有用户没账本」或「账本只有一半分类」。
+     * <p>用户名只 trim、<strong>不做大小写归一</strong>：{@code user.username} 是
+     * {@code utf8mb4_0900_as_cs}，Tom / tom 是两个账号。大小写语义由列定义保证，不依赖库默认排序规则。
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -52,9 +59,9 @@ public class AuthServiceImpl implements AuthService {
         String bookType = req.bookType().trim().toLowerCase(Locale.ROOT);
         List<CategoryTemplate.Seed> seeds = CategoryTemplate.of(bookType);
 
-        // 用户名预检：只是为了给出友好提示，真正的唯一性由 user.username 唯一索引保证
-        // 注意 MP 的逻辑删除会自动给这里拼 deleted = 0，已软删的用户查不出来，
-        // 但它依然占着唯一索引，所以下面还要 catch 一次 DuplicateKeyException
+        // 用户名预检：只是为了给出友好提示，真正的唯一性由 uk_user_username_active 保证
+        // MP 的逻辑删除会自动给这里拼 deleted = 0，墓碑行查不出来 —— 这正是现在的语义：
+        // 注销后的名字可以重新注册（墓碑行的 username_active 是 NULL，不参与唯一约束）
         if (userMapper.selectCount(Wrappers.<User>query().eq("username", username)) > 0) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "用户名已存在");
         }
@@ -68,7 +75,8 @@ public class AuthServiceImpl implements AuthService {
         try {
             userMapper.insert(user);
         } catch (DuplicateKeyException e) {
-            // 并发注册同一用户名，或该用户名被逻辑删除的历史用户占着 → 统一按业务异常处理
+            // 并发注册同一用户名（两个请求都通过了预检）→ 统一按业务异常处理。
+            // 墓碑行不会走到这里：它们在 uk_user_username_active 里的值是 NULL
             throw new BusinessException(ResultCode.BAD_REQUEST, "用户名已存在");
         }
 
@@ -96,6 +104,34 @@ public class AuthServiceImpl implements AuthService {
         log.info("注册成功：userId={}, username={}, bookId={}, bookType={}, 预置分类 {} 条",
                 user.getId(), username, book.getId(), bookType, categories.size());
         return UserResp.from(user);
+    }
+
+    /**
+     * 登录：校验密码 → 签发 token → 带上用户信息和全部账本
+     * <p>「用户不存在」和「密码错误」返回同一句提示：否则接口就成了用户名探测器。
+     * 被逻辑删除的用户由 MP 自动拼 {@code deleted = 0} 查不出来，同样走这条分支。
+     * <p>只读事务：这条路径不写库（current_book_id 由注册/切账本维护，登录不改它）。
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public LoginResp login(LoginReq req) {
+        String username = req.username().trim();
+
+        User user = userMapper.selectOne(Wrappers.<User>query().eq("username", username));
+        if (user == null || !passwordEncoder.matches(req.password(), user.getPassword())) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "用户名或密码错误");
+        }
+
+        // 账本按 id 升序，第一本（注册时建的）排在最前，前端切换列表的顺序才稳定
+        List<BookResp> books = bookMapper.selectList(Wrappers.<Book>query()
+                        .eq("user_id", user.getId())
+                        .orderByAsc("id"))
+                .stream()
+                .map(book -> BookResp.from(book, user.getCurrentBookId()))
+                .toList();
+
+        log.info("登录成功：userId={}, username={}, 账本 {} 本", user.getId(), username, books.size());
+        return new LoginResp(jwtUtil.generateToken(user.getId()), UserResp.from(user), books);
     }
 
     /** 模板条目 → 分类实体（只做字段映射，图标/颜色存的是语义 key） */

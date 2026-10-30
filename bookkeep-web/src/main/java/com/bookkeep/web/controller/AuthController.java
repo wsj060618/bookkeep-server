@@ -2,7 +2,9 @@ package com.bookkeep.web.controller;
 
 import com.bookkeep.common.result.Result;
 import com.bookkeep.service.AuthService;
+import com.bookkeep.model.dto.req.LoginReq;
 import com.bookkeep.model.dto.req.RegisterReq;
+import com.bookkeep.model.dto.resp.LoginResp;
 import com.bookkeep.model.dto.resp.UserResp;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -30,5 +32,15 @@ public class AuthController {
     @PostMapping("/register")
     public Result<UserResp> register(@Valid @RequestBody RegisterReq req) {
         return Result.success(authService.register(req));
+    }
+
+    /**
+     * 登录并签发 token
+     * <p>响应 {@code {token, user, books}}：前端拿到后存 token，后续请求带 {@code Authorization: Bearer ...}。
+     * 用户名不存在和密码错误都是 {@code code=400 + "用户名或密码错误"}，不区分两者。
+     */
+    @PostMapping("/login")
+    public Result<LoginResp> login(@Valid @RequestBody LoginReq req) {
+        return Result.success(authService.login(req));
     }
 }
