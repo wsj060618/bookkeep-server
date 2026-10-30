@@ -1,5 +1,6 @@
 package com.bookkeep.web.aspect;
 
+import com.bookkeep.common.exception.BusinessException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,9 +36,16 @@ public class LogAspect {
         Object result;
         try {
             result = joinPoint.proceed();
-        } catch (Throwable e) {
-            log.error("[接口异常] {} 参数:{} 耗时:{}ms 异常:{}",
+        } catch (BusinessException e) {
+            // 业务异常（400/401/403）也按 ERROR 留痕，保证 error 日志里能看到每一次失败；
+            // 但不打堆栈——它是预期内的分支，堆栈只会淹没真正的 5xx
+            log.error("[业务异常] {} 参数:{} 耗时:{}ms 异常:{}",
                     method, params, System.currentTimeMillis() - start, e.getMessage());
+            throw e;
+        } catch (Throwable e) {
+            // 未预期异常：必须带堆栈（最后一个参数传 e 而不是 e.getMessage()），否则 500 无从排查
+            log.error("[接口异常] {} 参数:{} 耗时:{}ms",
+                    method, params, System.currentTimeMillis() - start, e);
             throw e;
         }
         long cost = System.currentTimeMillis() - start;
