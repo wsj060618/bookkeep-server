@@ -2,10 +2,17 @@
 -- bookkeep-server 数据库初始化脚本
 -- 适用：MySQL 8.x（本机为 MySQL Server 8.4）
 -- 说明：重复执行会因「表已存在」报错（CREATE TABLE 未加 IF NOT EXISTS）
+--
+-- 排序规则分两层，是有意为之：
+--   库 / 表 / 其余列 → utf8mb4_0900_ai_ci（MySQL 8 默认，不区分大小写和重音，
+--                     中文与 emoji 排序符合 UCA 9.0；不要用 5.x 时代的 utf8mb4_general_ci）
+--   user.username / user.username_active → utf8mb4_0900_as_cs（区分大小写，见 user 表注释）
+--   两层混用时注意：不同排序规则的「两列直接比较」会报 Illegal mix of collations，
+--   而列与字符串参数比较没问题（参数会被列排序规则强制转换）。
 -- ============================================================
 
 -- 1) 建库：utf8mb4，中文/emoji 不乱码。已存在则跳过
-CREATE DATABASE IF NOT EXISTS bookkeep DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+CREATE DATABASE IF NOT EXISTS bookkeep DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 -- 2) 切到 bookkeep 库，后续建表都在这里
 USE bookkeep;
@@ -14,10 +21,14 @@ USE bookkeep;
 -- 3) user 用户表
 --    current_book_id：当前打开的账本 id，逻辑关联 book.id（无外键）
 --    deleted：逻辑删除，0=正常 1=已删（MyBatis-Plus 全局逻辑删除会用到）
+--    username：utf8mb4_0900_as_cs → Tom / tom 是两个账号（大小写不再由库默认排序规则决定）
+--    username_active：deleted=0 时等于 username，已删时为 NULL（NULL 不参与唯一约束），
+--                     于是「注销后名字可重新注册」，而活着的账号之间仍然互斥
 -- ------------------------------------------------------------
 CREATE TABLE `user` (
   id              BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
-  username        VARCHAR(50)  NOT NULL UNIQUE COMMENT '登录名，唯一',
+  username        VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs
+                    NOT NULL COMMENT '登录名，区分大小写',
   password        VARCHAR(100) NOT NULL COMMENT 'BCrypt 密文，禁止存明文',
   nickname        VARCHAR(50)  COMMENT '昵称',
   email           VARCHAR(100) COMMENT '邮箱',
@@ -25,7 +36,12 @@ CREATE TABLE `user` (
   current_book_id BIGINT       COMMENT '当前账本 id，可空（删除账本时会重指）',
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  deleted         TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删'
+  deleted         TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删',
+  username_active VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs
+                    GENERATED ALWAYS AS (IF(`deleted` = 0, `username`, NULL)) STORED
+                    COMMENT '仅未删除行等于 username，用于唯一约束',
+  UNIQUE KEY uk_user_username_active (username_active),
+  KEY idx_user_username (username)
 ) COMMENT='用户表';
 
 -- ------------------------------------------------------------

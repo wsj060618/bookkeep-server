@@ -126,21 +126,45 @@ class AuthRegisterTest {
     }
 
     @Test
-    @DisplayName("用户名被逻辑删除的历史用户占着：预检查不到，靠唯一索引兜底也返回 400")
-    void softDeletedUsernameStillRejected() throws Exception {
+    @DisplayName("已注销（逻辑删除）的用户名可以重新注册：墓碑行在唯一索引里是 NULL，不占名字")
+    void softDeletedUsernameCanBeReused() throws Exception {
         String username = nextUsername();
-        // MP 的逻辑删除会自动给预检拼 deleted = 0，所以这条记录预检是「查不到」的
+        // 造一条已注销的历史账号：deleted=1 → 生成列 username_active 为 NULL
         jdbcTemplate.update("INSERT INTO user (username, password, deleted) VALUES (?, ?, 1)",
                 username, "$2a$10$abcdefghijklmnopqrstuv");
 
         register(username, "personal")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("用户名已存在"));
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.username").value(username));
 
-        // 不能因为软删记录占到名字就额外插进去一个可见用户
-        assertEquals(0, jdbcTemplate.queryForObject(
+        // 同名两行：一行墓碑、一行新账号，互不冲突
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user WHERE username = ? AND deleted = 1", Integer.class, username));
+        assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM user WHERE username = ? AND deleted = 0", Integer.class, username));
+
+        // 新账号是另一个人：有自己的 current_book_id 和 12 条模板分类，不复用墓碑的数据
+        Long newBookId = jdbcTemplate.queryForObject(
+                "SELECT current_book_id FROM user WHERE username = ? AND deleted = 0", Long.class, username);
+        assertEquals(12, countCategories(newBookId));
+    }
+
+    @Test
+    @DisplayName("用户名区分大小写：Reg… 和 reg… 是两个账号（utf8mb4_0900_as_cs）")
+    void usernameIsCaseSensitive() throws Exception {
+        String lower = nextUsername();                                        // reg + 时间戳
+        String upper = Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
+        assertNotEquals(lower, upper);
+
+        register(upper, "personal").andExpect(jsonPath("$.code").value(200));
+        register(lower, "personal").andExpect(jsonPath("$.code").value(200));
+
+        // 只按 username 查会查出两行（正好验证 idx_user_username 不唯一），
+        // 所以业务查询必须带 deleted = 0 —— 现有 MP 查询都会自动拼
+        assertEquals(2, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user WHERE username IN (?, ?) AND deleted = 0",
+                Integer.class, lower, upper));
     }
 
     @Test
