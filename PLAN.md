@@ -39,12 +39,14 @@
 
 ## 3. 数据库设计
 
-建库：`CREATE DATABASE bookkeep DEFAULT CHARACTER SET utf8mb4;`
+建库：`CREATE DATABASE bookkeep DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;`
+
+排序规则分两层：库/表/其余列用 `utf8mb4_0900_ai_ci`（MySQL 8 默认），`user.username` / `user.username_active` 显式用 `utf8mb4_0900_as_cs`（用户名区分大小写）。两列不同排序规则直接比较会报 `Illegal mix of collations`，列与字符串参数比较不受影响。
 
 ```sql
 CREATE TABLE `user` (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-  username       VARCHAR(50)  NOT NULL UNIQUE,
+  username       VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL, -- 区分大小写
   password       VARCHAR(100) NOT NULL,          -- BCrypt
   nickname       VARCHAR(50),
   email          VARCHAR(100),
@@ -52,7 +54,13 @@ CREATE TABLE `user` (
   current_book_id BIGINT,                        -- 当前打开的记账本
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted        TINYINT DEFAULT 0
+  deleted        TINYINT DEFAULT 0,
+  -- 唯一性只约束未删除行：deleted=1 时为 NULL，MySQL 多个 NULL 不冲突
+  -- → 注销后用户名可被重新注册；活着的账号之间仍然互斥
+  username_active VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs
+                  GENERATED ALWAYS AS (IF(`deleted` = 0, `username`, NULL)) STORED,
+  UNIQUE KEY uk_user_username_active (username_active),
+  KEY idx_user_username (username)               -- 按用户名查（唯一索引已不覆盖 username）
 );
 
 CREATE TABLE book (
@@ -195,7 +203,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 方法 | 路径 | 说明 | 请求体 / 参数 |
 |---|---|---|---|
 | POST | `/api/auth/register` | 注册并创建第一本账本 | `{username, password, nickname?, email?, bookName, bookType}` → 用户信息 |
-| POST | `/api/auth/login` | 登录 | `{username, password}` → `{token, user:{id, username, nickname, email, currentBookId, books:[...]}}` |
+| POST | `/api/auth/login` | 登录 | `{username, password}` → `{token, user:{id, username, nickname, email, avatar, currentBookId}, books:[{id, name, type, current}]}` |
 | GET | `/api/auth/me` | 当前用户信息（含 currentBookId） | - |
 
 ### 5.2 账本
@@ -319,3 +327,17 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 12. OSS 的 AK/SK、bucket、endpoint 等敏感配置走环境变量（与数据库密码同理），禁止写进 `application.yml` 提交
 13. 头像上传需限制文件类型（jpg/png/webp）与大小（如 ≤2MB），并用唯一对象名（如 `avatar/{userId}/{UUID}.{ext}`）避免覆盖
 14. `LogAspect` 会对参数做 JSON 序列化，`MultipartFile` 参数会序列化失败或产生巨大日志，需在上传接口的日志处理中对 `MultipartFile` 跳过序列化
+15. 注册接口**非幂等**：用户连点两次 → 第一笔成功、第二笔 400 `用户名已存在`。前端必须按钮单飞（`submitting` 标志 + `finally` 复位，**不能**只靠 debounce，debounce 只是把重复请求延后发出），且收到 `用户名已存在` 时引导「去登录」而不是报「注册失败」——那多半是自己上一次点击已经成功。后端不做「同名同密码视为成功」的伪幂等
+
+## 9. 已知缺口（P1 有意不做，上线前必须回看）
+
+1. **无限流**：注册 / 登录都没有失败计数、验证码或 IP 限流，可被脚本批量注册和撞库。
+   登录侧「用户不存在与密码错误同一提示」只防枚举，不防暴力尝试。
+   计划：P4 用 Redis（或 Caffeine）按 `IP + username` 计失败次数，5 次 / 5 分钟；
+   生产环境再叠一层 nginx `limit_req`。在此之前不要对公网开放。
+2. **邮箱纯装饰**：`user.email` 无唯一索引、不发验证邮件，同一邮箱可注册任意多个账号，
+   也不支持邮箱找回密码。当前定位是「资料展示字段」，前端不得展示「已验证」字样。
+   若 P4 改为一邮箱一账号，需先清理存量重复邮箱，否则唯一索引加不上。
+3. **无密码找回**：忘记密码即废号（无手机号、无邮箱验证、无安全问题）。
+4. **注册非幂等**：重复提交由前端「单飞」控制 + 数据库唯一索引兜底（见 §8 第 15 条），
+   后端不提供幂等键。
