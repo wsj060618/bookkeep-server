@@ -3,7 +3,7 @@
 ## 1. 项目信息
 
 - 后端位置：`D:\coding\bookkeep-server`（本人开发）
-- 前端位置：`D:\coding\bookkeep-web`（后续由 AI 协助开发，严格按本计划书接口契约）
+- 前端位置：`D:\coding\bookkeep-web`（**由 AI 编写**，本人负责契约定义与联调验收；严格按本计划书接口契约，硬约定见 §5.0，配合节奏见 §6.1）
 - 技术栈：
   - Spring Boot 3.3.x + JDK 17 + Maven
   - MyBatis-Plus（`mybatis-plus-spring-boot3-starter`）+ MySQL 8
@@ -200,6 +200,18 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
   - 第 6 天起实际的例外：业务错误仍是 **HTTP 200 + body.code**（见 `GlobalExceptionHandler`），
     只有认证失败用真实 401（`JwtAuthenticationEntryPoint`）；403 真实状态码在第 7 天补。
 
+### 5.0 前后端契约硬约定（写第一个页面前定死，改一次全前端返工）
+
+前端由 AI 生成，下面 5 条必须固定，并把本节**直接喂给 AI**，而不是让它猜字段：
+
+| # | 约定 | 具体值 |
+|---|---|---|
+| 1 | 信封与分页 | 信封 `{code, message, data}`；分页 `data` 固定 `{total, list}`（`PageResult`），入参固定 `page`（从 1 开始）/ `size`，**不用** `current` / `records` / `rows` |
+| 2 | 金额类型 | **一律字符串**：`BigDecimal` 全局按字符串序列化（`JacksonConfig` 注册 `BigDecimal → String` 序列化器）。JS 的 `number` 是双精度，`0.1 + 0.2 !== 0.3`，金额累加/比较会算错 |
+| 3 | 日期格式 | 日期 `yyyy-MM-dd`（`transDate` / `startDate` / `endDate`），月份 `yyyy-MM`（`month`）；不传时间戳、不让前端解析 |
+| 4 | 错误处理 | 前端只写一个拦截器：`code !== 200` → 提示 `message`；`code === 401` → 清 token + 跳登录；`code === 403` → 提示无权限。业务错误 HTTP 仍是 200，**前端判断 `code`，不判断状态码** |
+| 5 | 列表自带名称 | 列表/详情直接返回展示所需名称，禁止让前端二次查询：流水含 `categoryName` / `categoryIcon` / `categoryColor`（§5.5），预算含 `categoryName`。这条最容易被纯后端自测漏掉——`curl` 返回 `categoryId: 3` 看起来完全正常 |
+
 ### 5.1 认证
 
 | 方法 | 路径 | 说明 | 请求体 / 参数 |
@@ -289,6 +301,31 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 - **P5.5** 头像上传（`FileService` 接口 + 阿里云 OSS 实现 + `POST /api/users/me/avatar`）
 - **P6** 收尾：防越权逐接口验证、删除联动、参数校验
 
+### 6.1 前后端配合节奏（按模块交替，禁止「全后端做完再统一联调」）
+
+原则：**后端推完一个模块（接口 + 测试 + `.http` 可重放请求）→ 立刻让 AI 写对应页面 → 联调验收 → 再进下一个模块。**
+
+不做「全后端先行」的原因：
+
+- 列表接口几乎必然要 join 出名称（见 §5.0 第 5 条），纯后端自测时看不出问题，等前端一联调才发现缺字段，而那时改的是**已经沉淀了 20 个接口的契约**
+- 联调问题会一次堆到十个（字段名、日期格式、金额精度、401 跳转、proxy），无法按顺序排查
+- 到第 3 周末才第一次看到能点的页面，中期没有任何「可演示」的成果
+
+| 阶段 | 后端 | 前端（AI 写，本人验收） | 联调验收标准 |
+|---|---|---|---|
+| 第 0 步（现在就能做） | P1 收尾（403） | **只做登录页** | 登录 → 存 token → 请求 `/api/auth/me` → 页面显示昵称 |
+| 1 | P2 分类 + 流水 | 流水列表 + 记一笔 | 记一笔后列表出现该条；切账本数据跟着换 |
+| 2 | P3 统计 | 统计图表 | 空月份显示 0，趋势不断层 |
+| 3 | P4 账本 + 预算 | 账本切换 + 预算页 | 删掉当前账本后列表不崩、自动切到剩余账本 |
+| 4 | P5 AI 分析 | 分析页 | 6 条规则都能显示，`level` 有对应颜色 |
+
+配套要求：
+
+- 前端脚手架**第一天就建起来**（Vite + 代理 `/api` → `http://localhost:8080`，见 §8 第 8 条），但只放登录页，其余页面随模块生长——先把 proxy / token 存储 / 401 跳转这三条基建验证掉，成本约半天
+- 每个模块的后端完成后，先用 `.http` 文件（IDEA 内置 HTTP Client）把请求跑通并**留在仓库里**，作为联调基准与将来面试的素材
+- 不要让 AI「一次性生成 10 个页面」：先只留 `login` 一个接口 + 一个页面把整条链路打通，再复制这个模式扩页面
+- 前端 AI 的产出按**可观察行为**验收（连点注册只发一次请求、切账本列表刷新、空数据显示 0），而不是「页面能打开」
+
 ### P1 细化（每天约 1 小时，按真实开发顺序）
 
 - **第 0 天 ✅ 已完成**：建库建表 + `application.yml`（UTF-8 + 环境变量 `${DB_USER}/${DB_PWD}`）+ `ResultCode`/`Result`/`PageResult`/`BusinessException`/`JwtUtil` + `BookkeepApplication(scanBasePackages)` + `DataSourceConnectionTest`
@@ -312,6 +349,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 - **P5**：report 输出结构化规则分析，商家账本含利润分析
 - **P5.5**：上传头像 → `user.avatar` 存 OSS URL，`/api/auth/me` 能返回该 URL；超大/非法格式文件返回 400
 - **P6**：登录 A 账号不能查/改/删 B 账号任何数据（逐接口验证）
+- **联调（每模块一次，§6.1）**：逐条核对 §5.0 五项——分页是 `{total, list}`、金额是字符串、日期是 `yyyy-MM-dd`、401 清 token 跳登录、列表直接带名称
 
 ## 8. 避坑清单
 
@@ -330,6 +368,9 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 13. 头像上传需限制文件类型（jpg/png/webp）与大小（如 ≤2MB），并用唯一对象名（如 `avatar/{userId}/{UUID}.{ext}`）避免覆盖
 14. `LogAspect` 会对参数做 JSON 序列化，`MultipartFile` 参数会序列化失败或产生巨大日志，需在上传接口的日志处理中对 `MultipartFile` 跳过序列化
 15. 注册接口**非幂等**：用户连点两次 → 第一笔成功、第二笔 400 `用户名已存在`。前端必须按钮单飞（`submitting` 标志 + `finally` 复位，**不能**只靠 debounce，debounce 只是把重复请求延后发出），且收到 `用户名已存在` 时引导「去登录」而不是报「注册失败」——那多半是自己上一次点击已经成功。后端不做「同名同密码视为成功」的伪幂等
+16. 金额与日期的序列化必须在联调前定死：`BigDecimal` 按**字符串**返回（JS 双精度会让 `0.1+0.2` 出错）、`LocalDate` 统一 `yyyy-MM-dd`（`spring.jackson.date-format` 只对 `java.util.Date` 生效）；这两条漏了要等前端一联调才暴露（见 §5.0）
+17. 契约漂移是前后端返工的第一大来源：分页字段名、金额类型、日期格式、错误码语义、列表是否带名称——五项定死后再写第一个页面，并把 §5.0 直接喂给 AI，别让它猜字段
+18. 「先全后端、最后统一联调」是工期失控的典型路径：一个模块的后端 + 测试 + `.http` 跑通就立刻联调，见 §6.1
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
