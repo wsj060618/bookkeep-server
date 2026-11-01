@@ -28,9 +28,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 全局异常处理集成测试：HTTP 状态码固定 200，业务语义看 body 的 code。
+ * <p>{@code addFilters = false}：这里只验证异常映射。第 6 天收紧 SecurityConfig 后，
+ * 这些测试自造的 {@code /test/error/*} 端点没有 token，带上过滤器链会一律变成 401，
+ * 测不到 {@code GlobalExceptionHandler} 本身。
  */
 @SpringBootTest
-@AutoConfigureMockMvc
+@AutoConfigureMockMvc(addFilters = false)
 class GlobalExceptionHandlerTest {
 
     @Autowired

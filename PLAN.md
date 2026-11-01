@@ -197,6 +197,8 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 - 统一返回 `{ code, message, data }`，`code=200` 成功
 - 常用 code：200 成功 / 400 参数错误 / 401 未登录或 token 失效 / 403 无权 / 500 服务器异常
 - 出错时 **HTTP 状态码与 `code` 一致**（`ResponseEntity.status(code)`），成功为 200
+  - 第 6 天起实际的例外：业务错误仍是 **HTTP 200 + body.code**（见 `GlobalExceptionHandler`），
+    只有认证失败用真实 401（`JwtAuthenticationEntryPoint`）；403 真实状态码在第 7 天补。
 
 ### 5.1 认证
 
@@ -294,8 +296,8 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 - **第 2 天 ✅ 已完成**：`Book`/`Category` 实体 + `BookMapper`/`CategoryMapper` + `CategoryTemplate`（用 `BOOK_PERSONAL`/`BOOK_MERCHANT`、`TYPE_INCOME`/`TYPE_EXPENSE` 常量代替原计划的 `BookType`/`CategoryType` 两个类）+ `BookMapperTest`/`CategoryMapperTest`
 - **第 3 天 ✅ 已完成**：最小 `SecurityConfig`（先 `permitAll`，提供 `BCryptPasswordEncoder`）+ `GlobalExceptionHandler` + `GlobalExceptionHandlerTest`（6 个用例：2 个主动抛出、4 个由校验/JSON/404 等框架行为产生）
 - **第 4 天 ✅ 已完成**：注册接口（`RegisterReq`/`UserResp`/`BookResp` + `AuthService.register` + `AuthController.register`）——事务内「归一化并校验 bookType → 用户名查重 → 建用户（BCrypt）→ 建首本账本 → `Db.saveBatch` 写入 12 条模板分类 → 回写 `current_book_id`」；用户名唯一先预检、再靠 `user.username` 唯一索引 `DuplicateKeyException` 兜并发注册与逻辑删除的历史用户；`AuthRegisterTest` 6 个用例（成功 / 商家模板 / 重名 / 软删重名 / 非法类型 / 参数校验）；同日把实体与 DTO 从 `bookkeep-service` 拆到新建的 `bookkeep-model` 模块（见 §4），包名 `com.bookkeep.model.entity` / `com.bookkeep.model.dto.req|resp`
-- **第 5 天**：登录发 token（`LoginReq`/`LoginResp` + `AuthService.login` + `AuthController.login`）
-- **第 6 天**：`SecurityUtil` + `JwtAuthenticationFilter` + 收紧 `SecurityConfig`（放行 auth，其余需认证）+ `/api/auth/me`
+- **第 5 天 ✅ 已完成**：登录发 token（`LoginReq`/`LoginResp` + `AuthService.login` + `AuthController.login`）——密码用 BCrypt 校验，用户不存在与密码错误同一提示（防枚举），响应 `{token, user, books}`，token 的 subject 存 userId
+- **第 6 天 ✅ 已完成**：`SecurityUtil.getUserId()`（common，从 SecurityContext 取 `Long` principal，匿名直接 401）+ `JwtAuthenticationFilter`（只认证不写响应，无效 token 按未登录继续走链）+ `JwtAuthenticationEntryPoint`（真实 HTTP 401 + `{code:401}` JSON）+ 收紧 `SecurityConfig`（只放行 `register`/`login`/`error`，其余 `authenticated()`）+ `GET /api/auth/me`（service 内部用 `SecurityUtil`，用户已注销时 401）；过滤器在 `SecurityConfig` 里手动 `new`（做成 Bean 会被 Boot 额外注册到 Servlet 容器）；`GlobalExceptionHandlerTest` 改 `@AutoConfigureMockMvc(addFilters = false)`，新增 `AuthMeTest`（9 个用例：无/坏/篡改/缺 Bearer 前缀 token、正常取用户、双用户隔离、软删用户旧 token 失效、登录仍匿名、未知业务路径先 401）
 - **第 7 天**：401/403 JSON 处理器 + 统一「HTTP 状态码 vs body.code」策略（业务错误沿用 200 + body.code，仅 401/403 用真实状态码）+ P1 全量验收（PLAN §7）
 - **缓冲（可选）**：`JacksonConfig`（LocalDate/LocalDateTime 格式），等响应含日期字段再加
 
@@ -316,7 +318,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 1. SpringBoot3 必须用 `mybatis-plus-spring-boot3-starter`（不是 `mybatis-plus-boot-starter`）
 2. jjwt 0.12.x API 与旧版不同：`Jwts.builder().signWith(key)` 需传 `SecretKey` 对象（`Keys.hmacShaKeyFor(secretBytes)`），不是字符串
 3. 金额用 `BigDecimal`，数据库 `DECIMAL(12,2)`，不用 double
-4. JWT 过滤器注册在 `UsernamePasswordAuthenticationFilter` 之前；解析失败直接写 401 JSON 返回
+4. JWT 过滤器注册在 `UsernamePasswordAuthenticationFilter` 之前；**过滤器只做认证、不写响应**，token 无效时不认证并继续走链，401 JSON 统一由 `JwtAuthenticationEntryPoint` 输出（在过滤器里再写一次会出现两种 401 格式）
 5. `SecurityUtil.getUserId()` 从 SecurityContext 取当前用户，Controller 不从 token 现拆
 6. 逻辑删除：MyBatis-Plus 全局配置默认拼 `deleted=0`，但**手写 `@Select` 的 SQL 不会自动拼**，统计 SQL 要自己加
 7. 日期统一 `yyyy-MM-dd` 传参，统计按 `DATE_FORMAT(trans_date,'%Y-%m')=#{month}` 比较，避免时区坑

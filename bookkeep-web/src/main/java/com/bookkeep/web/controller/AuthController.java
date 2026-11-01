@@ -8,6 +8,7 @@ import com.bookkeep.model.dto.resp.LoginResp;
 import com.bookkeep.model.dto.resp.UserResp;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -42,5 +43,16 @@ public class AuthController {
     @PostMapping("/login")
     public Result<LoginResp> login(@Valid @RequestBody LoginReq req) {
         return Result.success(authService.login(req));
+    }
+
+    /**
+     * 当前用户信息（含 currentBookId）
+     * <p>鉴权由 {@code SecurityConfig} 完成（这个路径<strong>不在</strong>放行名单里），
+     * 这里不接收任何参数、也不解析 token：userId 从 SecurityContext 取。
+     * <p>前端刷新页面后用它恢复登录态；账本列表由 P4 的 {@code GET /api/books} 提供，此接口只返回用户。
+     */
+    @GetMapping("/me")
+    public Result<UserResp> me() {
+        return Result.success(authService.getCurrentUser());
     }
 }

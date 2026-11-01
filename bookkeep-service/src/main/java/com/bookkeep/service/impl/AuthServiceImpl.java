@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.toolkit.Db;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.common.util.JwtUtil;
+import com.bookkeep.common.util.SecurityUtil;
 import com.bookkeep.service.AuthService;
 import com.bookkeep.service.constant.CategoryTemplate;
 import com.bookkeep.model.dto.req.LoginReq;
@@ -132,6 +133,24 @@ public class AuthServiceImpl implements AuthService {
 
         log.info("登录成功：userId={}, username={}, 账本 {} 本", user.getId(), username, books.size());
         return new LoginResp(jwtUtil.generateToken(user.getId()), UserResp.from(user), books);
+    }
+
+    /**
+     * 当前登录用户（GET /api/auth/me）
+     * <p>只读事务；userId 来自 SecurityContext，不再解析 token。
+     * <p>{@code selectById} 会被 MyBatis-Plus 自动加上 {@code deleted = 0}：
+     * 用户注销后旧 token 在 7 天有效期内仍能通过过滤器（过滤器不查库），但这里查不到 →
+     * 按 401 处理，客户端会清 token 回登录页。
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public UserResp getCurrentUser() {
+        Long userId = SecurityUtil.getUserId();
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED, "用户不存在或已注销");
+        }
+        return UserResp.from(user);
     }
 
     /** 模板条目 → 分类实体（只做字段映射，图标/颜色存的是语义 key） */
