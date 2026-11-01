@@ -197,8 +197,15 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 - 统一返回 `{ code, message, data }`，`code=200` 成功
 - 常用 code：200 成功 / 400 参数错误 / 401 未登录或 token 失效 / 403 无权 / 500 服务器异常
 - 出错时 **HTTP 状态码与 `code` 一致**（`ResponseEntity.status(code)`），成功为 200
-  - 第 6 天起实际的例外：业务错误仍是 **HTTP 200 + body.code**（见 `GlobalExceptionHandler`），
-    只有认证失败用真实 401（`JwtAuthenticationEntryPoint`）；403 真实状态码在第 7 天补。
+  - **第 7 天定稿的实际策略（覆盖上一条，实现以此为准）**：
+    - **业务错误 → 恒为 HTTP 200 + body.code**。`BusinessException` 不管 code 是 400/401/403 都一样，
+      调用点不用关心状态码；例如 `/api/auth/me` 遇到已注销用户返回 200 + `code=401`
+    - **认证 / 授权失败 → 真实 401 / 403 + 同一套 JSON 信封**：
+      过滤器链里由 `JwtAuthenticationEntryPoint`（401，未登录）和 `JwtAccessDeniedHandler`（403，已登录但无权限）输出；
+      方法级鉴权（`@PreAuthorize`）抛出的 `AccessDeniedException` 由 `GlobalExceptionHandler` 委托**同一个** 403 处理器，
+      两条路径的 JSON 完全一致
+    - 前端因此必须写两种分支：`then` 里判断 `code`（含 200 + `code=401` 的已注销用户，要清 token 跳登录），
+      `catch` 里判断 `error.response.status === 401`（同理清 token 跳登录）、`=== 403` 提示无权限
 
 ### 5.0 前后端契约硬约定（写第一个页面前定死，改一次全前端返工）
 
@@ -335,14 +342,14 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 - **第 4 天 ✅ 已完成**：注册接口（`RegisterReq`/`UserResp`/`BookResp` + `AuthService.register` + `AuthController.register`）——事务内「归一化并校验 bookType → 用户名查重 → 建用户（BCrypt）→ 建首本账本 → `Db.saveBatch` 写入 12 条模板分类 → 回写 `current_book_id`」；用户名唯一先预检、再靠 `user.username` 唯一索引 `DuplicateKeyException` 兜并发注册与逻辑删除的历史用户；`AuthRegisterTest` 6 个用例（成功 / 商家模板 / 重名 / 软删重名 / 非法类型 / 参数校验）；同日把实体与 DTO 从 `bookkeep-service` 拆到新建的 `bookkeep-model` 模块（见 §4），包名 `com.bookkeep.model.entity` / `com.bookkeep.model.dto.req|resp`
 - **第 5 天 ✅ 已完成**：登录发 token（`LoginReq`/`LoginResp` + `AuthService.login` + `AuthController.login`）——密码用 BCrypt 校验，用户不存在与密码错误同一提示（防枚举），响应 `{token, user, books}`，token 的 subject 存 userId
 - **第 6 天 ✅ 已完成**：`SecurityUtil.getUserId()`（common，从 SecurityContext 取 `Long` principal，匿名直接 401）+ `JwtAuthenticationFilter`（只认证不写响应，无效 token 按未登录继续走链）+ `JwtAuthenticationEntryPoint`（真实 HTTP 401 + `{code:401}` JSON）+ 收紧 `SecurityConfig`（只放行 `register`/`login`/`error`，其余 `authenticated()`）+ `GET /api/auth/me`（service 内部用 `SecurityUtil`，用户已注销时 401）；过滤器在 `SecurityConfig` 里手动 `new`（做成 Bean 会被 Boot 额外注册到 Servlet 容器）；`GlobalExceptionHandlerTest` 改 `@AutoConfigureMockMvc(addFilters = false)`，新增 `AuthMeTest`（9 个用例：无/坏/篡改/缺 Bearer 前缀 token、正常取用户、双用户隔离、软删用户旧 token 失效、登录仍匿名、未知业务路径先 401）
-- **第 7 天**：401/403 JSON 处理器 + 统一「HTTP 状态码 vs body.code」策略（业务错误沿用 200 + body.code，仅 401/403 用真实状态码）+ P1 全量验收（PLAN §7）
+- **第 7 天**：✅ 已完成 —— `JwtAccessDeniedHandler`（真实 403 + 同一 JSON 信封，注册进 `SecurityConfig.exceptionHandling`）+ `GlobalExceptionHandler` 显式接管 `AccessDeniedException`（否则被 `@ExceptionHandler(Exception.class)` 兜成 200 + code=500）+ 「HTTP 状态码 vs body.code」定稿（业务错误恒 200 + body.code，仅认证/授权失败用真实 401/403，见 §5）+ 测试 `SecurityJsonHandlerTest`（401/403 信封一致）与 `GlobalExceptionHandlerTest.accessDenied` + 验收脚本 `http/auth.http`
 - **缓冲（可选）**：`JacksonConfig`（LocalDate/LocalDateTime 格式），等响应含日期字段再加
 
 > 说明：`SecurityConfig` 会在第 3 天（临时放行）和第 6 天（收紧）各改一次，以便第 4–5 天的接口在认证做完前就能调通。
 
 ## 7. 自查清单
 
-- **P1**：注册（带类型）→ 登录 → 带 token 访问 `/api/auth/me` 成功；无 token 返回 401 JSON；错参 400
+- **P1**：注册（带类型）→ 登录 → 带 token 访问 `/api/auth/me` 成功；无 token 返回 401 JSON；错参 400；401/403 都是 JSON 信封而不是 HTML 错误页。对应脚本 `http/auth.http`（IDEA HTTP Client 直接点）
 - **P2**：Postman 建分类、记流水、按日期/类型/关键字分页筛选正常；A 用户看不到 B 用户数据
 - **P3**：手造一个月数据，summary/category/trend/daily 与手算一致
 - **P4**：新建 / 切换 / 删除账本联动正确（删除当前账本自动转移）；预算进度正确
@@ -371,6 +378,10 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 16. 金额与日期的序列化必须在联调前定死：`BigDecimal` 按**字符串**返回（JS 双精度会让 `0.1+0.2` 出错）、`LocalDate` 统一 `yyyy-MM-dd`（`spring.jackson.date-format` 只对 `java.util.Date` 生效）；这两条漏了要等前端一联调才暴露（见 §5.0）
 17. 契约漂移是前后端返工的第一大来源：分页字段名、金额类型、日期格式、错误码语义、列表是否带名称——五项定死后再写第一个页面，并把 §5.0 直接喂给 AI，别让它猜字段
 18. 「先全后端、最后统一联调」是工期失控的典型路径：一个模块的后端 + 测试 + `.http` 跑通就立刻联调，见 §6.1
+19. `@RestControllerAdvice` 的兜底 `@ExceptionHandler(Exception.class)` 会**吞掉** Spring Security 的
+    `AccessDeniedException`（`@PreAuthorize` 拒绝时抛的就是它），把 403 变成 `200 + code=500`，
+    而且**不会**再走到过滤器链的 `AccessDeniedHandler`。必须显式声明
+    `@ExceptionHandler(AccessDeniedException.class)` 并委托同一个 403 处理器（见 §5 策略）
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 

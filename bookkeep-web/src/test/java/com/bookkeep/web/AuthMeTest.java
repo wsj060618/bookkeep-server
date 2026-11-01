@@ -155,8 +155,9 @@ class AuthMeTest {
         jdbcTemplate.update("UPDATE user SET deleted = 1 WHERE id = ?", userId);
 
         JsonNode body = me(token);
-        // 这条路径抛的是 BusinessException(401)，由 GlobalExceptionHandler 包装；
-        // HTTP 状态码是否改成真实 401 是第 7 天统一策略的事，这里只锁 body.code
+        // 这条路径抛的是 BusinessException(401)，由 GlobalExceptionHandler 包装成 HTTP 200 + body.code=401。
+        // 第 7 天定稿的策略里这是<strong>有意</strong>的：真实 401 只表示「过滤器链判定未认证」，
+        // 业务层的 401（用户已注销）交给前端拦截器按 code 处理（清 token + 跳登录），行为一致。
         assertEquals(401, body.path("code").asInt());
     }
 

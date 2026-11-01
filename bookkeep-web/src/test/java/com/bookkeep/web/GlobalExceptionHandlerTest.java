@@ -13,6 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 全局异常处理集成测试：HTTP 状态码固定 200，业务语义看 body 的 code。
+ * 全局异常处理集成测试：业务错误 HTTP 200 + body.code；只有授权失败用真实 403（第 7 天策略）。
  * <p>{@code addFilters = false}：这里只验证异常映射。第 6 天收紧 SecurityConfig 后，
  * 这些测试自造的 {@code /test/error/*} 端点没有 token，带上过滤器链会一律变成 401，
  * 测不到 {@code GlobalExceptionHandler} 本身。
@@ -96,6 +97,15 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.message").value(ResultCode.ERROR.getMessage()));
     }
 
+    @Test
+    @DisplayName("授权失败：真实 HTTP 403 + code=403（不能被兜底吞成 200/500）")
+    void accessDenied() throws Exception {
+        mockMvc.perform(get("/test/error/denied"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403))
+                .andExpect(jsonPath("$.message").value(ResultCode.FORBIDDEN.getMessage()));
+    }
+
     /** 只为测试异常处理而存在的端点，仅注册在本测试的上下文中。 */
     @TestConfiguration
     static class ErrorEndpointsConfig {
@@ -117,6 +127,12 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/error/unknown")
         String unknown() {
             throw new IllegalStateException("boom");
+        }
+
+        /** 模拟 {@code @PreAuthorize} 拒绝：抛的正是 Spring Security 的 AccessDeniedException。 */
+        @GetMapping("/test/error/denied")
+        String denied() {
+            throw new AccessDeniedException("测试用无权限");
         }
 
         @PostMapping("/test/error/validate")
