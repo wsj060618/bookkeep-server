@@ -30,6 +30,12 @@ Multi-module Spring Boot 3.3.5 / JDK 17 / Maven backend for a bookkeeping web ap
   - PowerShell session: `$env:DB_USER="root"; $env:DB_PWD="..."` **in the same window** before `mvn spring-boot:run` / `mvn test`.
 - JDBC URL must use `characterEncoding=UTF-8`, **not** `utf8mb4` (Connector/J takes a Java charset name; `utf8mb4` throws `UnsupportedEncodingException`).
 - To (re)build the DB manually: `& "D:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe" -uroot -p -e "source D:/coding/bookkeep-server/sql/schema.sql"`. PowerShell does **not** support `<` redirection — use `source`, not `mysql < file`.
+- To wipe and rebuild from scratch (dev only, **loses all data**): drop the database first, then run `schema.sql` — that file is self-contained (`CREATE DATABASE IF NOT EXISTS` + `USE` + all 5 tables), so no other script is needed:
+  ```powershell
+  $mysql = "D:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe"
+  & $mysql -uroot -p -e "DROP DATABASE IF EXISTS bookkeep;"
+  & $mysql -uroot -p -e "source D:/coding/bookkeep-server/sql/schema.sql"
+  ```
 - Logs roll into `logs/` (daily, 30-day retention, ERROR split to `-error.log`); SQL logging on below `prod` profile.
 
 ## Conventions to follow when implementing (from PLAN.md)
