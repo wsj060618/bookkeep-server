@@ -1,23 +1,25 @@
 package com.bookkeep.service.constant;
 
-import com.bookkeep.common.exception.BusinessException;
-import com.bookkeep.common.result.ResultCode;
-
 import java.util.List;
 
 /**
- * 注册 / 新建账本时预置的分类模板
- * <p>只提供静态数据，不碰数据库；落库由后续的 AuthService / BookService 在事务里完成。
+ * 注册时预置的班级分类模板。
+ * <p>只提供静态数据，不碰数据库；落库由 {@code AuthService} 在事务里完成。
+ * <p><strong>只有一种账本类型</strong>（{@link #BOOK_CLASS}）：这个项目是给生活委员记班费用的，
+ * 个人版 / 商家版的模板在需求收敛时被删掉了。{@code book.type} 列保留并固定写 {@code class}，
+ * 将来真要做其它账本类型，只需在这里加一套模板 + 放开类型字段。
  * <p>分类<strong>名称</strong>只是预置默认值，用户可以自定义；{@code type} 只有 income / expense 两种。
- * <p><strong>图标与颜色存的是语义 key，不是具体展示值</strong>：前端用 key 去映射图标组件与主题色，
- * 所以换图标集 / 换主题不需要改数据。前端必须对未知 key 做兜底（默认图标、默认色）。
+ * <p><strong>图标与颜色存的是语义 key，不是具体样式</strong>：前端用 key 去映射图标组件与主题色，
+ * 所以换图标库 / 换主题不需要改数据。前端必须对未知 key 做兜底（默认图标、默认色）。
  * <p>key 约定：小写字母开头，仅含小写字母/数字/下划线。
  */
 public final class CategoryTemplate {
 
-    /** book.type 取值 */
-    public static final String BOOK_PERSONAL = "personal";
-    public static final String BOOK_MERCHANT = "merchant";
+    /** book.type 取值。当前项目只有这一种账本。 */
+    public static final String BOOK_CLASS = "class";
+
+    /** 默认账本名：注册时前端不填 bookName 就用这个 */
+    public static final String DEFAULT_BOOK_NAME = "班级账本";
 
     /** category.type 取值 */
     public static final String TYPE_INCOME = "income";
@@ -27,48 +29,32 @@ public final class CategoryTemplate {
     public record Seed(String name, String type, String icon, String color, int sortOrder) {
     }
 
-    private static final List<Seed> PERSONAL = List.of(
-            new Seed("餐饮", TYPE_EXPENSE, "food", "orange", 1),
-            new Seed("交通", TYPE_EXPENSE, "transport", "blue", 2),
-            new Seed("购物", TYPE_EXPENSE, "shopping", "pink", 3),
-            new Seed("住房", TYPE_EXPENSE, "housing", "green", 4),
-            new Seed("娱乐", TYPE_EXPENSE, "entertainment", "purple", 5),
-            new Seed("医疗", TYPE_EXPENSE, "medical", "red", 6),
-            new Seed("学习", TYPE_EXPENSE, "study", "cyan", 7),
+    /**
+     * 班级模板：8 条支出 + 5 条收入，共 13 条。
+     * <p>支出按「班费实际会花在哪」排，收入里的「结余转入」是给换届用的：
+     * 新生活委员建账后第一笔记「上学期结余 X 元」，历史就能接上。
+     */
+    private static final List<Seed> CLASS = List.of(
+            new Seed("班会物资", TYPE_EXPENSE, "supplies", "orange", 1),
+            new Seed("活动经费", TYPE_EXPENSE, "activity", "purple", 2),
+            new Seed("聚餐", TYPE_EXPENSE, "dining", "red", 3),
+            new Seed("打印复印", TYPE_EXPENSE, "print", "cyan", 4),
+            new Seed("场地", TYPE_EXPENSE, "venue", "green", 5),
+            new Seed("交通", TYPE_EXPENSE, "transport", "blue", 6),
+            new Seed("奖品", TYPE_EXPENSE, "prize", "yellow", 7),
             new Seed("其他", TYPE_EXPENSE, "other", "gray", 8),
-            new Seed("工资", TYPE_INCOME, "salary", "green", 9),
-            new Seed("奖金", TYPE_INCOME, "bonus", "yellow", 10),
-            new Seed("理财", TYPE_INCOME, "invest", "blue", 11),
-            new Seed("其他", TYPE_INCOME, "other", "gray", 12)
-    );
-
-    private static final List<Seed> MERCHANT = List.of(
-            new Seed("采购", TYPE_EXPENSE, "purchase", "orange", 1),
-            new Seed("租金", TYPE_EXPENSE, "rent", "green", 2),
-            new Seed("员工工资", TYPE_EXPENSE, "staff", "blue", 3),
-            new Seed("水电", TYPE_EXPENSE, "utilities", "yellow", 4),
-            new Seed("物流", TYPE_EXPENSE, "logistics", "cyan", 5),
-            new Seed("税费", TYPE_EXPENSE, "tax", "red", 6),
-            new Seed("设备", TYPE_EXPENSE, "equipment", "gray", 7),
-            new Seed("营销", TYPE_EXPENSE, "marketing", "purple", 8),
-            new Seed("其他", TYPE_EXPENSE, "other", "gray", 9),
-            new Seed("销售收入", TYPE_INCOME, "sales", "green", 10),
-            new Seed("服务收入", TYPE_INCOME, "service", "blue", 11),
-            new Seed("其他", TYPE_INCOME, "other", "gray", 12)
+            new Seed("收取班费", TYPE_INCOME, "fee", "green", 9),
+            new Seed("学院拨款", TYPE_INCOME, "subsidy", "blue", 10),
+            new Seed("活动赞助", TYPE_INCOME, "sponsor", "purple", 11),
+            new Seed("结余转入", TYPE_INCOME, "carryover", "cyan", 12),
+            new Seed("其他", TYPE_INCOME, "other", "gray", 13)
     );
 
     private CategoryTemplate() {
     }
 
-    /** 按账本类型（personal / merchant）取预置分类，返回不可变列表。 */
-    public static List<Seed> of(String bookType) {
-        if (bookType == null || bookType.isBlank()) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "账本类型不能为空");
-        }
-        return switch (bookType.trim().toLowerCase()) {
-            case BOOK_PERSONAL -> PERSONAL;
-            case BOOK_MERCHANT -> MERCHANT;
-            default -> throw new BusinessException(ResultCode.BAD_REQUEST, "账本类型只能是 personal / merchant");
-        };
+    /** 取班级分类模板（不可变列表）。 */
+    public static List<Seed> classCategories() {
+        return CLASS;
     }
 }

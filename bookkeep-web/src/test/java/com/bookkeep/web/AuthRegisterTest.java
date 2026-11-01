@@ -10,6 +10,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.concurrent.atomic.AtomicLong;
@@ -25,10 +26,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * 注册接口集成测试（POST /api/auth/register）
  * <p>走完整上下文 + 真实 MySQL：MockMvc 调接口，JdbcTemplate 直查原始列做断言，
- * 这样能验证「密码确实被加密」「账本类型确实落库」「预置分类确实写进去了」这类表述层的假象。
+ * 这样能验证「密码确实被加密」「账本类型确实落库」「班级分类模板确实写进去了」这类表述层的假象。
+ * <p>项目已收敛为单一「班级账本」：请求里没有 bookType，服务端固定写 {@code class}、
+ * 固定预置 13 条班级分类（8 支出 + 5 收入）。
  * <p>类上的 {@code @Transactional} 让每个用例结束后回滚，不污染开发库。
- * <p>当前 SecurityConfig 还是「全部放行」的临时版，所以这里不需要 token；
- * 第 6 天收紧后，本类的路由在 auth 白名单里，应当仍然不用改。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -48,10 +49,10 @@ class AuthRegisterTest {
     private ObjectMapper objectMapper;
 
     @Test
-    @DisplayName("注册成功：用户落库（BCrypt）、账本建好、12 条模板分类、current_book_id 回写")
+    @DisplayName("注册成功：用户落库（BCrypt）、班级账本建好、13 条模板分类、current_book_id 回写")
     void registerSuccess() throws Exception {
         String username = nextUsername();
-        RegisterReq req = new RegisterReq(username, "abc123456", "小明", "ming@example.com", "我的账本", "personal");
+        RegisterReq req = new RegisterReq(username, "abc123456", "小明", "ming@example.com", "我的账本");
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -75,49 +76,46 @@ class AuthRegisterTest {
                 "SELECT current_book_id FROM user WHERE username = ?", Long.class, username);
         assertEquals("我的账本", jdbcTemplate.queryForObject(
                 "SELECT name FROM book WHERE id = ?", String.class, bookId));
-        assertEquals("personal", jdbcTemplate.queryForObject(
+        assertEquals("class", jdbcTemplate.queryForObject(
                 "SELECT type FROM book WHERE id = ?", String.class, bookId));
         assertEquals(username, jdbcTemplate.queryForObject(
                 "SELECT u.username FROM user u JOIN book b ON b.user_id = u.id WHERE b.id = ?", String.class, bookId));
 
-        // 预置分类：personal 模板 12 条（8 支出 + 4 收入）
-        assertEquals(12, countCategories(bookId));
+        // 预置分类：班级模板 13 条（8 支出 + 5 收入），且是班级场景的分类名
+        assertEquals(13, countCategories(bookId));
+        assertEquals(8, countCategories(bookId, "expense"));
+        assertEquals(5, countCategories(bookId, "income"));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM category WHERE book_id = ? AND name = ?", Integer.class, bookId, "收取班费"));
     }
 
     @Test
-    @DisplayName("商家账本走商家模板：12 条分类，9 支出 / 3 收入")
-    void registerMerchantBookUsesMerchantTemplate() throws Exception {
+    @DisplayName("账本名和昵称都可以不填：账本名默认「班级账本」，昵称默认用户名")
+    void bookNameAndNicknameHaveDefaults() throws Exception {
         String username = nextUsername();
-        RegisterReq req = new RegisterReq(username, "abc123456", null, null, "小店账本", "MERCHANT");
+        RegisterReq req = new RegisterReq(username, "abc123456", null, null, null);
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.nickname").value(username)); // 昵称留空时默认用用户名
+                .andExpect(jsonPath("$.data.nickname").value(username));
 
-        // 大小写 / 空格应被归一化成小写再落库
         Long bookId = jdbcTemplate.queryForObject(
                 "SELECT current_book_id FROM user WHERE username = ?", Long.class, username);
-        assertEquals("merchant", jdbcTemplate.queryForObject(
-                "SELECT type FROM book WHERE id = ?", String.class, bookId));
-
-        assertEquals(12, countCategories(bookId));
-        assertEquals(9, countCategories(bookId, "expense"));
-        assertEquals(3, countCategories(bookId, "income"));
-        assertEquals(1, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM category WHERE book_id = ? AND name = ?", Integer.class, bookId, "采购"));
+        assertEquals("班级账本", jdbcTemplate.queryForObject(
+                "SELECT name FROM book WHERE id = ?", String.class, bookId));
     }
 
     @Test
     @DisplayName("用户名重复：400 + 友好提示，且不会产生第二条用户")
     void duplicateUsernameRejected() throws Exception {
         String username = nextUsername();
-        register(username, "personal").andExpect(jsonPath("$.code").value(200));
+        register(username).andExpect(jsonPath("$.code").value(200));
 
-        register(username, "personal")
-                .andExpect(status().isOk())                       // 业务错误仍是 HTTP 200（PLAN 第 7 天的策略）
+        register(username)
+                .andExpect(status().isOk())                       // 业务错误仍是 HTTP 200（PLAN §5 策略）
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("用户名已存在"));
 
@@ -133,7 +131,7 @@ class AuthRegisterTest {
         jdbcTemplate.update("INSERT INTO user (username, password, deleted) VALUES (?, ?, 1)",
                 username, "$2a$10$abcdefghijklmnopqrstuv");
 
-        register(username, "personal")
+        register(username)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.username").value(username));
@@ -144,10 +142,10 @@ class AuthRegisterTest {
         assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM user WHERE username = ? AND deleted = 0", Integer.class, username));
 
-        // 新账号是另一个人：有自己的 current_book_id 和 12 条模板分类，不复用墓碑的数据
+        // 新账号是另一个人：有自己的 current_book_id 和 13 条模板分类，不复用墓碑的数据
         Long newBookId = jdbcTemplate.queryForObject(
                 "SELECT current_book_id FROM user WHERE username = ? AND deleted = 0", Long.class, username);
-        assertEquals(12, countCategories(newBookId));
+        assertEquals(13, countCategories(newBookId));
     }
 
     @Test
@@ -157,32 +155,14 @@ class AuthRegisterTest {
         String upper = Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
         assertNotEquals(lower, upper);
 
-        register(upper, "personal").andExpect(jsonPath("$.code").value(200));
-        register(lower, "personal").andExpect(jsonPath("$.code").value(200));
+        register(upper).andExpect(jsonPath("$.code").value(200));
+        register(lower).andExpect(jsonPath("$.code").value(200));
 
         // 只按 username 查会查出两行（正好验证 idx_user_username 不唯一），
         // 所以业务查询必须带 deleted = 0 —— 现有 MP 查询都会自动拼
         assertEquals(2, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM user WHERE username IN (?, ?) AND deleted = 0",
                 Integer.class, lower, upper));
-    }
-
-    @Test
-    @DisplayName("非法账本类型：400 且一个用户都不落库")
-    void invalidBookTypeRejected() throws Exception {
-        String username = nextUsername();
-        RegisterReq req = new RegisterReq(username, "abc123456", null, null, "奇怪账本", "biz");
-
-        mockMvc.perform(post("/api/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("账本类型只能是 personal / merchant"));
-
-        // 类型校验放在最前面，就是为了不留「有用户没账本」的半成品
-        assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM user WHERE username = ?", Integer.class, username));
     }
 
     @Test
@@ -194,7 +174,7 @@ class AuthRegisterTest {
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RegisterReq(username, "123", null, null, "账本", "personal"))))
+                                new RegisterReq(username, "123", null, null, "账本"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message", containsString("密码长度")));
@@ -203,7 +183,7 @@ class AuthRegisterTest {
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RegisterReq("bad name!", "abc123456", null, null, "账本", "personal"))))
+                                new RegisterReq("bad name!", "abc123456", null, null, "账本"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message", containsString("用户名只能包含")));
@@ -219,8 +199,8 @@ class AuthRegisterTest {
     }
 
     /** 发一次注册请求（不含断言，交给调用方继续链式断言） */
-    private org.springframework.test.web.servlet.ResultActions register(String username, String bookType) throws Exception {
-        RegisterReq req = new RegisterReq(username, "abc123456", null, null, "测试账本", bookType);
+    private ResultActions register(String username) throws Exception {
+        RegisterReq req = new RegisterReq(username, "abc123456", null, null, "测试账本");
         return mockMvc.perform(post("/api/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)));

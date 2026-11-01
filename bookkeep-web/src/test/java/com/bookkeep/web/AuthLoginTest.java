@@ -74,7 +74,7 @@ class AuthLoginTest {
                 .andExpect(jsonPath("$.data.user.deleted").doesNotExist())
                 .andExpect(jsonPath("$.data.books.length()").value(1))
                 .andExpect(jsonPath("$.data.books[0].name").value("我的账本"))
-                .andExpect(jsonPath("$.data.books[0].type").value("personal"))
+                .andExpect(jsonPath("$.data.books[0].type").value("class"))
                 .andExpect(jsonPath("$.data.books[0].current").value(true))
                 .andReturn();
 
@@ -181,7 +181,7 @@ class AuthLoginTest {
     }
 
     private org.springframework.test.web.servlet.ResultActions register(String username, String bookName) throws Exception {
-        RegisterReq req = new RegisterReq(username, PASSWORD, null, null, bookName, "personal");
+        RegisterReq req = new RegisterReq(username, PASSWORD, null, null, bookName);
         return mockMvc.perform(post("/api/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)));

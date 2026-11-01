@@ -27,7 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
-import java.util.Locale;
+import java.util.UUID;
 
 /**
  * 认证业务实现
@@ -55,10 +55,8 @@ public class AuthServiceImpl implements AuthService {
     @Transactional(rollbackFor = Exception.class)
     public UserResp register(RegisterReq req) {
         String username = req.username().trim();
-        // 账本类型先统一成小写再校验，避免 "Personal" / " PERSONAL " 这类写法把数据写脏；
-        // CategoryTemplate.of 同时承担「非法类型直接 400」的职责，并返回对应的分类模板
-        String bookType = req.bookType().trim().toLowerCase(Locale.ROOT);
-        List<CategoryTemplate.Seed> seeds = CategoryTemplate.of(bookType);
+        // 只有一种账本类型（班级），模板固定取 class；请求里不再有 bookType 字段
+        List<CategoryTemplate.Seed> seeds = CategoryTemplate.classCategories();
 
         // 用户名预检：只是为了给出友好提示，真正的唯一性由 uk_user_username_active 保证
         // MP 的逻辑删除会自动给这里拼 deleted = 0，墓碑行查不出来 —— 这正是现在的语义：
@@ -81,11 +79,15 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ResultCode.BAD_REQUEST, "用户名已存在");
         }
 
-        // 2) 第一本账本：注册必带，所以注册完用户一定有一本账本
+        // 2) 班级账本：注册必建，名字可空（为空用默认「班级账本」）
         Book book = new Book();
         book.setUserId(user.getId());
-        book.setName(req.bookName().trim());
-        book.setType(bookType);
+        book.setName(StringUtils.hasText(req.bookName())
+                ? req.bookName().trim()
+                : CategoryTemplate.DEFAULT_BOOK_NAME);
+        book.setType(CategoryTemplate.BOOK_CLASS);
+        // 公示页 token：注册即生成，同学拿这个链接看账，不用登录（PLAN §5.9）
+        book.setShareToken(UUID.randomUUID().toString().replace("-", ""));
         bookMapper.insert(book);
 
         // 3) 预置分类模板：Db.saveBatch 内部走 JDBC batch，且用 Spring 管理的 SqlSessionFactory，
@@ -102,8 +104,8 @@ public class AuthServiceImpl implements AuthService {
                 .set("current_book_id", book.getId()));
         user.setCurrentBookId(book.getId());
 
-        log.info("注册成功：userId={}, username={}, bookId={}, bookType={}, 预置分类 {} 条",
-                user.getId(), username, book.getId(), bookType, categories.size());
+        log.info("注册成功：userId={}, username={}, bookId={}, 预置班级分类 {} 条",
+                user.getId(), username, book.getId(), categories.size());
         return UserResp.from(user);
     }
 

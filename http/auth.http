@@ -6,7 +6,8 @@
 @username = p1accept20261101
 @password = abc123456
 
-### 1. 注册（成功：code=200，返回 user + 首本账本；同时写入 12 条模板分类）
+### 1. 注册（成功：code=200，返回 user + 班级账本；同时写入 13 条班级分类）
+### 说明：没有 bookType 字段（项目只有班级账本一种）；bookName 可空，为空默认「班级账本」
 POST {{host}}/api/auth/register
 Content-Type: application/json
 
@@ -15,8 +16,7 @@ Content-Type: application/json
   "password": "{{password}}",
   "nickname": "验收用户",
   "email": "accept@example.com",
-  "bookName": "我的账本",
-  "bookType": "personal"
+  "bookName": "我的账本"
 }
 
 ### 2. 登录（成功：code=200；token 自动存入全局变量 token，供 3/4 使用）

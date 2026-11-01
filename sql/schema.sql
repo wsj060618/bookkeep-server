@@ -46,16 +46,18 @@ CREATE TABLE `user` (
 
 -- ------------------------------------------------------------
 -- 4) book 账本表：一本账本 = 一套独立数据（分类/流水/预算）
---    type：personal 个人 / merchant 商家，决定统计口径
+--    type：当前项目固定 class（班级账本），列保留以便将来扩展其它类型
 -- ------------------------------------------------------------
 CREATE TABLE book (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   user_id     BIGINT NOT NULL COMMENT '归属用户 user.id',
   name        VARCHAR(50) NOT NULL COMMENT '账本名',
-  type        VARCHAR(10) NOT NULL COMMENT '账本类型 personal个人 merchant商家',
+  type        VARCHAR(10) NOT NULL DEFAULT 'class' COMMENT '账本类型，当前固定 class 班级',
+  share_token VARCHAR(32) COMMENT '公示页随机 token（免登录只读，见 PLAN §5.9）',
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删'
+  deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删',
+  UNIQUE KEY uk_book_share_token (share_token)
 ) COMMENT='账本表';
 
 -- ------------------------------------------------------------

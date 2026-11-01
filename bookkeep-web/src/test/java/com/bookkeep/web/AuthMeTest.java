@@ -197,7 +197,7 @@ class AuthMeTest {
     }
 
     private void register(String username) throws Exception {
-        RegisterReq req = new RegisterReq(username, PASSWORD, null, null, "我的账本", "personal");
+        RegisterReq req = new RegisterReq(username, PASSWORD, null, null, "我的账本");
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))

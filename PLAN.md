@@ -13,32 +13,45 @@
   - Lombok + spring-boot-starter-validation
   - Spring Security + JWT（jjwt 0.12.x）
 - 工程结构：**Maven 父子工程（多模块）**，父工程 `bookkeep-server` 下拆四个子模块（`common` / `model` / `service` / `web`，见 §4）
+- 部署形态（第 7 天定稿，一套代码两种部署目标，差异只在配置）：
+  - **本地单机（日常使用，主目标）**：Windows + 本机 MySQL 8 + Nginx for Windows 托管前端静态文件，
+    并反代 `/api` → `127.0.0.1:8080`；后端只监听回环地址（不对外端口），Nginx 监听 80（局域网可访问）
+  - **云端（演示与取证，按需开启）**：Docker Compose 编排 `mysql` + `app` + `nginx`，部署到轻量应用服务器；
+    **只在试用期 / 面试期开启**，不做长期租用（理由与成本见 §9）
+  - 配置差异：本地 `application-local.yml`（gitignore），云端走环境变量；`nginx.conf` 两边共用，只改 `root` 与 `proxy_pass`
+- 部署边界：**不做**前后端两个端口直连（会引入 CORS），一律「Nginx 同源托管 + 反代」，后端只出 JSON
 
 ## 2. 核心设计
 
-### 2.1 多账本
-- 一本账本 = 一套独立的记账数据（分类 / 流水 / 预算）
-- 账本带 `type`（`personal` 个人 / `merchant` 商家），统计口径按当前账本类型切换
-- 用户可自由新建 / 重命名 / 删除 / 切换多本账本
+> **场景定稿（第 7 天）**：这是一个给**生活委员记班费**的自用系统，单用户、单账本。
+> 原计划里的个人版 / 商家版、多账本、预算、AI 分析、头像上传全部**有意砍掉**（原因见 §6 的范围取舍），
+> 目的是一个月内做出「能真实用的系统 + 能讲的简历项目」。
+
+### 2.1 单一账本（班级账本）
+- 一个用户只有一本账本，`book.type` 固定 `class`（列保留，将来扩展其它类型不用改表）
+- 不做新建 / 删除 / 切换账本；换届交接走 **Excel 导出**（§5.5.1），下一任用不用这套系统都行
+- 注册即建账本并预置 **13 条班级分类**（8 支出 + 5 收入，见 §3）
 
 ### 2.2 注册建账本
-- 注册时选择类型 + 账本名，自动创建第一本账本并预置对应分类模板
+- 注册时只填账号信息 + 可选账本名；后端固定建 `class` 账本并预置班级模板
+- 账本名不填则默认「班级账本」
 - `user.current_book_id` 指向当前账本，存后端
 
 ### 2.3 数据隔离
-- 分类 / 流水 / 预算 / 统计 / AI 分析全部按「当前账本」过滤
+- 分类 / 流水 / 统计全部按「当前账本」过滤
 - 前端无需传 book_id，后端从当前用户取 current_book_id
-- 防越权：所有查询强制带 book 归属校验
+- 防越权：所有查询强制带 book 归属校验（详见 §8 第 5 条）
 
-### 2.4 AI 分析
-- 本地规则引擎生成结构化分析报告
-- `AiAnalysisService` 接口抽象，预留大模型 API 实现（后续 `@ConditionalOnProperty` 切换）
-
-### 2.5 文件存储（头像）
-- 头像只在 `user.avatar` 存 **URL 字符串**（`VARCHAR(500)`），图片本体上传到**阿里云 OSS**
-- `FileService` 接口抽象，`AliyunOssFileServiceImpl` 为 OSS 实现，预留切换（同 §2.4 用 `@ConditionalOnProperty`）
-- OSS 配置（endpoint / bucket / accessKeyId / accessKeySecret / urlPrefix）走**环境变量**，禁止硬编码进仓库
-- `FileService` 入参用 `InputStream + 原始文件名`，**不引 `MultipartFile`**，避免 service 模块依赖 spring-web（转换在 controller 层做）
+### 2.4 有意不做的部分（不是漏了，是砍了）
+| 砍掉 | 原因 |
+|---|---|
+| 个人 / 商家账本与模板 | 场景只有一个：班费。多类型会带来无用的统计分支 |
+| 多账本管理（新建/切换/删除） | 单用户单账本；换届用 Excel |
+| 预算 | 班费没有「每月预算」概念 |
+| AI 分析（规则引擎） | 名不副实、面试容易被问穿，且对班费无用 |
+| 头像上传（OSS） | 单用户自用，无意义；也避免引入 AK/SK 与外部依赖 |
+| 多用户共享账本 | 需要 `book_member` + 角色 + 全接口改权限校验（3–5 天），班费场景收益低 |
+| 邮件/短信找回密码 | 单机版用 `--reset-password` 本机重置（§9 第 3 条） |
 
 ## 3. 数据库设计
 
@@ -53,7 +66,7 @@ CREATE TABLE `user` (
   password       VARCHAR(100) NOT NULL,          -- BCrypt
   nickname       VARCHAR(50),
   email          VARCHAR(100),
-  avatar         VARCHAR(500),                   -- 头像 URL（阿里云 OSS）
+  avatar         VARCHAR(500),                   -- 头像 URL（预留列，当前不做上传，见 §2.4）
   current_book_id BIGINT,                        -- 当前打开的记账本
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -70,10 +83,12 @@ CREATE TABLE book (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
   user_id     BIGINT NOT NULL,
   name        VARCHAR(50) NOT NULL,
-  type        VARCHAR(10) NOT NULL,              -- 'personal' / 'merchant'
+  type        VARCHAR(10) NOT NULL DEFAULT 'class',   -- 固定 'class'（班级账本）；列保留以便将来扩展
+  share_token VARCHAR(32),                            -- 公示页随机 token（免登录只读，§5.9）
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted     TINYINT DEFAULT 0
+  deleted     TINYINT DEFAULT 0,
+  UNIQUE KEY uk_book_share_token (share_token)
 );
 
 CREATE TABLE category (
@@ -114,12 +129,15 @@ CREATE TABLE budget (
 );
 ```
 
-### 分类模板（注册 / 新建账本时按 type 预置）
+### 分类模板（注册时按账本类型预置，当前只有 class）
 
-| type | 支出分类 | 收入分类 |
+| type | 支出分类（8） | 收入分类（5） |
 |---|---|---|
-| personal | 餐饮、交通、购物、住房、娱乐、医疗、学习、其他 | 工资、奖金、理财、其他 |
-| merchant | 采购、租金、员工工资、水电、物流、税费、设备、营销、其他 | 销售收入、服务收入、其他 |
+| class | 班会物资、活动经费、聚餐、打印复印、场地、交通、奖品、其他 | 收取班费、学院拨款、活动赞助、结余转入、其他 |
+
+- 图标/颜色存**语义 key**（如 `supplies` / `orange`），前端负责映射成图标组件与主题色，换图标库不用改数据
+- 「结余转入」是给换届用的：新生活委员建账后第一笔记「上学期结余 X 元」，历史衔接清晰
+- 模板实现在 `CategoryTemplate.classCategories()`；老库升级执行 `sql/migration_book_type_class.sql`
 
 ## 4. 工程与包结构（Maven 多模块）
 
@@ -133,36 +151,32 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 │   └── com.bookkeep.common
 │       ├── Result、ResultCode、PageResult
 │       ├── BusinessException
-│       ├── JwtUtil、SecurityUtil
-│       └── constant...
+│       └── JwtUtil、SecurityUtil
 ├── bookkeep-model\                       数据模型模块：实体 + 请求/响应 DTO（只有数据形状，无业务逻辑）
 │   └── com.bookkeep.model
-│       ├── entity       User、Book、Category、Transaction、Budget
+│       ├── entity       User、Book、Category、Transaction（Budget 表保留但不建实体，见 §2.4）
 │       └── dto
-│           ├── req      RegisterReq、LoginReq、BookReq、CategoryReq、TransactionReq、BudgetReq、UserUpdateReq
-│           └── resp     LoginResp、UserResp、BookResp、TransactionResp、SummaryResp、CategoryStatResp、AnalysisReportResp ...
+│           ├── req      RegisterReq、LoginReq、CategoryReq、TransactionReq、TransactionQuery、UserUpdateReq
+│           └── resp     LoginResp、UserResp、BookResp、CategoryResp、TransactionResp、
+│                        SummaryResp、CategoryStatResp、PublicReportResp
 ├── bookkeep-service\                     业务模块：数据访问 + 业务逻辑（mapper / service + impl）
 │   └── com.bookkeep.service
-│       ├── mapper       UserMapper、BookMapper、CategoryMapper、TransactionMapper、BudgetMapper、StatisticMapper
-│       ├── 接口与 impl   AuthService、BookService、CategoryService、TransactionService、BudgetService、StatisticService（impl 放 impl 子包）
-│       ├── constant     CategoryTemplate
-│       ├── file
-│       │   ├── FileService                  （接口：上传返回 URL）
-│       │   ├── AliyunOssFileServiceImpl     （阿里云 OSS 实现）
-│       │   └── OssProperties                （@ConfigurationProperties(prefix = "oss")）
-│       └── analysis
-│           ├── AiAnalysisService        （接口）
-│           ├── RuleAnalysisServiceImpl  （本地规则实现）
-│           └── AnalysisContext / AnalysisReport
+│       ├── mapper       UserMapper、BookMapper、CategoryMapper、TransactionMapper（统计用 @Select 手写 SQL）
+│       ├── 接口与 impl   AuthService、CategoryService、TransactionService、StatisticService、PublicReportService
+│       ├── constant     CategoryTemplate（班级模板唯一来源）
+│       └── export       TransactionExportService（导出：流水明细 + 汇总；实现见 §5.5.1）
 └── bookkeep-web\                         启动模块：启动类 + 控制器 + 配置
     └── com.bookkeep.web
-        ├── BookkeepApplication            主启动类（@SpringBootApplication + @MapperScan 扫 service 模块 mapper）
-        ├── controller    AuthController、BookController、UserController、CategoryController、
-        │                 TransactionController、StatisticController、BudgetController、AnalysisController
-        ├── config        SecurityConfig、MybatisPlusConfig、JacksonConfig、CorsConfig
-        ├── handler       GlobalExceptionHandler
-        └── resources/application.yml
+        ├── BookkeepApplication            主启动类（@SpringBootApplication + @MapperScan）
+        ├── controller    AuthController、CategoryController、TransactionController、
+        │                 StatisticController、PublicController（免登录只读）
+        ├── config        SecurityConfig、MybatisPlusConfig、JacksonConfig
+        ├── filter        JwtAuthenticationFilter（非 @Component，SecurityConfig 手动 new）
+        ├── handler       GlobalExceptionHandler、JwtAuthenticationEntryPoint、JwtAccessDeniedHandler
+        └── resources     application.yml、logback-spring.xml（application-local.yml 本地配置，gitignore）
 ```
+
+> 约定：`bookkeep-web` 里还放 `aspect/LogAspect`（控制器调用与异常日志）与 `config/StartupInfoRunner`（启动自检）。
 
 > 测试按标准 Maven 约定放**每个模块自己的 `src/test/java`**（不设独立 test 模块）：
 > - `common`：JwtUtil / Result / ResultCode 纯单元测试
@@ -175,9 +189,12 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 |---|---|---|
 | `bookkeep-common` | lombok、jjwt、spring-security-core | 轻依赖，JwtUtil/SecurityUtil 用 |
 | `bookkeep-model` | lombok、mybatis-plus-annotation、jakarta.validation-api | 实体 + DTO；只引注解包（会传递一个 mybatis 核心包），不拖整个 MyBatis-Plus 栈 |
-| `bookkeep-service` | spring-boot-starter、mybatis-plus-spring-boot3-starter、mysql-connector-j、spring-boot-starter-validation、bookkeep-model、bookkeep-common、aliyun-sdk-oss（+ JDK17 所需 jaxb-api/jaxb-runtime/activation） | mapper/service+impl/file/analysis |
+| `bookkeep-service` | spring-boot-starter、mybatis-plus-spring-boot3-starter、mysql-connector-j、spring-boot-starter-validation、bookkeep-model、bookkeep-common | mapper/service+impl/constant/export |
 | `bookkeep-web` | spring-boot-starter-web、spring-boot-starter-security、spring-boot-starter-aop、bookkeep-service、bookkeep-model | 启动/控制器/配置（controller 直接收发 DTO，故显式依赖 model） |
 | 各模块 | spring-boot-starter-test(test) | 每模块自带单测；web 额外 spring-security-test |
+
+> 导出实现：**先用 CSV（UTF-8 BOM，0 新依赖）**，Excel 能直接打开且中文不乱码，满足换届交接；
+> 若 W2 还有时间再做「双 sheet 的真 Excel」，那时才引 `easyexcel`（或 `poi-ooxml`）。不要为了双 sheet 卡住主线。
 
 ### 日志功能
 - `logback-spring.xml`（web 模块 resources）：控制台 + 滚动文件（`logs/bookkeep-server.log` 按天滚动，保留 30 天），ERROR 单独落 `-error.log`；日志带 `[环境]` 标识
@@ -220,32 +237,30 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 2 | 金额类型 | **一律字符串**：`BigDecimal` 全局按字符串序列化（`JacksonConfig` 注册 `BigDecimal → String` 序列化器）。JS 的 `number` 是双精度，`0.1 + 0.2 !== 0.3`，金额累加/比较会算错 |
 | 3 | 日期格式 | 日期 `yyyy-MM-dd`（`transDate` / `startDate` / `endDate`），月份 `yyyy-MM`（`month`）；不传时间戳、不让前端解析 |
 | 4 | 错误处理 | 前端只写一个拦截器：`code !== 200` → 提示 `message`；`code === 401` → 清 token + 跳登录；`code === 403` → 提示无权限。业务错误 HTTP 仍是 200，**前端判断 `code`，不判断状态码** |
-| 5 | 列表自带名称 | 列表/详情直接返回展示所需名称，禁止让前端二次查询：流水含 `categoryName` / `categoryIcon` / `categoryColor`（§5.5），预算含 `categoryName`。这条最容易被纯后端自测漏掉——`curl` 返回 `categoryId: 3` 看起来完全正常 |
+| 5 | 列表自带名称 | 列表/详情直接返回展示所需名称，禁止让前端二次查询：流水含 `categoryName` / `categoryIcon` / `categoryColor`（§5.5）。这条最容易被纯后端自测漏掉——`curl` 返回 `categoryId: 3` 看起来完全正常 |
 
 ### 5.1 认证
 
 | 方法 | 路径 | 说明 | 请求体 / 参数 |
 |---|---|---|---|
-| POST | `/api/auth/register` | 注册并创建第一本账本 | `{username, password, nickname?, email?, bookName, bookType}` → 用户信息 |
+| POST | `/api/auth/register` | 注册并创建班级账本（预置 13 条分类） | `{username, password, nickname?, email?, bookName?}` → 用户信息。**没有 bookType**；`bookName` 为空默认「班级账本」 |
 | POST | `/api/auth/login` | 登录 | `{username, password}` → `{token, user:{id, username, nickname, email, avatar, currentBookId}, books:[{id, name, type, current}]}` |
 | GET | `/api/auth/me` | 当前用户信息（含 currentBookId） | - |
 
+> `books` 是平铺在外层（不是 `user.books`）。虽然当前只有一个账本，字段保留是为了兼容已有前端契约。
+
 ### 5.2 账本
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/books` | 账本列表，含每本 `{id, name, type, current:bool}` |
-| POST | `/api/books` | 新建 `{name, type}`，预置分类模板 |
-| PUT | `/api/books/{id}` | 重命名 `{name}` |
-| DELETE | `/api/books/{id}` | 删除账本及其数据；若为当前账本，current_book_id 指向剩余第一本（无则置 null） |
-| PUT | `/api/books/{id}/current` | 切换当前账本 |
+**不做**（见 §2.1）：不提供新建 / 重命名 / 删除 / 切换账本接口。
+账本信息只随 `login` 的 `books` 数组返回；换届交接走 Excel 导出（§5.5.1）。
 
 ### 5.3 用户
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| PUT | `/api/users/me` | 改昵称 / 邮箱 / 头像 `{nickname?, email?, avatar?}` |
-| POST | `/api/users/me/avatar` | 上传头像（multipart 字段 `file`）→ 传 OSS 后返回 `{avatar}` 并更新用户 |
+| PUT | `/api/users/me` | 改昵称 / 邮箱 `{nickname?, email?}` |
+
+头像上传**不做**（避免引入 OSS 与外部依赖）。
 
 ### 5.4 分类（按当前账本）
 
@@ -261,107 +276,143 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/transactions?page=1&size=10&type=&categoryId=&startDate=&endDate=&keyword=` | 分页查询 → PageResult |
-| POST | `/api/transactions` | 新增 `{categoryId, type, amount, transDate, note?}` |
-| PUT | `/api/transactions/{id}` | 修改（仅自己账本） |
+| POST | `/api/transactions` | 新增 `{categoryId, type, amount, transDate, note?}`；**支出不能超过当前余额** |
+| PUT | `/api/transactions/{id}` | 修改（仅自己账本，同样校验余额） |
 | DELETE | `/api/transactions/{id}` | 删除（仅自己账本） |
+| GET | `/api/transactions/export?startDate=&endDate=` | 导出 Excel/CSV（**含逐行结余**），换届与公示用 |
 
 返回 DTO 含 `categoryName`、`categoryIcon`、`categoryColor`。
 
-### 5.6 统计（按当前账本及其类型）
+#### 5.5.1 班费收支表设计（第 7 天定稿）
+
+**形态**：真实班费表是「流水账 + 逐行结余」，不是分类汇总表：
+
+| 日期 | 分类 | 摘要 | 收入 | 支出 | 结余 |
+|---|---|---|---|---|---|
+| 2026-09-05 | 收取班费 | 全班 38 人 × 50 | 1900.00 | | 1900.00 |
+| 2026-09-20 | 班会物资 | 横幅+气球 | | 86.50 | 1813.50 |
+
+**逐行结余怎么算**：MySQL 8 窗口函数，在分页**之前**算完（前端累加一上分页就错）：
+
+```sql
+WITH running AS (
+  SELECT t.id, t.trans_date, c.name AS category_name, t.type, t.amount, t.note,
+         SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END)
+             OVER (ORDER BY t.trans_date, t.id) AS balance_after
+  FROM `transaction` t
+  JOIN category c ON c.id = t.category_id
+  WHERE t.book_id = #{bookId} AND t.deleted = 0
+)
+SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{offset}
+```
+
+- `ORDER BY trans_date, id` 里的 **id 不能省**，否则同一天多笔顺序不稳定，余额会跳
+- **取舍**：普通明细列表**不返回**结余列（只返回金额）；**导出与公示页才带** `balanceAfter`（它们是全量查询，语义清晰）
+- 余额校验：`当前余额 = Σ收入 − Σ支出`，新增/修改**支出**时超过余额 → `400「班费余额不足，当前余额 X」`
+- 统计口径：本月收入/支出/结余；累计结余 = 最后一行 `balance_after`；分类占比按支出 `GROUP BY category_id`
+
+**导出格式**（换届凭证）：
+
+- `流水明细` sheet：日期 / 分类 / 摘要 / 收入 / 支出 / 结余，最后一行「合计」
+- `汇总` sheet：按分类合计 + 期初结余 + 期末结余 + 导出时间 + 账本名
+- 硬要求：UTF-8 BOM（否则 Excel 中文乱码）、金额固定两位小数、日期 `yyyy-MM-dd` 文本
+
+### 5.6 统计（按当前账本）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/statistics/summary?month=2026-08` | 个人：`{income, expense, balance}`；商家：`{income, expense, profit, profitRate}` |
+| GET | `/api/statistics/summary?month=2026-08` | `{income, expense, balance}`（balance = 该月收支差；累计余额另给 `totalBalance`） |
 | GET | `/api/statistics/category?month=&type=expense` | 分类占比 `[{categoryName, amount, percent}]` |
-| GET | `/api/statistics/trend?months=6` | 近 N 月收支趋势 `[{month, income, expense}]`（补零） |
-| GET | `/api/statistics/daily?days=30` | 近 N 天每日支出 `[{date, amount}]`（补零） |
-| GET | `/api/statistics/profit?months=6` | 商家利润趋势 `[{month, income, cost, profit}]` |
-| GET | `/api/statistics/cost-structure?month=` | 商家成本分类占比（即支出的分类占比） |
 
-### 5.7 预算（按当前账本）
+月度趋势 / 每日趋势 / 利润 / 成本结构**不做**（图表的边际价值低于部署与导出；需要时再加）。
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/budgets?month=2026-08` | 当月预算列表，含已用 / 剩余 / 进度 |
-| POST | `/api/budgets` | 新增 `{categoryId, month, amount}`（同月同分类唯一键兜底） |
-| PUT | `/api/budgets/{id}` | 修改 |
-| DELETE | `/api/budgets/{id}` | 删除 |
+### 5.7 预算
 
-### 5.8 AI 分析（按当前账本）
+**不做**（见 §2.4）。表结构保留在 `schema.sql` 里，不建实体、不写接口。
+
+### 5.8 AI 分析
+
+**不做**（见 §2.4）。原「规则引擎 + level 预警」的设计整体放弃。
+
+### 5.9 只读公示页（免登录）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/analysis/report?month=2026-08` | 结构化分析报告 |
+| GET | `/api/public/report/{shareToken}?month=2026-08` | 免登录只读：本月收入/支出/结余 + 分类占比 + 明细（含逐行结余） |
 
-报告规则（每条带 `level: normal/warning/danger`）：
-1. 本月总支出 vs 上月 → 环比百分比，超 20% 预警
-2. 逐分类对比预算，超支标红预警
-3. 支出 Top 3 分类及占比，占比过高建议
-4. 日均支出 vs 上月日均，趋势判断
-5. 结余情况，支出 > 收入标 danger
-6. 商家额外：利润环比下滑 / 成本超支预警
+- `book.share_token`：注册时生成 32 位随机串（`UUID` 去横线），写进 `book` 表并加唯一索引
+- 只读、**不含任何个人信息**（只出账本名与金额），前端页面路径 `/report/{token}`
+- 设计意图：同学看账不需要账号，因此**公网只需暴露这一个只读接口**，登录入口的风险面最小
+- 若用户不想公开，可提供一个「重置 token」的开关（P2 之后再说，先不做接口）
 
-## 6. 开发顺序
+## 6. 开发顺序（第 7 天重排：一个月 / 最多五周做完，本地为主 + 云取证）
 
-- **P1** 骨架 + 统一返回/异常 + JWT 认证 + 注册建账本（模板分类批量插入）
-- **P2** 分类 + 流水 CRUD（book 隔离 + 分页筛选）
-- **P3** 统计接口（聚合 SQL，补零处理）
-- **P4** 账本管理（增删改 + 切换当前）+ 预算
-- **P5** AI 分析（规则引擎 + 接口抽象）
-- **P5.5** 头像上传（`FileService` 接口 + 阿里云 OSS 实现 + `POST /api/users/me/avatar`）
-- **P6** 收尾：防越权逐接口验证、删除联动、参数校验
+**范围（定稿）**：P1 已完成；剩下 P2 分类 + 流水、P3 统计（砍到 2 个接口）、导出、公示页、单机打包、云端取证。
+**砍掉**：P4 多账本 + 预算、P5 AI 分析、P5.5 头像上传、多用户共享账本（见 §2.4）。
 
-### 6.1 前后端配合节奏（按模块交替，禁止「全后端做完再统一联调」）
+### 6.0 四档优先级（时间不够就从下往上砍）
+
+| 档 | 内容 | 状态 |
+|---|---|---|
+| **A 档（必须，否则项目失去意义）** | P2 分类 + 流水后端（隔离/分页筛选/余额校验）+ 记一笔 + 明细列表 + CSV/Excel 导出 + 单机跑起来 + 每日备份 | 第 1–3 周 |
+| **B 档（争取）** | 本月收支/结余 + 分类占比、只读公示页 | 第 2–4 周 |
+| **C 档（有余力）** | Docker Compose 云端取证、HTTPS、登录限流、demo 视频、简历精修 | 第 4–5 周 |
+| **不做** | 多账本、预算、AI 分析、头像、多用户共享、手机离线、邮件找回密码 | — |
+
+### 6.1 五周排期（每周都有可验收产出）
+
+| 周 | 后端 | 前端（AI 写，本人验收） | 周末验收 |
+|---|---|---|---|
+| **W1** | P2 分类 + 流水（book 隔离、分页筛选、余额校验）+ 单测 + `http/*.http` | 记一笔 + 明细列表（移动优先卡片） | `localhost` 能登录、能记一笔、列表能看到；**当天开始记真实班费** |
+| **W2** | `class` 收敛已提前完成；导出（双 sheet、UTF-8 BOM、逐行结余）+ 统计 summary/category + 公示页接口 | 统计卡片 + 导出按钮 + 公示页 | 导出的 Excel 发班群不丢人；公示链接免登录能看 |
+| **W3** | 单机打包：`repackage` fat jar + `deploy/nginx/nginx.conf` + 启停/备份脚本 | 生产构建（`dist` 交给 Nginx，history 路由 + `try_files`） | 双击 `start-all.bat` 能用；重启电脑数据还在；备份能恢复；手机同 WiFi 能开 |
+| **W4** | Dockerfile + compose（本机跑通）→ 试用期上云：HTTPS、密钥外部化、登录限流（含 `X-Real-IP`）、导入真实数据、**备份恢复演练** | 无（前端产物复用） | 手机 4G 打开 `https://` 地址能记一笔；七项取证材料齐全 |
+| **W5** | 缓冲修 bug + 真实数据复盘 | 无 | README / `deploy/README.md` 能让别人 30 分钟复现；简历两行定稿；2 分钟 demo 录屏 |
+
+**三条硬约束**：
+1. **W1 必须跑通「记一笔」**——这是唯一不能延的部分，否则没有真实数据，项目失去说服力
+2. **W4 才申请服务器试用**，W1–W3 全部本地，别浪费试用期
+3. **W4 上线前必须先完成登录限流与密钥外部化**（公网暴露的前置条件，见 §9 第 1 条）
+
+### 6.2 前后端配合节奏（按模块交替，禁止「全后端做完再统一联调」）
 
 原则：**后端推完一个模块（接口 + 测试 + `.http` 可重放请求）→ 立刻让 AI 写对应页面 → 联调验收 → 再进下一个模块。**
 
 不做「全后端先行」的原因：
 
-- 列表接口几乎必然要 join 出名称（见 §5.0 第 5 条），纯后端自测时看不出问题，等前端一联调才发现缺字段，而那时改的是**已经沉淀了 20 个接口的契约**
+- 列表接口几乎必然要 join 出名称（见 §5.0 第 5 条），纯后端自测时看不出问题，等前端一联调才发现缺字段
 - 联调问题会一次堆到十个（字段名、日期格式、金额精度、401 跳转、proxy），无法按顺序排查
 - 到第 3 周末才第一次看到能点的页面，中期没有任何「可演示」的成果
 
-| 阶段 | 后端 | 前端（AI 写，本人验收） | 联调验收标准 |
-|---|---|---|---|
-| 第 0 步（✅ 代码已完成，待真人跑一遍验收） | P1 收尾（403） | **只做登录页** | 登录 → 存 token → 请求 `/api/auth/me` → 页面显示昵称 |
-| 1 | P2 分类 + 流水 | 流水列表 + 记一笔 | 记一笔后列表出现该条；切账本数据跟着换 |
-| 2 | P3 统计 | 统计图表 | 空月份显示 0，趋势不断层 |
-| 3 | P4 账本 + 预算 | 账本切换 + 预算页 | 删掉当前账本后列表不崩、自动切到剩余账本 |
-| 4 | P5 AI 分析 | 分析页 | 6 条规则都能显示，`level` 有对应颜色 |
-
 配套要求：
 
-- 前端脚手架**第一天就建起来**（Vite + 代理 `/api` → `http://localhost:8080`，见 §8 第 8 条），但只放登录页，其余页面随模块生长——先把 proxy / token 存储 / 401 跳转这三条基建验证掉，成本约半天
-  - 第 7 天已建好：`D:\coding\bookkeep-web`（`npm run dev` → http://localhost:5173）。已落地的三条基建：`vite.config.ts` 的 `/api` 代理、`utils/token.ts` + `stores/auth.ts` 的 token 持久化、`api/request.ts` 里 `code`/`status` 双分支的 401 处理
-  - 验收步骤写在 `bookkeep-web/README.md`（7 条可观察行为，含「刷新后昵称还在」和「乱码 token 被弹回登录页」）
-- 每个模块的后端完成后，先用 `.http` 文件（IDEA 内置 HTTP Client）把请求跑通并**留在仓库里**，作为联调基准与将来面试的素材
-- 不要让 AI「一次性生成 10 个页面」：先只留 `login` 一个接口 + 一个页面把整条链路打通，再复制这个模式扩页面
-- 前端 AI 的产出按**可观察行为**验收（连点注册只发一次请求、切账本列表刷新、空数据显示 0），而不是「页面能打开」
+- 前端脚手架**第一周就建起来**（Vite + 代理 `/api` → `http://localhost:8080`）——已验证：`vite.config.ts` 代理、`utils/token.ts` + `stores/auth.ts` token 持久化、`api/request.ts` 的 `code`/`status` 双分支 401 处理；验收步骤见 `bookkeep-web/README.md`
+- 每个模块的后端完成后，用可重放的 HTTP 脚本跑通并**留在仓库里**（`http/`）：IDEA Ultimate 的 HTTP Client / VS Code 的 REST Client / Apifox 任选，语法通用；社区版 IDEA 没有 HTTP Client
+- 不要让 AI「一次性生成 10 个页面」：先打通一条完整链路，再复制模式扩页面
+- 前端产出按**可观察行为**验收（连点只发一次请求、刷新后数据还在、空数据显示 0），而不是「页面能打开」
 
-### P1 细化（每天约 1 小时，按真实开发顺序）
+### P1 细化（全部已完成）
 
-- **第 0 天 ✅ 已完成**：建库建表 + `application.yml`（UTF-8 + 环境变量 `${DB_USER}/${DB_PWD}`）+ `ResultCode`/`Result`/`PageResult`/`BusinessException`/`JwtUtil` + `BookkeepApplication(scanBasePackages)` + `DataSourceConnectionTest`
-- **第 1 天 ✅ 已完成**：`User` 实体 + `UserMapper` + `UserMapperTest`（持久层 + 逻辑删除验证，测试通过）
-- **第 2 天 ✅ 已完成**：`Book`/`Category` 实体 + `BookMapper`/`CategoryMapper` + `CategoryTemplate`（用 `BOOK_PERSONAL`/`BOOK_MERCHANT`、`TYPE_INCOME`/`TYPE_EXPENSE` 常量代替原计划的 `BookType`/`CategoryType` 两个类）+ `BookMapperTest`/`CategoryMapperTest`
-- **第 3 天 ✅ 已完成**：最小 `SecurityConfig`（先 `permitAll`，提供 `BCryptPasswordEncoder`）+ `GlobalExceptionHandler` + `GlobalExceptionHandlerTest`（6 个用例：2 个主动抛出、4 个由校验/JSON/404 等框架行为产生）
-- **第 4 天 ✅ 已完成**：注册接口（`RegisterReq`/`UserResp`/`BookResp` + `AuthService.register` + `AuthController.register`）——事务内「归一化并校验 bookType → 用户名查重 → 建用户（BCrypt）→ 建首本账本 → `Db.saveBatch` 写入 12 条模板分类 → 回写 `current_book_id`」；用户名唯一先预检、再靠 `user.username` 唯一索引 `DuplicateKeyException` 兜并发注册与逻辑删除的历史用户；`AuthRegisterTest` 6 个用例（成功 / 商家模板 / 重名 / 软删重名 / 非法类型 / 参数校验）；同日把实体与 DTO 从 `bookkeep-service` 拆到新建的 `bookkeep-model` 模块（见 §4），包名 `com.bookkeep.model.entity` / `com.bookkeep.model.dto.req|resp`
-- **第 5 天 ✅ 已完成**：登录发 token（`LoginReq`/`LoginResp` + `AuthService.login` + `AuthController.login`）——密码用 BCrypt 校验，用户不存在与密码错误同一提示（防枚举），响应 `{token, user, books}`，token 的 subject 存 userId
-- **第 6 天 ✅ 已完成**：`SecurityUtil.getUserId()`（common，从 SecurityContext 取 `Long` principal，匿名直接 401）+ `JwtAuthenticationFilter`（只认证不写响应，无效 token 按未登录继续走链）+ `JwtAuthenticationEntryPoint`（真实 HTTP 401 + `{code:401}` JSON）+ 收紧 `SecurityConfig`（只放行 `register`/`login`/`error`，其余 `authenticated()`）+ `GET /api/auth/me`（service 内部用 `SecurityUtil`，用户已注销时 401）；过滤器在 `SecurityConfig` 里手动 `new`（做成 Bean 会被 Boot 额外注册到 Servlet 容器）；`GlobalExceptionHandlerTest` 改 `@AutoConfigureMockMvc(addFilters = false)`，新增 `AuthMeTest`（9 个用例：无/坏/篡改/缺 Bearer 前缀 token、正常取用户、双用户隔离、软删用户旧 token 失效、登录仍匿名、未知业务路径先 401）
-- **第 7 天**：✅ 已完成 —— `JwtAccessDeniedHandler`（真实 403 + 同一 JSON 信封，注册进 `SecurityConfig.exceptionHandling`）+ `GlobalExceptionHandler` 显式接管 `AccessDeniedException`（否则被 `@ExceptionHandler(Exception.class)` 兜成 200 + code=500）+ 「HTTP 状态码 vs body.code」定稿（业务错误恒 200 + body.code，仅认证/授权失败用真实 401/403，见 §5）+ 测试 `SecurityJsonHandlerTest`（401/403 信封一致）与 `GlobalExceptionHandlerTest.accessDenied` + 验收脚本 `http/auth.http`
-- **缓冲（可选）**：`JacksonConfig`（LocalDate/LocalDateTime 格式），等响应含日期字段再加
-
-> 说明：`SecurityConfig` 会在第 3 天（临时放行）和第 6 天（收紧）各改一次，以便第 4–5 天的接口在认证做完前就能调通。
+- **第 0 天 ✅**：建库建表 + `application.yml`（UTF-8 + 环境变量 `${DB_USER}/${DB_PWD}`）+ `ResultCode`/`Result`/`PageResult`/`BusinessException`/`JwtUtil` + `BookkeepApplication(scanBasePackages)` + `DataSourceConnectionTest`
+- **第 1 天 ✅**：`User` 实体 + `UserMapper` + `UserMapperTest`（持久层 + 逻辑删除验证）
+- **第 2 天 ✅**：`Book`/`Category` 实体 + `BookMapper`/`CategoryMapper` + `CategoryTemplate` + `BookMapperTest`/`CategoryMapperTest`
+- **第 3 天 ✅**：最小 `SecurityConfig`（先 `permitAll`）+ `GlobalExceptionHandler` + `GlobalExceptionHandlerTest`
+- **第 4 天 ✅**：注册接口（事务内建用户 → 建账本 → `Db.saveBatch` 写模板分类 → 回写 `current_book_id`）；同日把实体与 DTO 拆到 `bookkeep-model`
+- **第 5 天 ✅**：登录发 token（BCrypt 校验、防用户名枚举、`{token, user, books}` 平铺结构）
+- **第 6 天 ✅**：`SecurityUtil` + `JwtAuthenticationFilter`（只认证不写响应）+ `JwtAuthenticationEntryPoint`（真实 401）+ 收紧 `SecurityConfig` + `GET /api/auth/me` + `AuthMeTest`
+- **第 7 天 ✅**：`JwtAccessDeniedHandler`（真实 403）+ `GlobalExceptionHandler` 接管 `AccessDeniedException` + 「HTTP 状态码 vs body.code」定稿（§5）+ `SecurityJsonHandlerTest` + `http/auth.http`
+- **第 7 天（范围收敛）✅**：砍掉 personal / merchant，`book.type` 固定 `class`（`DEFAULT 'class'`）+ 13 条班级分类模板 + `book.share_token`（公示页）+ `RegisterReq` 去掉 `bookType`、`bookName` 改可选（默认「班级账本」）+ 相关测试重写 + `sql/migration_book_type_class.sql`
 
 ## 7. 自查清单
 
-- **P1**：注册（带类型）→ 登录 → 带 token 访问 `/api/auth/me` 成功；无 token 返回 401 JSON；错参 400；401/403 都是 JSON 信封而不是 HTML 错误页。对应脚本 `http/auth.http`（IDEA HTTP Client 直接点）
-- **P2**：Postman 建分类、记流水、按日期/类型/关键字分页筛选正常；A 用户看不到 B 用户数据
-- **P3**：手造一个月数据，summary/category/trend/daily 与手算一致
-- **P4**：新建 / 切换 / 删除账本联动正确（删除当前账本自动转移）；预算进度正确
-- **P5**：report 输出结构化规则分析，商家账本含利润分析
-- **P5.5**：上传头像 → `user.avatar` 存 OSS URL，`/api/auth/me` 能返回该 URL；超大/非法格式文件返回 400
-- **P6**：登录 A 账号不能查/改/删 B 账号任何数据（逐接口验证）
-- **联调（每模块一次，§6.1）**：逐条核对 §5.0 五项——分页是 `{total, list}`、金额是字符串、日期是 `yyyy-MM-dd`、401 清 token 跳登录、列表直接带名称
+- **P1 ✅**：注册 → 登录 → 带 token 访问 `/api/auth/me` 成功；无 token 返回真实 401 JSON；错参 400；401/403 都是 JSON 信封而不是 HTML 错误页。脚本：`http/auth.http`
+- **P1 收敛 ✅**：注册请求不含 `bookType`；账本 `type='class'`；预置 13 条班级分类（8 支出 + 5 收入）；`bookName` 不填默认「班级账本」
+- **P2（W1 周末）**：能记一笔、列表能看到；按日期/类型/分类/关键字分页筛选正常；A 用户看不到 B 用户数据（逐接口验证）；支出超过余额返回 400
+- **P3 + 导出（W2 周末）**：手算一个月数据，`summary`/`category` 与手算一致；导出的 Excel 用 Excel 打开中文不乱码、金额两位小数、逐行结余正确，最后一行合计与 `summary` 对齐；公示链接免登录能看到本月收支
+- **本地部署（W3 周末）**：双击 `start-all.bat` 能用；重启电脑后数据还在；`backup\yyyyMMdd.sql` 能恢复到新库并查到数据；手机同 WiFi 打开 `http://电脑IP/` 可用；`netstat` 显示后端只监听 `127.0.0.1:8080`
+- **云端（W4 周末）**：手机 4G 打开 `https://` 地址能登录、能记一笔；`docker compose ps` 三个容器 healthy；限流生效（连错 6 次被拒）；取证材料七项齐全
+- **安全/运维（第 4–5 周）**：`--reset-password` 执行后**新密码能登录、旧密码返回 401**；`docker compose down && up` 后数据仍在（卷挂载正确）；备份恢复演练过一次
+- **联调（每模块一次，§6.2）**：逐条核对 §5.0 五项——分页是 `{total, list}`、金额是字符串、日期是 `yyyy-MM-dd`、401 清 token 跳登录、列表直接带名称
 
 ## 8. 避坑清单
 
@@ -373,12 +424,9 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 6. 逻辑删除：MyBatis-Plus 全局配置默认拼 `deleted=0`，但**手写 `@Select` 的 SQL 不会自动拼**，统计 SQL 要自己加
 7. 日期统一 `yyyy-MM-dd` 传参，统计按 `DATE_FORMAT(trans_date,'%Y-%m')=#{month}` 比较，避免时区坑
 8. 跨域：开发用 Vite 代理（`/api` → `http://localhost:8080`）、生产用 nginx 反向代理，前后端同源，**无需 `CorsConfig`**；Jackson 日期格式按需配 `JacksonConfig`（`spring.jackson.date-format` 只对 `java.util.Date` 生效，LocalDate/LocalDateTime 需单独配）
-9. 删除账本 / 分类注意数据联动（逻辑删除其下流水）
-10. 统计接口结果补零，前端图表才不断层
-11. 阿里云 OSS SDK 在 JDK17 下需额外引 `jaxb-api` / `jaxb-runtime` / `activation`，否则运行时抛 `ClassNotFoundException: javax.xml.bind.JAXBException`
-12. OSS 的 AK/SK、bucket、endpoint 等敏感配置走环境变量（与数据库密码同理），禁止写进 `application.yml` 提交
-13. 头像上传需限制文件类型（jpg/png/webp）与大小（如 ≤2MB），并用唯一对象名（如 `avatar/{userId}/{UUID}.{ext}`）避免覆盖
-14. `LogAspect` 会对参数做 JSON 序列化，`MultipartFile` 参数会序列化失败或产生巨大日志，需在上传接口的日志处理中对 `MultipartFile` 跳过序列化
+9. 删除分类前先查有没有流水引用（有则 400 提示「该分类下已有 N 笔流水」），不要级联删流水——账目不能因为删一个分类就凭空少掉
+10. 统计接口结果补零（本项目的 summary/category 按月过滤，暂不涉及补零；将来加趋势图时务必补零，否则前端图表会断层）
+11–14. ~~OSS / 头像上传~~：头像功能已砍（§2.4），这四条暂不适用。若将来要加：JDK17 需额外引 `jaxb-api`/`jaxb-runtime`/`activation`；AK/SK 走环境变量；限制类型与大小；`LogAspect` 需跳过 `MultipartFile` 序列化
 15. 注册接口**非幂等**：用户连点两次 → 第一笔成功、第二笔 400 `用户名已存在`。前端必须按钮单飞（`submitting` 标志 + `finally` 复位，**不能**只靠 debounce，debounce 只是把重复请求延后发出），且收到 `用户名已存在` 时引导「去登录」而不是报「注册失败」——那多半是自己上一次点击已经成功。后端不做「同名同密码视为成功」的伪幂等
 16. 金额与日期的序列化必须在联调前定死：`BigDecimal` 按**字符串**返回（JS 双精度会让 `0.1+0.2` 出错）、`LocalDate` 统一 `yyyy-MM-dd`（`spring.jackson.date-format` 只对 `java.util.Date` 生效）；这两条漏了要等前端一联调才暴露（见 §5.0）
 17. 契约漂移是前后端返工的第一大来源：分页字段名、金额类型、日期格式、错误码语义、列表是否带名称——五项定死后再写第一个页面，并把 §5.0 直接喂给 AI，别让它猜字段
@@ -390,16 +438,41 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 20. 前端 `src/types/api.ts` 是后端 DTO 的**镜像**：改 DTO（加字段、改类型、改 nullable）必须同步改它，
     否则 TS 会把旧字段当成正确契约一路编过，运行时才拿到 `undefined`。反过来也成立——页面报
     `Property 'xxx' does not exist` 时，先怀疑两边字段名不一致（大小写也算）
+21. **Nginx 反代后 `request.getRemoteAddr()` 永远是 `127.0.0.1`**：按 IP 做的限流会变成「全站共用一个 IP」，
+    谁都能把别人锁死。必须两头配：Nginx `proxy_set_header X-Real-IP $remote_addr` +
+    后端优先读 `X-Real-IP`（回落 `getRemoteAddr()`）。同理日志里的真实客户端 IP 也依赖这个头
+22. **SPA 放在 Nginx / 静态目录必须处理刷新 404**：前端用 `createWebHistory()` 时，直接访问 `/login`
+    会变成找静态文件 → 404。Nginx 加 `try_files $uri $uri/ /index.html`；单体 jar 方案则改用 hash 路由
+23. **MySQL 必须 8.0+**：schema 用了 `utf8mb4_0900_as_cs`（5.7 没有）和生成列唯一索引
+    `uk_user_username_active`。安装/部署脚本要检查版本，否则建表直接失败
+24. **`--reset-password` 不能做成 HTTP 接口**：那等于给公网开一个「无密码改任意账号」的后门。
+    正确做法是 `ApplicationRunner` 里判断启动参数，命中后更新密码并 `System.exit(0)`，不启 Web 容器
+25. **服务器试用期是稀缺资源**：功能没做完就先别申请，否则期限在写代码时被烧掉。
+    顺序固定为「本地全做完 → 申请试用 → 一次完成上云 + 取证（截图/录屏/备份演练）」
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
-1. **无限流**：注册 / 登录都没有失败计数、验证码或 IP 限流，可被脚本批量注册和撞库。
+1. **无限流**（**公网部署的前置条件**）：注册 / 登录都没有失败计数、验证码或 IP 限流，可被脚本批量注册和撞库；
+   BCrypt 每次校验约 60–100 ms，几十个并发登录就能打满 1 核小机器的 CPU。
    登录侧「用户不存在与密码错误同一提示」只防枚举，不防暴力尝试。
-   计划：P4 用 Redis（或 Caffeine）按 `IP + username` 计失败次数，5 次 / 5 分钟；
-   生产环境再叠一层 nginx `limit_req`。在此之前不要对公网开放。
+   计划（W4 上线前必须完成）：内存版 Caffeine，**按 `IP + username` 计失败次数，5 次 / 5 分钟**，
+   成功登录后清零；再补一条**单 IP 每分钟 30 次**的粗粒度限制（防用户名喷洒）。
+   Nginx 必须透传 `X-Real-IP`（见 §8 第 21 条），否则按 IP 限流形同虚设。
+   **本地 / 局域网使用不需要限流**（外网访问不到）。
 2. **邮箱纯装饰**：`user.email` 无唯一索引、不发验证邮件，同一邮箱可注册任意多个账号，
    也不支持邮箱找回密码。当前定位是「资料展示字段」，前端不得展示「已验证」字样。
-   若 P4 改为一邮箱一账号，需先清理存量重复邮箱，否则唯一索引加不上。
-3. **无密码找回**：忘记密码即废号（无手机号、无邮箱验证、无安全问题）。
+3. **无自助找回密码**：不做邮箱/手机验证（P1 没有邮件通道，且单机版的用户就是机器主人）。定位分两种：
+   - **单机版**：用本机命令重置 —— `java -jar bookkeep.jar --reset-password=<username> <newPassword>`
+     （能在这台机器上执行命令本身就是身份证明，不需要验证旧密码；**不要**做成 HTTP 接口，见 §8 第 24 条）
+   - **公网版**（将来若开放注册）：才需要邮箱验证，按「发信通道 + 一次性 token + 有效期」实现，并补失败限流
+   - 功能未落地前忘记密码只能手工 `UPDATE user SET password=<BCrypt 哈希>`；
+     **密码忘了不代表数据丢**——数据在 MySQL 里，随时可重置
 4. **注册非幂等**：重复提交由前端「单飞」控制 + 数据库唯一索引兜底（见 §8 第 15 条），
    后端不提供幂等键。
+5. **没有长期在线部署**：本项目按「本地为主 + 按需上云」设计（§1），日常记账在本地，
+   云端只在**试用期 / 面试期**开启。原因：长期租用轻量服务器约 100–200 元/学期，本人不接受。
+   代价：出门在外不能即时记账，靠事后补录（`transDate` 是业务日期，统计不受影响）；
+   简历上写「按需部署于轻量应用服务器」，不承诺 7×24 在线。
+   如果哪天需要零成本长期在线，备选是「常开电脑 + Cloudflare Tunnel」，但可靠性取决于那台机器与网络。
+6. **公示页 token 不可重置**（§5.9）：token 泄露后没有界面能换掉它。当前风险可接受（只读、无个人信息、
+   单机场景）；对外分享前若担心，可手工 `UPDATE book SET share_token = <新随机串> WHERE id = ?`。

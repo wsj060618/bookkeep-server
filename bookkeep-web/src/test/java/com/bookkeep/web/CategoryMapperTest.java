@@ -1,8 +1,8 @@
 package com.bookkeep.web;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.bookkeep.service.constant.CategoryTemplate;
 import com.bookkeep.model.entity.Category;
+import com.bookkeep.service.constant.CategoryTemplate;
 import com.bookkeep.service.mapper.CategoryMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,6 +22,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Transactional // 默认回滚
 class CategoryMapperTest {
 
+    /** 同上：避开开发库里真实存在的 book_id，防止按 book_id 统计时命中别人的数据 */
+    private static final Long TEST_BOOK_ID = 999_999L;
+
     @Autowired
     private CategoryMapper categoryMapper;
 
@@ -29,11 +32,10 @@ class CategoryMapperTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("模板分类能整体落库，字段映射（sort_order/type）正确")
+    @DisplayName("班级模板分类能整体落库，字段映射（sort_order/type）正确")
     void insertFromTemplate() {
-        Long bookId = 1L;
-        List<CategoryTemplate.Seed> seeds = CategoryTemplate.of(CategoryTemplate.BOOK_PERSONAL);
-        assertEquals(12, seeds.size());
+        List<CategoryTemplate.Seed> seeds = CategoryTemplate.classCategories();
+        assertEquals(13, seeds.size());
 
         // 图标/颜色存的是语义 key（前端映射），不是 emoji 或 hex
         for (CategoryTemplate.Seed seed : seeds) {
@@ -43,7 +45,7 @@ class CategoryMapperTest {
 
         for (CategoryTemplate.Seed seed : seeds) {
             Category category = new Category();
-            category.setBookId(bookId);
+            category.setBookId(TEST_BOOK_ID);
             category.setName(seed.name());
             category.setType(seed.type());
             category.setIcon(seed.icon());
@@ -55,7 +57,7 @@ class CategoryMapperTest {
 
         CategoryTemplate.Seed first = seeds.get(0);
         Category found = categoryMapper.selectOne(
-                Wrappers.<Category>query().eq("book_id", bookId).eq("name", first.name())
+                Wrappers.<Category>query().eq("book_id", TEST_BOOK_ID).eq("name", first.name())
                         .eq("type", first.type()));
         assertNotNull(found);
         assertEquals(first.sortOrder(), found.getSortOrder());
@@ -69,12 +71,11 @@ class CategoryMapperTest {
     }
 
     @Test
-    @DisplayName("按 type 筛选，income / expense 各自条数正确")
+    @DisplayName("按 type 筛选，income / expense 各自条数正确（8 支出 + 5 收入）")
     void filterByType() {
-        Long bookId = 1L;
-        for (CategoryTemplate.Seed seed : CategoryTemplate.of(CategoryTemplate.BOOK_MERCHANT)) {
+        for (CategoryTemplate.Seed seed : CategoryTemplate.classCategories()) {
             Category category = new Category();
-            category.setBookId(bookId);
+            category.setBookId(TEST_BOOK_ID);
             category.setName(seed.name());
             category.setType(seed.type());
             category.setIcon(seed.icon());
@@ -84,19 +85,19 @@ class CategoryMapperTest {
         }
 
         long expenses = categoryMapper.selectCount(
-                Wrappers.<Category>query().eq("book_id", bookId).eq("type", CategoryTemplate.TYPE_EXPENSE));
+                Wrappers.<Category>query().eq("book_id", TEST_BOOK_ID).eq("type", CategoryTemplate.TYPE_EXPENSE));
         long incomes = categoryMapper.selectCount(
-                Wrappers.<Category>query().eq("book_id", bookId).eq("type", CategoryTemplate.TYPE_INCOME));
+                Wrappers.<Category>query().eq("book_id", TEST_BOOK_ID).eq("type", CategoryTemplate.TYPE_INCOME));
 
-        assertEquals(9, expenses);
-        assertEquals(3, incomes);
+        assertEquals(8, expenses);
+        assertEquals(5, incomes);
     }
 
     @Test
     @DisplayName("逻辑删除后查不到")
     void logicDelete() {
         Category category = new Category();
-        category.setBookId(1L);
+        category.setBookId(TEST_BOOK_ID);
         category.setName("临时分类_" + System.currentTimeMillis());
         category.setType(CategoryTemplate.TYPE_EXPENSE);
         category.setSortOrder(99);

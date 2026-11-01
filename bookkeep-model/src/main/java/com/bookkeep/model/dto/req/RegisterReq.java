@@ -7,16 +7,16 @@ import jakarta.validation.constraints.Size;
 
 /**
  * 注册请求体（POST /api/auth/register）
- * <p>注册即建账本：{@code bookName} + {@code bookType} 决定第一本账本的名字与预置分类模板。
+ * <p>注册即建账本：这个项目只有一种账本（班级账本，{@code book.type = class}），
+ * 所以请求里<strong>没有</strong> bookType 字段；分类模板由后端按 class 固定选取。
  * <p>用 record 承载，校验注解直接标在组件上；校验失败由 {@code GlobalExceptionHandler}
  * 统一转成 {@code {code:400, message:"字段: 提示"}}。
  *
- * @param username 登录名，唯一，4–20 位字母/数字/下划线
+ * @param username 登录名，唯一，4–20 位字母/数字/下划线（区分大小写）
  * @param password 明文密码，6–32 位，落库前由 BCrypt 加密
  * @param nickname 昵称，可空；为空时默认取用户名
- * @param email    邮箱，可空
- * @param bookName 第一本账本名，非空且 ≤50 字符
- * @param bookType 账本类型，只能是 personal / merchant（见 service 模块的 {@code CategoryTemplate}）
+ * @param email    邮箱，可空（仅展示用，不发验证邮件，见 PLAN §9）
+ * @param bookName 账本名，可空；为空时默认「班级账本」
  */
 //public record RegisterReq(String username, String password, ...) { }
 //等价于：
@@ -55,11 +55,7 @@ public record RegisterReq(
         @Size(max = 100, message = "邮箱不能超过 100 个字符")
         String email,
 
-        @NotBlank(message = "账本名不能为空")
         @Size(max = 50, message = "账本名不能超过 50 个字符")
-        String bookName,
-
-        @NotBlank(message = "账本类型不能为空")
-        String bookType
+        String bookName
 ) {
 }
