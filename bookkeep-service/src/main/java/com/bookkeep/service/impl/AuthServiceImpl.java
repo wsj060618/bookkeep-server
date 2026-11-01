@@ -1,7 +1,6 @@
 package com.bookkeep.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.baomidou.mybatisplus.extension.toolkit.Db;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.common.util.JwtUtil;
@@ -17,6 +16,7 @@ import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.Category;
 import com.bookkeep.model.entity.User;
 import com.bookkeep.service.mapper.BookMapper;
+import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +42,7 @@ public class AuthServiceImpl implements AuthService {
 
     private final UserMapper userMapper;
     private final BookMapper bookMapper;
+    private final CategoryMapper categoryMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
 
@@ -90,12 +91,16 @@ public class AuthServiceImpl implements AuthService {
         book.setShareToken(UUID.randomUUID().toString().replace("-", ""));
         bookMapper.insert(book);
 
-        // 3) 预置分类模板：Db.saveBatch 内部走 JDBC batch，且用 Spring 管理的 SqlSessionFactory，
-        //    所以与上面两次 insert 属于同一个事务，一起提交 / 一起回滚
+        // 3) 预置分类模板：逐条 insert，和用户/账本共用同一个 SqlSession 与事务。
+        //    这里**不用** MyBatis-Plus 的 Db.saveBatch：它是静态工具，自己取 Session，
+        //    在「外层已有事务」的场景下写入不一定挂在当前事务上——测试里就表现为
+        //    「日志显示插了 13 条，同一事务却查不到」（MySQL 默认 REPEATABLE READ，
+        //    事务快照在第一次读时已固定，另一个连接后提交的行对它是不可见的）。
+        //    13 条固定数据，逐条 insert 的性能代价可以忽略，换来事务语义确定、代码更好读。
         List<Category> categories = seeds.stream()
                 .map(seed -> toCategory(book.getId(), seed))
                 .toList();
-        Db.saveBatch(categories);
+        categories.forEach(categoryMapper::insert);
 
         // 4) 回写当前账本：只更新 current_book_id 一列，
         //    不用 updateById（那会把密码哈希、用户名等字段再写一遍，白白多冒一次覆盖风险）

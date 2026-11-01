@@ -1,0 +1,96 @@
+### P2 流水接口 · 手工验收脚本
+### 前置：auth.http 的 1、2（拿 token），category.http 的 1（拿分类 id）
+### 关键约定：金额一律字符串（"620.00"）；日期 yyyy-MM-dd；分页 page 从 1 开始
+
+@host = http://localhost:8080
+### 换成「收取班费」的 id
+@feeCategoryId = 9
+### 换成「聚餐」的 id
+@diningCategoryId = 3
+
+### 1. 记一笔收入（班费收取 1900 元）
+POST {{host}}/api/transactions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "categoryId": {{feeCategoryId}},
+  "type": "income",
+  "amount": "1900.00",
+  "transDate": "2026-09-05",
+  "note": "全班 38 人 × 50"
+}
+
+### 2. 记一笔支出（聚餐 620 元）
+POST {{host}}/api/transactions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "categoryId": {{diningCategoryId}},
+  "type": "expense",
+  "amount": "620.00",
+  "transDate": "2026-11-08",
+  "note": "中秋聚餐补差"
+}
+
+### 3. 分页列表（默认 page=1&size=10，日期倒序；每条带 categoryName/categoryIcon/categoryColor）
+GET {{host}}/api/transactions
+Authorization: Bearer {{token}}
+
+### 4. 只看本月支出
+GET {{host}}/api/transactions?type=expense&startDate=2026-11-01&endDate=2026-11-30
+Authorization: Bearer {{token}}
+
+### 5. 关键字搜索
+GET {{host}}/api/transactions?keyword=聚餐
+Authorization: Bearer {{token}}
+
+### 6. 当前余额（Σ收入 − Σ支出，字符串；此时应为 "1280.00"）
+GET {{host}}/api/transactions/balance
+Authorization: Bearer {{token}}
+
+### 7. 余额校验：支出超过余额（预期 code=400「班费余额不足，当前余额 ...」）
+POST {{host}}/api/transactions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "categoryId": {{diningCategoryId}},
+  "type": "expense",
+  "amount": "99999.00",
+  "transDate": "2026-11-09"
+}
+
+### 8. 类型与分类不一致（预期 400「流水类型与所选分类不一致」）
+POST {{host}}/api/transactions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "categoryId": {{diningCategoryId}},
+  "type": "income",
+  "amount": "10.00",
+  "transDate": "2026-11-09"
+}
+
+### 9. 修改流水（{id} 换成返回的 id；改大超余额会 400）
+PUT {{host}}/api/transactions/{id}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "categoryId": {{diningCategoryId}},
+  "type": "expense",
+  "amount": "600.00",
+  "transDate": "2026-11-08",
+  "note": "中秋聚餐补差（修正）"
+}
+
+### 10. 删除流水（逻辑删除，余额随之恢复）
+DELETE {{host}}/api/transactions/{id}
+Authorization: Bearer {{token}}
+
+### 11. 分页越界（预期 400）
+GET {{host}}/api/transactions?page=0
+Authorization: Bearer {{token}}

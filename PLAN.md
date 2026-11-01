@@ -449,6 +449,11 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
     正确做法是 `ApplicationRunner` 里判断启动参数，命中后更新密码并 `System.exit(0)`，不启 Web 容器
 25. **服务器试用期是稀缺资源**：功能没做完就先别申请，否则期限在写代码时被烧掉。
     顺序固定为「本地全做完 → 申请试用 → 一次完成上云 + 取证（截图/录屏/备份演练）」
+26. **别在事务方法里用 MyBatis-Plus 的静态 `Db.saveBatch(...)`**：它自己取 `SqlSession`，
+    外层 `@Transactional` + MySQL `REPEATABLE READ` 时，写入可能落在调用方事务快照之外。
+    症状极具误导性：SQL 日志显示 13 条 insert 都执行了，同一事务里查却是 0 行
+    （P2 的 13 个接口测试全挂在这里）。固定 13 条模板分类直接逐条 `mapper.insert()` 即可；
+    真要批量导入，用 Spring 托管服务上的 `IService.saveBatch`，永远别用静态 `Db` 工具
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 

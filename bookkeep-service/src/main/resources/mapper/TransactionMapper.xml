@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  流水的手写 SQL。
+
+  为什么这些 SQL 不放注解：
+    - 注解里写动态 SQL 要用 <script> 包裹，`<>` 还得转义成 `&lt;&gt;`，IDE 不认、难读
+    - 后面 W2 要写的「逐行结余」（SUM(...) OVER (ORDER BY ...)）、分类占比、导出筛选会越来越复杂
+  放在 XML 里以后：标签原生可用、IDEA 能识别 SQL、连上数据源还能补全列名。
+
+  三个必须遵守的约定：
+    1) namespace 必须与 Mapper 接口全限定名完全一致
+    2) <select> 的 id 必须与接口方法名一致
+    3) 手写 SQL 必须自己写 `deleted = 0` —— MyBatis-Plus 的逻辑删除只管它自己生成的 SQL，
+       漏了就会把已删除的流水算进余额（PLAN §8 第 6 条）
+
+  为什么拆成 sumBalance / sumBalanceExcluding 两条而不用 <if>：
+    一条 SQL 带「可选排除条件」需要在 <if test="..."> 里写 OGNL，
+    MyBatisX 对「多参数 + 动态标签」的解析经常失灵（会误报 Cannot resolve symbol），
+    而且空参数在那里只能传 null。拆成两条：参数一一对应、IDE 不报错、调用方意图也更清楚。
+-->
+<mapper namespace="com.bookkeep.service.mapper.TransactionMapper">
+
+    <!--
+      当前账本余额 = Σ收入 − Σ支出（只算未删除行）。
+      COALESCE：空账本时 SUM 返回 NULL，不兜底会变成 NPE。
+    -->
+    <select id="sumBalance" resultType="java.math.BigDecimal">
+        SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0)
+        FROM `transaction`
+        WHERE book_id = #{bookId}
+          AND deleted = 0
+    </select>
+
+    <!--
+      同上，但先排除某一条流水：修改流水时用。
+      例：原来支出 100、余额 200，要改成 210 —— 若把这条也计入余额（200），会被误判超支；
+      排除后余额是 300，判断才正确。
+    -->
+    <select id="sumBalanceExcluding" resultType="java.math.BigDecimal">
+        SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0)
+        FROM `transaction`
+        WHERE book_id = #{bookId}
+          AND deleted = 0
+          AND id != #{excludeId}
+    </select>
+
+    <!-- 某个分类下还有多少笔未删除的流水（删除分类前的引用检查） -->
+    <select id="countByCategoryId" resultType="long">
+        SELECT COUNT(*)
+        FROM `transaction`
+        WHERE category_id = #{categoryId}
+          AND deleted = 0
+    </select>
+
+</mapper>

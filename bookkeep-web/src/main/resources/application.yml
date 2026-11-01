@@ -14,6 +14,10 @@ spring:
     time-zone: GMT+8
 
 mybatis-plus:
+  # 手写 SQL 放 XML：默认值就是 classpath*:/mapper/**/*.xml，这里显式写出来，
+  # 一是不靠默认值（别人接手不用猜），二是换目录时不会出现「启动正常但 Invalid bound statement」。
+  # 注意必须是 classpath*:（带星），service 模块是独立 jar，不带星可能只扫到第一个匹配。
+  mapper-locations: classpath*:/mapper/**/*.xml
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl

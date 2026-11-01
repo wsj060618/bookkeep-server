@@ -1,0 +1,54 @@
+### P2 分类接口 · 手工验收脚本（IDEA Ultimate HTTP Client / VS Code REST Client / Apifox 均可）
+### 用法：先跑 auth.http 的 1、2 拿到 token，再按顺序点这里的请求。
+### 注意：Class 分类接口全部需要 token；账本由后端从 token 推导，前端不传 bookId。
+
+@host = http://localhost:8080
+@token = {{token}}
+
+### 1. 全部分类（注册后应为 13 条：8 支出 + 5 收入，按 sort_order 升序）
+GET {{host}}/api/categories
+Authorization: Bearer {{token}}
+
+### 2. 只看支出（8 条）
+GET {{host}}/api/categories?type=expense
+Authorization: Bearer {{token}}
+
+### 3. 只看收入（5 条，第一条是「收取班费」）
+GET {{host}}/api/categories?type=income
+Authorization: Bearer {{token}}
+
+### 4. 新增分类（排在最后；icon/color 不传默认 other/gray）
+POST {{host}}/api/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "班服",
+  "type": "expense",
+  "icon": "shirt",
+  "color": "blue"
+}
+
+### 5. 修改分类名（type 必须与库里一致，改了会 400）
+### 把 {id} 换成第 4 步返回的 id
+PUT {{host}}/api/categories/{id}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "班服定制",
+  "type": "expense",
+  "icon": "shirt",
+  "color": "blue"
+}
+
+### 6. 删除分类（若该分类下有流水 → 400 并提示条数，这是预期行为）
+DELETE {{host}}/api/categories/{id}
+Authorization: Bearer {{token}}
+
+### 7. 非法 type（预期：HTTP 200 + code=400）
+GET {{host}}/api/categories?type=bogus
+Authorization: Bearer {{token}}
+
+### 8. 不带 token（预期：真实 HTTP 401 + {"code":401,...}）
+GET {{host}}/api/categories
