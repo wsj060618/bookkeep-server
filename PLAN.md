@@ -4,6 +4,9 @@
 
 - 后端位置：`D:\coding\bookkeep-server`（本人开发）
 - 前端位置：`D:\coding\bookkeep-web`（**由 AI 编写**，本人负责契约定义与联调验收；严格按本计划书接口契约，硬约定见 §5.0，配合节奏见 §6.1）
+  - 技术栈（第 7 天定）：Vue 3 + **TypeScript** + Vite + Element Plus + Pinia + vue-router + axios
+  - 选 TS 的理由：接口字段写错在 `npm run build`（`vue-tsc`）就报错，而不是等联调；代价是本人要先过一遍 TS 基本概念（`bookkeep-web/README.md` 有速查）
+  - 独立 git 仓库；`src/types/api.ts` 是后端 DTO 的镜像，**后端改 DTO 必须先改它**
 - 技术栈：
   - Spring Boot 3.3.x + JDK 17 + Maven
   - MyBatis-Plus（`mybatis-plus-spring-boot3-starter`）+ MySQL 8
@@ -320,7 +323,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 
 | 阶段 | 后端 | 前端（AI 写，本人验收） | 联调验收标准 |
 |---|---|---|---|
-| 第 0 步（现在就能做） | P1 收尾（403） | **只做登录页** | 登录 → 存 token → 请求 `/api/auth/me` → 页面显示昵称 |
+| 第 0 步（✅ 代码已完成，待真人跑一遍验收） | P1 收尾（403） | **只做登录页** | 登录 → 存 token → 请求 `/api/auth/me` → 页面显示昵称 |
 | 1 | P2 分类 + 流水 | 流水列表 + 记一笔 | 记一笔后列表出现该条；切账本数据跟着换 |
 | 2 | P3 统计 | 统计图表 | 空月份显示 0，趋势不断层 |
 | 3 | P4 账本 + 预算 | 账本切换 + 预算页 | 删掉当前账本后列表不崩、自动切到剩余账本 |
@@ -329,6 +332,8 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 配套要求：
 
 - 前端脚手架**第一天就建起来**（Vite + 代理 `/api` → `http://localhost:8080`，见 §8 第 8 条），但只放登录页，其余页面随模块生长——先把 proxy / token 存储 / 401 跳转这三条基建验证掉，成本约半天
+  - 第 7 天已建好：`D:\coding\bookkeep-web`（`npm run dev` → http://localhost:5173）。已落地的三条基建：`vite.config.ts` 的 `/api` 代理、`utils/token.ts` + `stores/auth.ts` 的 token 持久化、`api/request.ts` 里 `code`/`status` 双分支的 401 处理
+  - 验收步骤写在 `bookkeep-web/README.md`（7 条可观察行为，含「刷新后昵称还在」和「乱码 token 被弹回登录页」）
 - 每个模块的后端完成后，先用 `.http` 文件（IDEA 内置 HTTP Client）把请求跑通并**留在仓库里**，作为联调基准与将来面试的素材
 - 不要让 AI「一次性生成 10 个页面」：先只留 `login` 一个接口 + 一个页面把整条链路打通，再复制这个模式扩页面
 - 前端 AI 的产出按**可观察行为**验收（连点注册只发一次请求、切账本列表刷新、空数据显示 0），而不是「页面能打开」
@@ -382,6 +387,9 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
     `AccessDeniedException`（`@PreAuthorize` 拒绝时抛的就是它），把 403 变成 `200 + code=500`，
     而且**不会**再走到过滤器链的 `AccessDeniedHandler`。必须显式声明
     `@ExceptionHandler(AccessDeniedException.class)` 并委托同一个 403 处理器（见 §5 策略）
+20. 前端 `src/types/api.ts` 是后端 DTO 的**镜像**：改 DTO（加字段、改类型、改 nullable）必须同步改它，
+    否则 TS 会把旧字段当成正确契约一路编过，运行时才拿到 `undefined`。反过来也成立——页面报
+    `Property 'xxx' does not exist` 时，先怀疑两边字段名不一致（大小写也算）
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
