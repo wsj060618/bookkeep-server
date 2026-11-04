@@ -18,7 +18,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 /**
  * 安全配置（第 7 天起为正式版）。
- * <p>规则：{@code /api/auth/register}、{@code /api/auth/login} 放行，其余（含 {@code /api/auth/me}）都要 token。
+ * <p>规则：{@code /api/auth/register}、{@code /api/auth/login}、{@code /api/public/report/**} 放行，
+ * 其余（含 {@code /api/auth/me}）都要 token。
  * <p>注意<strong>不能</strong>写成 {@code /api/auth/**}：那会把 {@code /api/auth/me} 也放行，
  * 匿名请求进去后 {@code SecurityUtil.getUserId()} 只能抛 401，等于把「是否登录」的判断散到业务层。
  * <p>过滤器手动 {@code new}：{@link JwtAuthenticationFilter} 不是 Bean，避免 Boot 把它额外注册到 Servlet 容器。
@@ -41,6 +42,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)) // 不建 session
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/register", "/api/auth/login").permitAll() // 登录前唯一可访问的两个接口
+                        // 公示页：同学看账不需要账号，这是公网唯一放行的只读入口（PLAN §5.9）
+                        .requestMatchers("/api/public/report/**").permitAll()
                         .requestMatchers("/error").permitAll() // 容器错误转发也是过滤器链的一环，放行避免 401 盖掉真实错误
                         .anyRequest().authenticated()) // 其余全部需要认证
                 .exceptionHandling(ex -> ex

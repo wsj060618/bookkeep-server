@@ -6,8 +6,13 @@ import com.bookkeep.model.dto.req.TransactionQuery;
 import com.bookkeep.model.dto.req.TransactionReq;
 import com.bookkeep.model.dto.resp.TransactionResp;
 import com.bookkeep.service.TransactionService;
+import com.bookkeep.service.export.TransactionExportService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,9 +21,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 
 /**
  * 流水接口（按当前账本）。
@@ -33,6 +41,7 @@ import java.math.BigDecimal;
 public class TransactionController {
 
     private final TransactionService transactionService;
+    private final TransactionExportService transactionExportService;
 
     /**
      * 分页查询。
@@ -63,5 +72,26 @@ public class TransactionController {
     public Result<Void> delete(@PathVariable Long id) {
         transactionService.delete(id);
         return Result.success();
+    }
+
+    /**
+     * 导出班费收支表（CSV，UTF-8 BOM，含逐行结余）。
+     * <p>成功时返回文件流而不是 JSON 信封——下载类接口只能这样，前端用 blob 接收。
+     * <p>参数错误（开始晚于结束）仍走业务异常：HTTP 200 + JSON {@code code=400}，由前端统一拦截器提示。
+     */
+    @GetMapping("/export")
+    public ResponseEntity<byte[]> export(@RequestParam(required = false) LocalDate startDate,
+                                         @RequestParam(required = false) LocalDate endDate) {
+        TransactionExportService.CsvFile file = transactionExportService.export(startDate, endDate);
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                // 文件名含中文，必须交给 ContentDisposition 生成 filename*=UTF-8''... 形式，
+                // 手写 header 会在部分浏览器上变成乱码或直接把附件名截断
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment()
+                                .filename(file.filename(), StandardCharsets.UTF_8)
+                                .build()
+                                .toString())
+                .body(file.content());
     }
 }

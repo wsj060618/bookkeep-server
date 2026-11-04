@@ -75,6 +75,8 @@ class AuthLoginTest {
                 .andExpect(jsonPath("$.data.books.length()").value(1))
                 .andExpect(jsonPath("$.data.books[0].name").value("我的账本"))
                 .andExpect(jsonPath("$.data.books[0].type").value("class"))
+                // 公示页链接要靠它拼 /report/{token}，32 位 UUID（去横线），前后端契约的一部分
+                .andExpect(jsonPath("$.data.books[0].shareToken").isString())
                 .andExpect(jsonPath("$.data.books[0].current").value(true))
                 .andReturn();
 

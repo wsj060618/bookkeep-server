@@ -6,19 +6,14 @@
 
   为什么这些 SQL 不放注解：
     - 注解里写动态 SQL 要用 <script> 包裹，`<>` 还得转义成 `&lt;&gt;`，IDE 不认、难读
-    - 后面 W2 要写的「逐行结余」（SUM(...) OVER (ORDER BY ...)）、分类占比、导出筛选会越来越复杂
-  放在 XML 里以后：标签原生可用、IDEA 能识别 SQL、连上数据源还能补全列名。
+    - 「逐行结余」（SUM(...) OVER (ORDER BY ...)）、分类占比、导出筛选都写在这里
+  放在 XML 里：标签原生可用、IDEA 能识别 SQL、连上数据源还能补全列名。
 
   三个必须遵守的约定：
     1) namespace 必须与 Mapper 接口全限定名完全一致
     2) <select> 的 id 必须与接口方法名一致
     3) 手写 SQL 必须自己写 `deleted = 0` —— MyBatis-Plus 的逻辑删除只管它自己生成的 SQL，
        漏了就会把已删除的流水算进余额（PLAN §8 第 6 条）
-
-  为什么拆成 sumBalance / sumBalanceExcluding 两条而不用 <if>：
-    一条 SQL 带「可选排除条件」需要在 <if test="..."> 里写 OGNL，
-    MyBatisX 对「多参数 + 动态标签」的解析经常失灵（会误报 Cannot resolve symbol），
-    而且空参数在那里只能传 null。拆成两条：参数一一对应、IDE 不报错、调用方意图也更清楚。
 -->
 <mapper namespace="com.bookkeep.service.mapper.TransactionMapper">
 
@@ -52,6 +47,113 @@
         FROM `transaction`
         WHERE category_id = #{categoryId}
           AND deleted = 0
+    </select>
+
+    <!-- 截至某天（含）的累计余额：导出时算期初 / 期末结余 -->
+    <select id="sumBalanceUpTo" resultType="java.math.BigDecimal">
+        SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0)
+        FROM `transaction`
+        WHERE book_id = #{bookId}
+          AND deleted = 0
+          AND trans_date &lt;= #{date}
+    </select>
+
+    <!--
+      某月收入 / 支出合计。
+      按月比较用 DATE_FORMAT 而不是给 trans_date 加减一天：后者遇到月份天数不同容易差一天，
+      而 trans_date 是 DATE 类型，格式化后直接和 'yyyy-MM' 字符串比，语义最直白（PLAN §8 第 7 条）。
+    -->
+    <select id="sumMonth" resultType="com.bookkeep.service.mapper.row.MonthSumRow">
+        SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0)  AS income,
+               COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) AS expense
+        FROM `transaction`
+        WHERE book_id = #{bookId}
+          AND deleted = 0
+          AND DATE_FORMAT(trans_date, '%Y-%m') = #{month}
+    </select>
+
+    <!--
+      分类占比的原料（金额降序）。
+      LEFT JOIN + ON 里带 c.deleted = 0：分类被删掉但流水还在时，金额仍要计入合计，
+      名称由 COALESCE 兜成「已删除分类」。若把 c.deleted = 0 写到 WHERE，这些流水会被整段丢掉，
+      分类合计就和总支出对不上了。
+    -->
+    <select id="selectCategoryAmounts" resultType="com.bookkeep.service.mapper.row.CategoryAmountRow">
+        SELECT t.category_id                    AS category_id,
+               COALESCE(c.name, '已删除分类')    AS category_name,
+               COALESCE(c.icon, 'other')        AS category_icon,
+               COALESCE(c.color, 'gray')        AS category_color,
+               SUM(t.amount)                    AS amount
+        FROM `transaction` t
+                 LEFT JOIN category c ON c.id = t.category_id AND c.deleted = 0
+        WHERE t.book_id = #{bookId}
+          AND t.deleted = 0
+          AND t.type = #{type}
+          AND DATE_FORMAT(t.trans_date, '%Y-%m') = #{month}
+        GROUP BY t.category_id, c.name, c.icon, c.color
+        ORDER BY amount DESC, t.category_id
+    </select>
+
+    <!--
+      逐行结余的公共部分（导出与公示页共用）。
+      三个要点：
+        1) 窗口函数在外层 WHERE 之前算完，且不按月份/日期过滤 —— 结余是「全账本累计」，
+           若先按月过滤再累计，每月第一天都会从 0 开始，数字全错（PLAN §5.5.1）
+        2) ORDER BY 里的 id 不能省：同一天多笔时只按日期排序，行的先后不稳定，结余会跳
+        3) 排序方向固定升序：结余只有从上往下读才成立，展示顺序由调用方决定（导出按时间正序）
+    -->
+    <sql id="runningBalanceSource">
+        WITH running AS (SELECT t.id,
+                                t.trans_date,
+                                t.type,
+                                t.amount,
+                                t.note,
+                                COALESCE(c.name, '已删除分类') AS category_name,
+                                COALESCE(c.icon, 'other')     AS category_icon,
+                                COALESCE(c.color, 'gray')     AS category_color,
+                                SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END)
+                                    OVER (ORDER BY t.trans_date, t.id) AS balance_after
+                         FROM `transaction` t
+                                  LEFT JOIN category c ON c.id = t.category_id AND c.deleted = 0
+                         WHERE t.book_id = #{bookId}
+                           AND t.deleted = 0)
+    </sql>
+
+    <!--
+      日期区间 + 逐行结余（导出用）。
+      区间两端可空：用 `#{startDate} IS NULL OR ...` 代替 <if>，一条 SQL 覆盖「不限 / 单边 / 双边」三种情况，
+      不用为多参数场景再写动态标签（MyBatisX 对「多参数 + 动态标签」会误报）。
+    -->
+    <select id="selectRangeWithRunningBalance" resultType="com.bookkeep.service.mapper.row.TransactionBalanceRow">
+        <include refid="runningBalanceSource"/>
+        SELECT trans_date,
+               type,
+               amount,
+               note,
+               category_name,
+               category_icon,
+               category_color,
+               balance_after
+        FROM running
+        WHERE (#{startDate,jdbcType=DATE} IS NULL OR trans_date &gt;= #{startDate,jdbcType=DATE})
+          AND (#{endDate,jdbcType=DATE} IS NULL OR trans_date &lt;= #{endDate,jdbcType=DATE})
+        ORDER BY trans_date ASC, id ASC
+    </select>
+
+    <!-- 某月 + 逐行结余（公示页用） -->
+    <select id="selectMonthWithRunningBalance" resultType="com.bookkeep.service.mapper.row.TransactionBalanceRow">
+        <include refid="runningBalanceSource"/>
+        SELECT trans_date,
+               type,
+               amount,
+               note,
+               category_name,
+               category_icon,
+               category_color,
+               balance_after
+        FROM running
+        WHERE DATE_FORMAT(trans_date, '%Y-%m') = #{month}
+        ORDER BY trans_date ASC, id ASC
     </select>
 
 </mapper>

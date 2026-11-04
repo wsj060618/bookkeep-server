@@ -38,6 +38,21 @@ public final class AuthHelper {
         return prefix + SEQ.incrementAndGet();
     }
 
+    /**
+     * 再登录一次，取公示页 token（{@code books[0].shareToken}）。
+     * <p>单独再登录而不是复用 {@link #registerAndLogin} 的响应：那个方法只回 token，
+     * 每个需要 shareToken 的测试自己解析一遍登录体会把断言写散。
+     */
+    public static String shareToken(MockMvc mockMvc, ObjectMapper objectMapper, String username)
+            throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + username + "\",\"password\":\"" + PASSWORD + "\"}"))
+                .andExpect(jsonPath("$.code").value(200))
+                .andReturn();
+        return json(result, objectMapper).path("data").path("books").get(0).path("shareToken").asText();
+    }
+
     /** 注册 + 登录，返回可直接放进 {@code Authorization} 头的 token。 */
     public static String registerAndLogin(MockMvc mockMvc, ObjectMapper objectMapper, String username)
             throws Exception {

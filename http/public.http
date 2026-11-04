@@ -1,0 +1,22 @@
+### P3 只读公示页 · 手工验收脚本
+### 前置：auth.http 的 1、2 —— 登录响应的 data.books[0].shareToken 就是 {shareToken}
+### 验收要点：这条请求【不带 Authorization】也必须成功；除账本名与金额外不能出现任何个人信息
+
+@host = http://localhost:8080
+### 换成登录响应里的 books[0].shareToken（32 位）
+@shareToken = 0123456789abcdef0123456789abcdef
+
+### 1. 本月公示（不传 month 取当月）
+GET {{host}}/api/public/report/{{shareToken}}
+
+### 2. 指定月份：本月收支 + 分类占比 + 逐行结余
+GET {{host}}/api/public/report/{{shareToken}}?month=2026-09
+
+### 3. 未知 token（预期 code=404「公示页不存在或已失效」）
+GET {{host}}/api/public/report/ffffffffffffffffffffffffffffffff
+
+### 4. 月份格式错误（预期 code=400）
+GET {{host}}/api/public/report/{{shareToken}}?month=2026-9
+
+### 5. 对照：同一个接口前缀之外仍然必须登录（预期真实 401）
+GET {{host}}/api/transactions
