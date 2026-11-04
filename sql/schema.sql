@@ -57,6 +57,7 @@ CREATE TABLE book (
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删',
+  deleted_at  DATETIME NULL COMMENT '进入回收站的时间（deleted=1 时才有值）；满 15 天连同分类/流水彻底删除',
   UNIQUE KEY uk_book_share_token (share_token)
 ) COMMENT='账本表';
 

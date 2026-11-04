@@ -1,12 +1,33 @@
-### 账本接口 · 手工验收脚本（只有重命名，PLAN §5.2）
-### 用法：先跑 auth.http 的 1、2 拿到 token；books[0].id 从登录响应里取。
-### 注意：账本列表没有独立接口，它只随 /api/auth/login 的 books 返回。
+### 账本接口 · 手工验收脚本（增删改查 + 回收站，PLAN §5.2）
+### 用法：先跑 auth.http 的 1、2 拿到 token；bookId 从 GET /api/books 里取（注册后只有一本）。
+### 注意：分类 / 流水 / 统计都只认「当前账本」，切换后要重新看一眼分类列表。
 
 @host = http://localhost:8080
 @token = {{token}}
 @bookId = {{bookId}}
 
-### 1. 重命名当前账本（响应带 shareToken 与 current=true）
+### 1. 我的账本（注册后 1 本，current=true）
+GET {{host}}/api/books
+Authorization: Bearer {{token}}
+
+### 2. 新建账本（自动切为当前，事务内预置 13 条分类）
+POST {{host}}/api/books
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "二班账本"
+}
+
+### 3. 分类跟着当前账本走（新账本应是 13 条，id 与旧账本不同）
+GET {{host}}/api/categories
+Authorization: Bearer {{token}}
+
+### 4. 切换当前账本（把 {id} 换成第 1 步返回的 id，body 为空）
+PUT {{host}}/api/books/{{bookId}}/current
+Authorization: Bearer {{token}}
+
+### 5. 重命名（shareToken 不变，公示链接继续有效）
 PUT {{host}}/api/books/{{bookId}}
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -15,25 +36,19 @@ Content-Type: application/json
   "name": "计科2301班费"
 }
 
-### 2. 再登录一次，确认 books[0].name 已变、shareToken 没变
-POST {{host}}/api/auth/login
-Content-Type: application/json
-
-{
-  "username": "{{username}}",
-  "password": "{{password}}"
-}
-
-### 3. 空名（预期：HTTP 200 + code=400）
-PUT {{host}}/api/books/{{bookId}}
+### 6. 删除 → 进回收站（只剩一本时预期 400「至少保留一本账本」）
+DELETE {{host}}/api/books/{{bookId}}
 Authorization: Bearer {{token}}
-Content-Type: application/json
 
-{
-  "name": "   "
-}
+### 7. 回收站（带 deletedAt / expireAt，到期=删除时间 + 15 天）
+GET {{host}}/api/books/trash
+Authorization: Bearer {{token}}
 
-### 4. 改别人的账本 id（预期：HTTP 200 + code=404「账本不存在」）
+### 8. 从回收站恢复（不自动切为当前）
+PUT {{host}}/api/books/{{bookId}}/restore
+Authorization: Bearer {{token}}
+
+### 9. 改别人的 / 不存在的账本（预期：HTTP 200 + code=404）
 PUT {{host}}/api/books/999999
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -42,10 +57,5 @@ Content-Type: application/json
   "name": "越权改名"
 }
 
-### 5. 不带 token（预期：真实 HTTP 401 + {"code":401,...}）
-PUT {{host}}/api/books/{{bookId}}
-Content-Type: application/json
-
-{
-  "name": "匿名改名"
-}
+### 10. 不带 token（预期：真实 HTTP 401 + {"code":401,...}）
+GET {{host}}/api/books

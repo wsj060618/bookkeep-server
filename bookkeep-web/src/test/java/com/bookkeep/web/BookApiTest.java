@@ -2,6 +2,7 @@ package com.bookkeep.web;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.bookkeep.web.support.AuthHelper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,24 +11,19 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
-import static com.bookkeep.web.support.AuthHelper.PASSWORD;
-import static com.bookkeep.web.support.AuthHelper.json;
 import static com.bookkeep.web.support.AuthHelper.nextUsername;
 import static com.bookkeep.web.support.AuthHelper.registerAndLogin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 账本接口集成测试（PUT /api/books/{id}）。
- * <p>只测重命名：新建 / 删除 / 切换账本按 PLAN §5.2 不做，别在这里「顺手」加。
- * <p>账本列表不单独查——它只随登录响应返回，所以改名后的断言都走再登录一次。
+ * 改名接口的细节测试（PUT /api/books/{id}）；增删查与回收站见 {@link BookManageApiTest}。
+ * <p>这里专门钉住两件事：改名会让下一次登录看到新名字、但 shareToken 不变。
+ * <p>账本只随登录响应返回，所以断言都走再登录一次。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -127,14 +123,6 @@ class BookApiTest {
 
     /** 账本只随登录响应返回，所以每个断言都要再登录一次 */
     private JsonNode loginData(String username) throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"" + PASSWORD + "\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andReturn();
-        JsonNode data = json(result, objectMapper).path("data");
-        assertFalse(data.path("books").isEmpty());
-        return data;
+        return AuthHelper.loginData(mockMvc, objectMapper, username);
     }
 }

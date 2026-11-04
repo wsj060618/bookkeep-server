@@ -37,4 +37,10 @@ public class Book {
 
     @TableLogic
     private Integer deleted;
+
+    /**
+     * 进入回收站的时间（deleted=1 时才有值）。满 15 天由定时任务连同分类、流水彻底删除。
+     * <p>为什么不用 {@code updated_at}：它是 ON UPDATE 自动列的，改名也会动，算不出「删了多久」。
+     */
+    private LocalDateTime deletedAt;
 }

@@ -82,6 +82,18 @@ public final class AuthHelper {
         return token;
     }
 
+    /** 登录并返回整个 data 节点（{token, user, books}），用于取 books 里的 id / name / shareToken */
+    public static JsonNode loginData(MockMvc mockMvc, ObjectMapper objectMapper, String username)
+            throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + username + "\",\"password\":\"" + PASSWORD + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andReturn();
+        return json(result, objectMapper).path("data");
+    }
+
     /** 带上 Bearer token 的 GET，返回解析后的 JSON（按 UTF-8 解码，否则中文提示乱码）。 */
     public static JsonNode getJson(MockMvc mockMvc, ObjectMapper objectMapper, String url, String token)
             throws Exception {
