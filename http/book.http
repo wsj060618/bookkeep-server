@@ -1,0 +1,51 @@
+### 账本接口 · 手工验收脚本（只有重命名，PLAN §5.2）
+### 用法：先跑 auth.http 的 1、2 拿到 token；books[0].id 从登录响应里取。
+### 注意：账本列表没有独立接口，它只随 /api/auth/login 的 books 返回。
+
+@host = http://localhost:8080
+@token = {{token}}
+@bookId = {{bookId}}
+
+### 1. 重命名当前账本（响应带 shareToken 与 current=true）
+PUT {{host}}/api/books/{{bookId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "计科2301班费"
+}
+
+### 2. 再登录一次，确认 books[0].name 已变、shareToken 没变
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "{{username}}",
+  "password": "{{password}}"
+}
+
+### 3. 空名（预期：HTTP 200 + code=400）
+PUT {{host}}/api/books/{{bookId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "   "
+}
+
+### 4. 改别人的账本 id（预期：HTTP 200 + code=404「账本不存在」）
+PUT {{host}}/api/books/999999
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "越权改名"
+}
+
+### 5. 不带 token（预期：真实 HTTP 401 + {"code":401,...}）
+PUT {{host}}/api/books/{{bookId}}
+Content-Type: application/json
+
+{
+  "name": "匿名改名"
+}

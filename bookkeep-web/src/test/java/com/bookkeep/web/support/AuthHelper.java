@@ -28,7 +28,8 @@ public final class AuthHelper {
 
     private static final AtomicLong SEQ = new AtomicLong(System.currentTimeMillis());
 
-    private static final String PASSWORD = "abc123456";
+    /** 所有测试账号统一用这个密码；需要自己发登录请求的测试可以引用 */
+    public static final String PASSWORD = "abc123456";
 
     private AuthHelper() {
     }
