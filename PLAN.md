@@ -244,10 +244,11 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 方法 | 路径 | 说明 | 请求体 / 参数 |
 |---|---|---|---|
 | POST | `/api/auth/register` | 注册并创建班级账本（预置 13 条分类） | `{username, password, nickname?, email?, bookName?}` → 用户信息。**没有 bookType**；`bookName` 为空默认「班级账本」 |
-| POST | `/api/auth/login` | 登录 | `{username, password}` → `{token, user:{id, username, nickname, email, avatar, currentBookId}, books:[{id, name, type, current}]}` |
+| POST | `/api/auth/login` | 登录 | `{username, password}` → `{token, user:{id, username, nickname, email, avatar, currentBookId}, books:[{id, name, type, shareToken, current}]}` |
 | GET | `/api/auth/me` | 当前用户信息（含 currentBookId） | - |
 
 > `books` 是平铺在外层（不是 `user.books`）。虽然当前只有一个账本，字段保留是为了兼容已有前端契约。
+> `shareToken` 是公示页链接 `/report/{token}` 的原料（W2 补进契约），前端拼分享链接只认这个字段，不需要额外接口。
 
 ### 5.2 账本
 
@@ -307,22 +308,35 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 ```
 
 - `ORDER BY trans_date, id` 里的 **id 不能省**，否则同一天多笔顺序不稳定，余额会跳
+- **窗口函数必须在外层过滤之前算**：`WITH running` 里只按 `book_id` 过滤，月份/日期条件写在外层 `WHERE`。
+  先按月过滤再累计，每月第一行都会从 0 开始，数字全错（W2 的 `selectMonthWithRunningBalance` 就是这么写的）
 - **取舍**：普通明细列表**不返回**结余列（只返回金额）；**导出与公示页才带** `balanceAfter`（它们是全量查询，语义清晰）
 - 余额校验：`当前余额 = Σ收入 − Σ支出`，新增/修改**支出**时超过余额 → `400「班费余额不足，当前余额 X」`
-- 统计口径：本月收入/支出/结余；累计结余 = 最后一行 `balance_after`；分类占比按支出 `GROUP BY category_id`
+- 统计口径：本月收入/支出/结余；累计结余 = 全账本 `sumBalance`（不等于本月结余）；分类占比按支出 `GROUP BY category_id`
 
-**导出格式**（换届凭证）：
+**导出格式（W2 落地：单个 CSV，两个区块）**：
 
-- `流水明细` sheet：日期 / 分类 / 摘要 / 收入 / 支出 / 结余，最后一行「合计」
-- `汇总` sheet：按分类合计 + 期初结余 + 期末结余 + 导出时间 + 账本名
-- 硬要求：UTF-8 BOM（否则 Excel 中文乱码）、金额固定两位小数、日期 `yyyy-MM-dd` 文本
+- 抬头区块：账本名 / 导出时间 / 统计区间 / 期间收入 / 期间支出 / **期初结余** / **期末结余**
+- `流水明细` 区块：日期 / 分类 / 摘要 / 收入 / 支出 / 结余，最后一行「合计」
+- `分类合计` 区块：分类 / 类型 / 金额（支出在前，同类内金额降序）
+- 期初结余 = 截至 `startDate − 1 天` 的累计余额，期末结余 = 截至 `endDate` 的累计余额（区间为空时仍自洽）
+- 硬要求：UTF-8 BOM（否则 Excel 中文乱码）、金额固定两位小数、日期 `yyyy-MM-dd` 文本、
+  **备注里的逗号 / 引号 / 换行必须按 CSV 规则加引号并双写引号**，否则一行会被 Excel 挤错列
+- 双 sheet 的真 Excel 属 C 档（引 `easyexcel` 或 `poi-ooxml`），先用 CSV 把主线走完，不阻塞
+- 接口行为：成功返回 `text/csv` + `Content-Disposition: attachment`（中文文件名走 `filename*=UTF-8''`）；
+  参数错误仍是 HTTP 200 + JSON 信封（`code=400`），前端要按「响应类型」分流：blob 才当文件
 
 ### 5.6 统计（按当前账本）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/statistics/summary?month=2026-08` | `{income, expense, balance}`（balance = 该月收支差；累计余额另给 `totalBalance`） |
-| GET | `/api/statistics/category?month=&type=expense` | 分类占比 `[{categoryName, amount, percent}]` |
+| GET | `/api/statistics/summary?month=2026-08` | `{month, income, expense, balance, totalBalance}`（balance = 该月收支差，totalBalance = 全账本累计） |
+| GET | `/api/statistics/category?month=&type=expense` | 分类占比 `[{categoryId, categoryName, categoryIcon, categoryColor, amount, percent}]` |
+
+- `month` 不传取当月（北京时间），格式必须是 `yyyy-MM`，格式错返回 400 而不是空数据（空数据会被误读成「这个月没记账」）
+- `percent` 保留两位小数、四舍五入，**各项相加可能不等于 100.00**（例：三项各 33.33），前端别用它反算金额
+- 分类项带上 `categoryId/icon/color` 是为了饼图图例直接出图标（§5.0 第 5 条），不是允许前端再查分类
+- 统计口径只在 `StatisticCalculator` 实现一次：登录态统计与免登录公示页共用，避免两处数字不一致
 
 月度趋势 / 每日趋势 / 利润 / 成本结构**不做**（图表的边际价值低于部署与导出；需要时再加）。
 
@@ -340,9 +354,16 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 |---|---|---|
 | GET | `/api/public/report/{shareToken}?month=2026-08` | 免登录只读：本月收入/支出/结余 + 分类占比 + 明细（含逐行结余） |
 
-- `book.share_token`：注册时生成 32 位随机串（`UUID` 去横线），写进 `book` 表并加唯一索引
+响应体（W2 定稿）：`{bookName, month, income, expense, balance, totalBalance, categories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter}]}`
+
+- `book.share_token`：注册时生成 32 位随机串（`UUID` 去横线），写进 `book` 表并加唯一索引；
+  **登录响应的 `books[].shareToken`** 就是它（前端拼 `/report/{token}` 唯一来源）
+- 明细按日期**升序**返回：逐行结余只有从上往下读才成立，翻页/倒序展示由前端处理
+- 明细不带 `id`、整页不含 `username`/`email`/`userId`：这个接口匿名可访问，能少暴露一个字段就少一个
+- token 不存在（或账本已注销）→ `code=404「公示页不存在或已失效」`；**绝不能回落到「当前登录用户的账本」**
 - 只读、**不含任何个人信息**（只出账本名与金额），前端页面路径 `/report/{token}`
 - 设计意图：同学看账不需要账号，因此**公网只需暴露这一个只读接口**，登录入口的风险面最小
+- `SecurityConfig` 只放行 `/api/public/report/**`，其余路径（含统计）仍要 token——`PublicReportApiTest` 钉住了这一点
 - 若用户不想公开，可提供一个「重置 token」的开关（P2 之后再说，先不做接口）
 
 ## 6. 开发顺序（第 7 天重排：一个月 / 最多五周做完，本地为主 + 云取证）
@@ -364,7 +385,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 | 周 | 后端 | 前端（AI 写，本人验收） | 周末验收 |
 |---|---|---|---|
 | **W1** | P2 分类 + 流水（book 隔离、分页筛选、余额校验）+ 单测 + `http/*.http` | 记一笔 + 明细列表（移动优先卡片） | `localhost` 能登录、能记一笔、列表能看到；**当天开始记真实班费** |
-| **W2** | `class` 收敛已提前完成；导出（双 sheet、UTF-8 BOM、逐行结余）+ 统计 summary/category + 公示页接口 | 统计卡片 + 导出按钮 + 公示页 | 导出的 Excel 发班群不丢人；公示链接免登录能看 |
+| **W2** | `class` 收敛已提前完成；导出（CSV、UTF-8 BOM、逐行结余）+ 统计 summary/category + 公示页接口 ✅ 代码完成 | 统计卡片 + 导出按钮 + 公示页 | 导出的 CSV 发班群不丢人；公示链接免登录能看 |
 | **W3** | 单机打包：`repackage` fat jar + `deploy/nginx/nginx.conf` + 启停/备份脚本 | 生产构建（`dist` 交给 Nginx，history 路由 + `try_files`） | 双击 `start-all.bat` 能用；重启电脑数据还在；备份能恢复；手机同 WiFi 能开 |
 | **W4** | Dockerfile + compose（本机跑通）→ 试用期上云：HTTPS、密钥外部化、登录限流（含 `X-Real-IP`）、导入真实数据、**备份恢复演练** | 无（前端产物复用） | 手机 4G 打开 `https://` 地址能记一笔；七项取证材料齐全 |
 | **W5** | 缓冲修 bug + 真实数据复盘 | 无 | README / `deploy/README.md` 能让别人 30 分钟复现；简历两行定稿；2 分钟 demo 录屏 |
@@ -403,12 +424,30 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 - **第 7 天 ✅**：`JwtAccessDeniedHandler`（真实 403）+ `GlobalExceptionHandler` 接管 `AccessDeniedException` + 「HTTP 状态码 vs body.code」定稿（§5）+ `SecurityJsonHandlerTest` + `http/auth.http`
 - **第 7 天（范围收敛）✅**：砍掉 personal / merchant，`book.type` 固定 `class`（`DEFAULT 'class'`）+ 13 条班级分类模板 + `book.share_token`（公示页）+ `RegisterReq` 去掉 `bookType`、`bookName` 改可选（默认「班级账本」）+ 相关测试重写 + `sql/migration_book_type_class.sql`
 
+### W2 细化（P3 统计 + 导出 + 公示页，后端已完成）
+
+- `StatisticCalculator`（`service/support`）：**统计口径唯一实现点**，登录态统计与免登录公示页共用；
+  月份参数统一在这里解析（空 → 当月北京时间，格式错 → 400）
+- `GET /api/statistics/summary` + `GET /api/statistics/category`（`StatisticController`）：本月收支/结余 + 累计余额；
+  分类占比两位小数，默认 `type=expense`
+- `GET /api/transactions/export`（`TransactionExportService`）：CSV（UTF-8 BOM）+ 抬头汇总 + 明细逐行结余 +
+  分类合计；期初/期末结余按区间的边界日计算；成功返回文件流，参数错误仍走 JSON 信封
+- `GET /api/public/report/{shareToken}`（`PublicController` + `PublicReportService`）：免登录只读，
+  `SecurityConfig` 只放行这一条路径；账本从 token 反查，查不到 404
+- 契约补充：登录响应 `books[].shareToken`（前端拼分享链接的唯一来源）
+- 测试：`StatisticApiTest`（6 例，含手算口径/越权/参数校验）、`ExportApiTest`（7 例，含 BOM、CSV 转义、
+  区间期初、空账本、越权）、`PublicReportApiTest`（6 例，含免登录、跨月结余、token 边界、不泄露个人信息）；
+  另有不需要数据库的单元测试 `TransactionExportServiceTest`（5 例）与 `StatisticCalculatorTest`（3 例）
+- `http/statistics.http`、`http/public.http` 可重放验收脚本
+
 ## 7. 自查清单
 
 - **P1 ✅**：注册 → 登录 → 带 token 访问 `/api/auth/me` 成功；无 token 返回真实 401 JSON；错参 400；401/403 都是 JSON 信封而不是 HTML 错误页。脚本：`http/auth.http`
 - **P1 收敛 ✅**：注册请求不含 `bookType`；账本 `type='class'`；预置 13 条班级分类（8 支出 + 5 收入）；`bookName` 不填默认「班级账本」
-- **P2（W1 周末）**：能记一笔、列表能看到；按日期/类型/分类/关键字分页筛选正常；A 用户看不到 B 用户数据（逐接口验证）；支出超过余额返回 400
-- **P3 + 导出（W2 周末）**：手算一个月数据，`summary`/`category` 与手算一致；导出的 Excel 用 Excel 打开中文不乱码、金额两位小数、逐行结余正确，最后一行合计与 `summary` 对齐；公示链接免登录能看到本月收支
+- **P2（W1 周末）✅**：能记一笔、列表能看到；按日期/类型/分类/关键字分页筛选正常；A 用户看不到 B 用户数据（逐接口验证）；支出超过余额返回 400
+- **P3 + 导出（W2 后端，代码完成 / 待跑测试与手工验收）**：手算一个月数据，`summary`/`category` 与手算一致；
+  导出的 CSV 用 Excel 打开中文不乱码、金额两位小数、逐行结余正确，合计行与 `summary` 对齐；
+  公示链接免登录能看到本月收支。脚本：`http/statistics.http`、`http/public.http`
 - **本地部署（W3 周末）**：双击 `start-all.bat` 能用；重启电脑后数据还在；`backup\yyyyMMdd.sql` 能恢复到新库并查到数据；手机同 WiFi 打开 `http://电脑IP/` 可用；`netstat` 显示后端只监听 `127.0.0.1:8080`
 - **云端（W4 周末）**：手机 4G 打开 `https://` 地址能登录、能记一笔；`docker compose ps` 三个容器 healthy；限流生效（连错 6 次被拒）；取证材料七项齐全
 - **安全/运维（第 4–5 周）**：`--reset-password` 执行后**新密码能登录、旧密码返回 401**；`docker compose down && up` 后数据仍在（卷挂载正确）；备份恢复演练过一次
@@ -454,6 +493,15 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
     症状极具误导性：SQL 日志显示 13 条 insert 都执行了，同一事务里查却是 0 行
     （P2 的 13 个接口测试全挂在这里）。固定 13 条模板分类直接逐条 `mapper.insert()` 即可；
     真要批量导入，用 Spring 托管服务上的 `IService.saveBatch`，永远别用静态 `Db` 工具
+27. **窗口函数要放在「外层筛选」之前**：`WITH running AS (…全账本…) SELECT … WHERE DATE_FORMAT(...) = #{month}`
+    才对。写成 `WITH running AS (… WHERE 月份…)` 时每月第一行都从 0 开始累计，公示页/导出的结余全错，
+    而且只有跨月数据才暴露（单月测试永远绿）
+28. **CSV 不是「拼逗号」**：备注里出现 `,` `"` 或换行时必须整体加引号、内部引号双写；
+    同时文件头要写 UTF-8 BOM，否则 Excel 打开是乱码。导出的行是「发到班群」的凭证，
+    这两条出错比接口 500 更难被发现
+29. **下载接口不能用统一 JSON 信封**：成功时返回 `text/csv` + `Content-Disposition`，
+    失败（如日期区间颠倒）仍走 `200 + {code:400}`。前端必须按响应类型分流：
+    `responseType: 'blob'` 时才当文件保存，否则会把 JSON 当 CSV 存下来
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
