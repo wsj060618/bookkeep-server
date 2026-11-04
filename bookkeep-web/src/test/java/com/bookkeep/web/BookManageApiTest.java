@@ -53,13 +53,13 @@ class BookManageApiTest {
         String token = registerAndLogin(mockMvc, objectMapper, username);
         long firstBookId = bookId(token, 0);
 
-        // 在旧账本里记一笔，用于验证切换后的隔离
-        long firstCategoryId = categoryId(token, "聚餐");
+        // 在旧账本里记一笔，用于验证切换后的隔离（记收入：空账本不能先记支出，余额会变负）
+        long firstCategoryId = categoryId(token, "收取班费");
         mockMvc.perform(post("/api/transactions")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"categoryId\":" + firstCategoryId + ",\"type\":\"expense\","
-                                + "\"amount\":\"20.00\",\"transDate\":\"2026-11-01\",\"note\":\"旧账本\"}"))
+                        .content("{\"categoryId\":" + firstCategoryId + ",\"type\":\"income\","
+                                + "\"amount\":\"100.00\",\"transDate\":\"2026-11-01\",\"note\":\"旧账本\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
@@ -87,7 +87,6 @@ class BookManageApiTest {
         assertEquals(0, transactions.path("total").asInt());
 
         // 切回第一本：上一笔流水又能看到
-        long secondBookId = books.get(1).path("id").asLong();
         mockMvc.perform(put("/api/books/" + firstBookId + "/current")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
@@ -97,7 +96,6 @@ class BookManageApiTest {
 
         JsonNode back = getJson(mockMvc, objectMapper, "/api/transactions", token).path("data");
         assertEquals(1, back.path("total").asInt());
-        assertEquals(secondBookId, books.get(1).path("id").asLong());
     }
 
     @Test
@@ -219,12 +217,12 @@ class BookManageApiTest {
                 .andExpect(status().isOk());
         long doomedBookId = bookId(token, 1);
 
-        // 先记一笔，确保流水也会被清掉
-        long categoryId = categoryId(token, "聚餐");
+        // 先记一笔，确保流水也会被清掉（收入：新账本余额为 0，支出会被余额校验挡下）
+        long categoryId = categoryId(token, "收取班费");
         mockMvc.perform(post("/api/transactions")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"categoryId\":" + categoryId + ",\"type\":\"expense\","
+                        .content("{\"categoryId\":" + categoryId + ",\"type\":\"income\","
                                 + "\"amount\":\"5.50\",\"transDate\":\"2026-11-02\"}"))
                 .andExpect(jsonPath("$.code").value(200));
 
