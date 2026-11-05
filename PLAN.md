@@ -90,6 +90,7 @@ CREATE TABLE book (
   name        VARCHAR(50) NOT NULL,
   type        VARCHAR(10) NOT NULL DEFAULT 'class',   -- 固定 'class'（班级账本）；列保留以便将来扩展
   share_token VARCHAR(32),                            -- 公示页随机 token（免登录只读，§5.9）
+  share_token_expires_at DATETIME NULL,               -- 公示链接到期时间；NULL/过期 = 链接失效（分享时 +3 天）
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted     TINYINT DEFAULT 0,
@@ -249,11 +250,12 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 方法 | 路径 | 说明 | 请求体 / 参数 |
 |---|---|---|---|
 | POST | `/api/auth/register` | 注册并创建班级账本（预置 13 条分类） | `{username, password, nickname?, email?, bookName?}` → 用户信息。**没有 bookType**；`bookName` 为空默认「班级账本」 |
-| POST | `/api/auth/login` | 登录 | `{username, password}` → `{token, user:{id, username, nickname, email, avatar, currentBookId}, books:[{id, name, type, shareToken, current}]}` |
+| POST | `/api/auth/login` | 登录 | `{username, password}` → `{token, user:{id, username, nickname, email, avatar, currentBookId}, books:[{id, name, type, shareToken, shareTokenExpiresAt, current}]}` |
 | GET | `/api/auth/me` | 当前用户信息（含 currentBookId） | - |
 
 > `books` 是平铺在外层（不是 `user.books`）。虽然当前只有一个账本，字段保留是为了兼容已有前端契约。
-> `shareToken` 是公示页链接 `/report/{token}` 的原料（W2 补进契约），前端拼分享链接只认这个字段，不需要额外接口。
+> `shareToken` / `shareTokenExpiresAt` 是当前公示链接的状态：**从未分享过为 `null`**，链接 3 天有效；
+> 生成/更换链接走 `POST /api/books/{id}/share`（§5.2），前端不要自己拼 `book.id`。
 
 ### 5.2 账本
 
@@ -263,7 +265,8 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 |---|---|---|
 | GET | `/api/books` | 我的账本（不含回收站），带 `current` 标记 |
 | POST | `/api/books` | 新建 `{name}`，事务内预置 13 条分类，并自动切为当前 |
-| PUT | `/api/books/{id}` | 重命名 `{name}`，`shareToken` 不变 |
+| PUT | `/api/books/{id}` | 重命名 `{name}`，已有 `shareToken` 不变 |
+| POST | `/api/books/{id}/share` | 生成 / 重生公示链接 → `{token, expiresAt}`；**每次调用都换新 token** |
 | PUT | `/api/books/{id}/current` | 切换当前账本，返回切换后的完整列表 |
 | DELETE | `/api/books/{id}` | 删除 → 进回收站；**至少保留一本** |
 | GET | `/api/books/trash` | 回收站，带 `deletedAt` / `expireAt` |
@@ -273,6 +276,8 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 
 - **上限 10 本**，超出 400
 - 归属一律按 `book.user_id` 校验，别人的账本 id 一律 404（不暴露 id 是否有效）
+- 公示链接：注册/新建账本**不发** token，必须 `POST /api/books/{id}/share` 显式生成；
+  `expiresAt = now + 3 天`，再分享一次就换新 token、旧链接立即失效（单链接模型，避免一叠永不过期的凭证）
 - 删除写 `deleted=1 + deleted_at`（不能用 MP 的 `deleteById`：它不写 `deleted_at`，回收站就算不出到期日）
 - 删的是当前账本时，`current_book_id` 自动重指到剩下最早的一本
 - 到期清理：`purgeExpired()` 每天 3:30 由 `BookPurgeJob` 执行，**同时**在 `GET /api/books` 里顺手做一遍
@@ -380,15 +385,17 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 响应体（W2 定稿）：`{bookName, month, income, expense, balance, totalBalance, categories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter}]}`
 
-- `book.share_token`：注册时生成 32 位随机串（`UUID` 去横线），写进 `book` 表并加唯一索引；
-  **登录响应的 `books[].shareToken`** 就是它（前端拼 `/report/{token}` 唯一来源）
+- `book.share_token` + `book.share_token_expires_at`：32 位随机串（`UUID` 去横线）+ 到期时间，
+  由 `POST /api/books/{id}/share` 生成，**有效期 3 天**；再分享一次即换新 token，旧链接立即失效
+- 查询条件必须同时带 `share_token = ?` 和 `share_token_expires_at > now()`：过期、从未分享、账本已注销
+  一律 `code=404「公示页不存在或已失效」`，**绝不能回落到「当前登录用户的账本」**
 - 明细按日期**升序**返回：逐行结余只有从上往下读才成立，翻页/倒序展示由前端处理
 - 明细不带 `id`、整页不含 `username`/`email`/`userId`：这个接口匿名可访问，能少暴露一个字段就少一个
-- token 不存在（或账本已注销）→ `code=404「公示页不存在或已失效」`；**绝不能回落到「当前登录用户的账本」**
 - 只读、**不含任何个人信息**（只出账本名与金额），前端页面路径 `/report/{token}`
 - 设计意图：同学看账不需要账号，因此**公网只需暴露这一个只读接口**，登录入口的风险面最小
-- `SecurityConfig` 只放行 `/api/public/report/**`，其余路径（含统计）仍要 token——`PublicReportApiTest` 钉住了这一点
-- 若用户不想公开，可提供一个「重置 token」的开关（P2 之后再说，先不做接口）
+- `SecurityConfig` 只放行 `/api/public/report/**`，其余路径（含统计）仍要 token——`PublicReportApiTest` / `ShareLinkApiTest` 钉住了这一点
+- 为什么是「单链接 + 3 天」而不是「多条并存」：班费公示是短期行为（发一次、看几天），
+  单链接让「我能随时让旧链接失效」成立；要同时发给多个群再评估多链接表
 
 ## 6. 开发顺序（第 7 天重排：一个月 / 最多五周做完，本地为主 + 云取证）
 
@@ -457,10 +464,12 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 - `GET /api/transactions/export`（`TransactionExportService`）：CSV（UTF-8 BOM）+ 抬头汇总 + 明细逐行结余 +
   分类合计；期初/期末结余按区间的边界日计算；成功返回文件流，参数错误仍走 JSON 信封
 - `GET /api/public/report/{shareToken}`（`PublicController` + `PublicReportService`）：免登录只读，
-  `SecurityConfig` 只放行这一条路径；账本从 token 反查，查不到 404
-- 契约补充：登录响应 `books[].shareToken`（前端拼分享链接的唯一来源）
+  `SecurityConfig` 只放行这一条路径；账本从 token 反查，**且必须未过期**，查不到 404
+- 契约补充：`POST /api/books/{id}/share` → `{token, expiresAt}`（3 天有效，每次分享重新生成），
+  登录响应里的 `books[].shareToken` 只是「当前链接」的快照，可能为 null
 - 测试：`StatisticApiTest`（6 例，含手算口径/越权/参数校验）、`ExportApiTest`（7 例，含 BOM、CSV 转义、
-  区间期初、空账本、越权）、`PublicReportApiTest`（6 例，含免登录、跨月结余、token 边界、不泄露个人信息）；
+  区间期初、空账本、越权）、`PublicReportApiTest`（6 例，含免登录、跨月结余、token 边界、不泄露个人信息）、
+  `ShareLinkApiTest`（5 例，含 3 天有效期、再分享旧链接 404、过期 404、越权 404、未登录 401）；
   另有不需要数据库的单元测试 `TransactionExportServiceTest`（5 例）与 `StatisticCalculatorTest`（3 例）
 - `http/statistics.http`、`http/public.http` 可重放验收脚本
 
@@ -552,6 +561,10 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
     `selectById` 比对一次，不一致就按未认证处理。别为了「过滤器零查库」把这段挪到业务层——业务层覆盖不全
     （账本列表、统计、导出都只拿 userId），漏一个接口就等于没做。代价是每个已认证请求多一次主键查询，本项目量级可忽略。
     迁移 `sql/migration_user_token_version.sql` 必须执行，否则所有用户查询报 `Unknown column 'token_version'`
+35. **公示链接的 3 天有效期两端必须用同一个时钟**：写入 `share_token_expires_at` 与查询比较都用
+    `LocalDateTime.now()`（应用时钟）。别一边写 `NOW()` 一边用 Java 时间——容器/DB 时钟差几秒，
+    就会出现「刚生成的链接偶发 404」或「过期链接多活一会儿」。迁移里补老数据用 `DATE_ADD(NOW(), …)`
+    只是一次性补值，不参与运行时判断
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
@@ -581,8 +594,10 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
    代价：出门在外不能即时记账，靠事后补录（`transDate` 是业务日期，统计不受影响）；
    简历上写「按需部署于轻量应用服务器」，不承诺 7×24 在线。
    如果哪天需要零成本长期在线，备选是「常开电脑 + Cloudflare Tunnel」，但可靠性取决于那台机器与网络。
-6. **公示页 token 不可重置**（§5.9）：token 泄露后没有界面能换掉它。当前风险可接受（只读、无个人信息、
-   单机场景）；对外分享前若担心，可手工 `UPDATE book SET share_token = <新随机串> WHERE id = ?`。
+6. **公示链接是「单链接 + 3 天」模型**（§5.9）：同时只有一个有效 token，再分享即让旧链接失效，
+   适合「发一次、看几天」的班费公示；代价是**无法同时给两个群发不同链接**（第二个群会顶掉第一个）。
+   链接泄露时点一次「分享」就能废掉旧的，不用登服务器改库。
+   过期链接仍留在 `book.share_token` 里（只是 `share_token_expires_at` 已过去），不影响唯一索引。
 7. **回收站清理依赖应用在跑**：到期清理靠每天 3:30 的 `@Scheduled`，停机期间不会执行；
    补偿是 `GET /api/books` 时顺手清理一次，所以**长期不打开应用就不会清理**——数据留着比误删好。
    想立刻清理：`SELECT id FROM book WHERE deleted = 1 AND deleted_at < NOW() - INTERVAL 15 DAY;`
