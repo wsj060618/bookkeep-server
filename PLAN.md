@@ -481,7 +481,8 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
   备份 → 删一行流水 → 恢复 → 行数复原；`netstat` 确认后端只监听 `127.0.0.1:8080`。
   **仍待你亲自验的两条**：重启电脑后数据还在（MySQL84 已 `Automatic`）；手机同 WiFi 打开（需先放行 80 入站，`deploy/README.md` 有 `netsh` 命令）
 - **重置密码（提升到 W3 做完）**：`java -jar bookkeep.jar --reset-password=<用户名> <新密码>`，
-  不启 Web 容器（服务开着也能执行），不暴露成 HTTP 接口；旧 token 在过期前仍有效（JWT 无状态，见 §9 第 3 条）
+  不启 Web 容器（服务开着也能执行），不暴露成 HTTP 接口；
+  **改完密码旧 token 立即失效**（`user.token_version` 自增 + JWT `ver` 声明，过滤器比对不一致即按未认证处理）
 - **云端（W4 周末）**：手机 4G 打开 `https://` 地址能登录、能记一笔；`docker compose ps` 三个容器 healthy；限流生效（连错 6 次被拒）；取证材料七项齐全
 - **安全/运维（第 4–5 周）**：`--reset-password` 执行后**新密码能登录、旧密码返回 401**；`docker compose down && up` 后数据仍在（卷挂载正确）；备份恢复演练过一次
 - **联调（每模块一次，§6.2）**：逐条核对 §5.0 五项——分页是 `{total, list}`、金额是字符串、日期是 `yyyy-MM-dd`、401 清 token 跳登录、列表直接带名称
@@ -491,7 +492,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 1. SpringBoot3 必须用 `mybatis-plus-spring-boot3-starter`（不是 `mybatis-plus-boot-starter`）
 2. jjwt 0.12.x API 与旧版不同：`Jwts.builder().signWith(key)` 需传 `SecretKey` 对象（`Keys.hmacShaKeyFor(secretBytes)`），不是字符串
 3. 金额用 `BigDecimal`，数据库 `DECIMAL(12,2)`，不用 double
-4. JWT 过滤器注册在 `UsernamePasswordAuthenticationFilter` 之前；**过滤器只做认证、不写响应**，token 无效时不认证并继续走链，401 JSON 统一由 `JwtAuthenticationEntryPoint` 输出（在过滤器里再写一次会出现两种 401 格式）
+4. JWT 过滤器注册在 `UsernamePasswordAuthenticationFilter` 之前；**过滤器只做认证、不写响应**，token 无效时不认证并继续走链，401 JSON 统一由 `JwtAuthenticationEntryPoint` 输出（在过滤器里再写一次会出现两种 401 格式）；「认证」里还包含一次 `user.token_version` 比对（见第 34 条）
 5. `SecurityUtil.getUserId()` 从 SecurityContext 取当前用户，Controller 不从 token 现拆
 6. 逻辑删除：MyBatis-Plus 全局配置默认拼 `deleted=0`，但**手写 `@Select` 的 SQL 不会自动拼**，统计 SQL 要自己加
 7. 日期统一 `yyyy-MM-dd` 传参，统计按 `DATE_FORMAT(trans_date,'%Y-%m')=#{month}` 比较，避免时区坑
@@ -546,6 +547,11 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
     改这几个文件时别把中文搬回 `.bat`
 33. **`mysql -e "source D:/..."` 在 Windows 会炸**：盘符的冒号让客户端把路径当标识符（`ERROR 1059`）。
     恢复脚本改成 `Start-Process -RedirectStandardInput <dump 文件>`，把 SQL 直接喂给 mysql，绕开 `source`
+34. **改密码必须让旧 JWT 失效，否则「重置密码」只是换了个密码**：JWT 是无状态的，签出去就管到过期。
+    做法是 `user.token_version`（默认 0）+ token 里的 `ver` claim：改密码/重置时 `+1`，过滤器每个请求
+    `selectById` 比对一次，不一致就按未认证处理。别为了「过滤器零查库」把这段挪到业务层——业务层覆盖不全
+    （账本列表、统计、导出都只拿 userId），漏一个接口就等于没做。代价是每个已认证请求多一次主键查询，本项目量级可忽略。
+    迁移 `sql/migration_user_token_version.sql` 必须执行，否则所有用户查询报 `Unknown column 'token_version'`
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
@@ -562,7 +568,9 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
    - **单机版**：用本机命令重置 —— `java -jar bookkeep.jar --reset-password=<username> <newPassword>`
      （能在这台机器上执行命令本身就是身份证明，不需要验证旧密码；**不要**做成 HTTP 接口，见 §8 第 24 条）
      - 已实现：命中参数就 `WebApplicationType.NONE`，不启 Web 容器，所以服务开着也能重置，也不会去抢 8080
-     - **改密码不踢下线**：JWT 无状态，旧 token 在 7 天过期前仍然有效；要踢下线得给 `user` 加 `token_version`（暂不做）
+     - **改密码/重置会踢掉所有旧 token**：`user.token_version` + JWT 里的 `ver`，过滤器每请求比对一次
+       （多一次 `selectById`，换来「改密码即全端下线」）；本次改动之前签发的老 token 没有 `ver`，按 0 处理，
+       与用户记录默认值一致，不会把人误踢
    - **公网版**（将来若开放注册）：才需要邮箱验证，按「发信通道 + 一次性 token + 有效期」实现，并补失败限流
    - 功能未落地前忘记密码只能手工 `UPDATE user SET password=<BCrypt 哈希>`；
      **密码忘了不代表数据丢**——数据在 MySQL 里，随时可重置

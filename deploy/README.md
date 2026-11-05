@@ -64,7 +64,8 @@ java -jar ..\bookkeep-web\target\bookkeep.jar --reset-password=<用户名> <新�
 - 服务**开着也能执行**：检测到 `--reset-password` 就不启 Web 容器，不会去抢 8080。
 - 只能在这台机器上执行命令，本身就是身份证明，所以不需要旧密码；但**不要**把它做成 HTTP 接口。
 - 密码规则与注册一致：6–32 位；用户名 4–20 位字母数字下划线。
-- **改完密码不会踢下线**：JWT 无状态，已经签发的 token 在 7 天过期前仍然有效。
+- **改完密码，旧 token 立即全端失效**：`user.token_version` 自增 + JWT 的 `ver` 声明，过滤器比对不一致就按未认证处理。
+  前端会收到真实 401，按既有逻辑清 token 回登录页。
 - 环境变量没带就会因为 `${DB_USER}` 解析不到而启动失败——这是故意的，不提供默认数据库密码。
 
 ## 备份与恢复演练
@@ -94,3 +95,4 @@ deploy\start-all.bat
 | 手机打不开、本机能开 | 80 端口入站没放行（`netsh` 那条），或手机不在同一 WiFi |
 | `netstat -ano \| findstr 8080` 显示 `0.0.0.0:8080` | `application.yml` 的 `server.address` 被改掉了，后端只应监听回环 |
 | 起了两个后端 | 脚本会先检测 8080；但 `deploy\stop-all.bat` 只杀 `run\bookkeep.pid` 里的进程，IDEA 启的实例不归它管 |
+| `mvn package` 报 `Unable to rename bookkeep.jar` | 后端正在运行，Windows 锁住了 jar。先 `stop-all.bat` 再打包（打包会先把 jar 截断，别在这个状态下启动） |
