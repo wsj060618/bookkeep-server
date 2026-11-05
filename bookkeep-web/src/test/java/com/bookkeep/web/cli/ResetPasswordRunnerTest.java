@@ -35,6 +35,7 @@ class ResetPasswordRunnerTest {
         assertNull(runner.reset("admin", "newpass1"));
 
         assertTrue(encoder.matches("newpass1", user.getPassword()));
+        assertEquals(1, user.getTokenVersion()); // 改密码必须让旧 token 失效
         verify(userMapper).updateById(user);
     }
 

@@ -50,7 +50,7 @@ public class ResetPasswordRunner implements ApplicationRunner {
             log.error("用法：java -jar bookkeep.jar --reset-password=<username> <newPassword>");
             System.exit(1);
         }
-        log.info("用户 {} 的密码已重置（已签发的 token 在过期前仍然有效）", username);
+        log.info("用户 {} 的密码已重置，之前签发的 token 已全部失效", username);
         System.exit(0);
     }
 
@@ -70,6 +70,8 @@ public class ResetPasswordRunner implements ApplicationRunner {
             return "用户不存在或已注销：" + username;
         }
         user.setPassword(passwordEncoder.encode(password));
+        // 版本 +1：之前签发的 token 全部作废，改完密码必须重新登录
+        user.setTokenVersion(user.getTokenVersion() + 1);
         userMapper.updateById(user);
         return null;
     }

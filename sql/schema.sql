@@ -30,6 +30,7 @@ CREATE TABLE `user` (
   username        VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs
                     NOT NULL COMMENT '登录名，区分大小写',
   password        VARCHAR(100) NOT NULL COMMENT 'BCrypt 密文，禁止存明文',
+  token_version   INT NOT NULL DEFAULT 0 COMMENT '令牌版本：改密码/重置时 +1，旧 JWT 立即失效',
   nickname        VARCHAR(50)  COMMENT '昵称',
   email           VARCHAR(100) COMMENT '邮箱',
   avatar          VARCHAR(500) COMMENT '头像 URL，可空',

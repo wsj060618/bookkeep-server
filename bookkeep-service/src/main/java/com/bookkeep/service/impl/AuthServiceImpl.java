@@ -139,14 +139,15 @@ public class AuthServiceImpl implements AuthService {
                 .toList();
 
         log.info("登录成功：userId={}, username={}, 账本 {} 本", user.getId(), username, books.size());
-        return new LoginResp(jwtUtil.generateToken(user.getId()), UserResp.from(user), books);
+        return new LoginResp(jwtUtil.generateToken(user.getId(), user.getTokenVersion()),
+                UserResp.from(user), books);
     }
 
     /**
      * 当前登录用户（GET /api/auth/me）
      * <p>只读事务；userId 来自 SecurityContext，不再解析 token。
      * <p>{@code selectById} 会被 MyBatis-Plus 自动加上 {@code deleted = 0}：
-     * 用户注销后旧 token 在 7 天有效期内仍能通过过滤器（过滤器不查库），但这里查不到 →
+     * 用户注销后旧 token 在 7 天有效期内仍能通过过滤器（过滤器只比对 token_version，查不到就放行认证），但这里查不到 →
      * 按 401 处理，客户端会清 token 回登录页。
      */
     @Override

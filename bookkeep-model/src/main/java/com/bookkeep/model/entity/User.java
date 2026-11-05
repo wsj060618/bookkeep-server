@@ -19,6 +19,9 @@ public class User {
 
     private String password;
 
+    /** 令牌版本：改密码/重置时 +1，之前签发的 JWT 立即失效 */
+    private Integer tokenVersion = 0;
+
     private String nickname; //
 
     private String email;

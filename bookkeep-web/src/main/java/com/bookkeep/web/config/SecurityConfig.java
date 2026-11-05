@@ -1,6 +1,7 @@
 package com.bookkeep.web.config;
 
 import com.bookkeep.common.util.JwtUtil;
+import com.bookkeep.service.mapper.UserMapper;
 import com.bookkeep.web.filter.JwtAuthenticationFilter;
 import com.bookkeep.web.handler.JwtAccessDeniedHandler;
 import com.bookkeep.web.handler.JwtAuthenticationEntryPoint;
@@ -31,6 +32,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtUtil jwtUtil;
+    private final UserMapper userMapper;
     private final JwtAuthenticationEntryPoint authenticationEntryPoint;
     private final JwtAccessDeniedHandler accessDeniedHandler;
 
@@ -49,7 +51,7 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler)) // 403 统一 JSON（默认是 HTML 错误页）
                 // 注册在 UsernamePasswordAuthenticationFilter 之前：Spring Security 的惯例位置，
                 // 保证业务过滤器看到 SecurityContext 时已经填好
-                .addFilterBefore(new JwtAuthenticationFilter(jwtUtil), UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(new JwtAuthenticationFilter(jwtUtil, userMapper), UsernamePasswordAuthenticationFilter.class)
                 .httpBasic(AbstractHttpConfigurer::disable) // 禁用 httpBasic
                 .formLogin(AbstractHttpConfigurer::disable); // 禁用 formLogin
         return http.build();

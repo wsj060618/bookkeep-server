@@ -15,6 +15,9 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
+    /** 令牌版本：与 user.token_version 比对，改密码后旧 token 立即作废 */
+    private static final String CLAIM_TOKEN_VERSION = "ver";
+
     private final SecretKey key;
     private final long expireSeconds;
 
@@ -27,10 +30,11 @@ public class JwtUtil {
     /**
      * 生成token
      */
-    public String generateToken(Long userId) {
+    public String generateToken(Long userId, int tokenVersion) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(String.valueOf(userId))
+                .claim(CLAIM_TOKEN_VERSION, tokenVersion)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusSeconds(expireSeconds)))
                 .signWith(key)
@@ -41,12 +45,15 @@ public class JwtUtil {
      * 解析token
      */
     public Long parseUserId(String token) {
-        Claims claims = Jwts.parser()
-                .verifyWith(key)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
-        return Long.valueOf(claims.getSubject());
+        return Long.valueOf(claims(token).getSubject());
+    }
+
+    /**
+     * 令牌版本：本次改动之前签发的老 token 没有该 claim，按 0 处理（用户记录默认也是 0，不会误杀）
+     */
+    public int parseTokenVersion(String token) {
+        Object value = claims(token).get(CLAIM_TOKEN_VERSION);
+        return value instanceof Number number ? number.intValue() : 0;
     }
 
     /**
@@ -59,5 +66,13 @@ public class JwtUtil {
         } catch (JwtException | IllegalArgumentException e) {
             return false;
         }
+    }
+
+    private Claims claims(String token) {
+        return Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 }
