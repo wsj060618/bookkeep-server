@@ -288,9 +288,18 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| PUT | `/api/users/me` | 改昵称 / 邮箱 `{nickname?, email?}` |
+| PUT | `/api/users/me` | 改昵称 / 邮箱 `{nickname?, email?}`（**待实现**） |
+| PUT | `/api/users/me/password` | 改密码 `{oldPassword, newPassword}`；成功后 `token_version + 1`，所有旧 token 立即失效（**待实现**） |
+| DELETE | `/api/users/me` | 注销账户 `{password}` 二次确认：软删本人 + 名下账本，JWT 立即失效，用户名释放（**待实现**） |
 
-头像上传**不做**（避免引入 OSS 与外部依赖）。
+- 改密码**必须校验旧密码**（否则拿到手机的人可以直接改掉），规则与注册一致（6–32 位）
+- 注销账户的定稿口径：
+  - 带当前密码二次确认；逻辑删除 `user.deleted=1`，生成列 `username_active` 变 NULL → **用户名可重新注册**（沿用现有设计）
+  - 名下 `book` 一并 `deleted=1 + deleted_at=now`，交给回收站 15 天清理任务物理删除（与单本删除同一套路径，别另写一份）
+  - **不提供注销后自助恢复**：user 已软删，登录查不到；要恢复只能改库（单机场景可接受，写进 backlog 的取舍里）
+  - 改密码 / 注销都让 `token_version + 1`，旧 token 立刻 401（见 §8 第 34 条）
+- 前端入口：顶栏用户名 → 下拉「账号设置」（`/settings`），含改昵称/邮箱、改密码、注销账户（危险操作单独二次确认）
+- 头像上传**不做**（避免引入 OSS 与外部依赖）。
 
 ### 5.4 分类（按当前账本）
 
@@ -585,6 +594,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
        （多一次 `selectById`，换来「改密码即全端下线」）；本次改动之前签发的老 token 没有 `ver`，按 0 处理，
        与用户记录默认值一致，不会把人误踢
    - **公网版**（将来若开放注册）：才需要邮箱验证，按「发信通道 + 一次性 token + 有效期」实现，并补失败限流
+     —— 具体接口与前置条件见 §10 第 2 条（已排期，等用户管理做完再说）
    - 功能未落地前忘记密码只能手工 `UPDATE user SET password=<BCrypt 哈希>`；
      **密码忘了不代表数据丢**——数据在 MySQL 里，随时可重置
 4. **注册非幂等**：重复提交由前端「单飞」控制 + 数据库唯一索引兜底（见 §8 第 15 条），
@@ -603,3 +613,38 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
    想立刻清理：`SELECT id FROM book WHERE deleted = 1 AND deleted_at < NOW() - INTERVAL 15 DAY;`
    然后按「流水 → 分类 → 账本」手工删，或删完 `deleted_at` 后重启应用一次。
    另外 `deleted_at IS NULL` 的历史已删账本（加这个字段之前删的）永不自动清理，需要时手工补时间。
+
+## 10. Backlog（已记下、还没做；动工前先把契约和测试补齐）
+
+### 10.1 用户管理（优先，先做这个）
+
+缺一整个「用户管理」模块，接口与规则已在 §5.3 定稿，待实现：
+
+- 后端：`UserService` + `UserController`（`PUT /api/users/me`、`PUT /api/users/me/password`、`DELETE /api/users/me`）
+  - 改密码：校验旧密码 → BCrypt 更新 → `token_version + 1`（复用 `ResetPasswordRunner` 的规则常量）
+  - 注销：校验密码 → 软删 user → 软删名下全部 book（写 `deleted_at`）→ 结束
+- 前端：`/settings` 页面 + 顶栏用户菜单入口
+- 测试要点（每个都得有）：
+  1. 旧密码错 → `code=400`，密码不变
+  2. 改密码成功 → 旧 token 请求 `/api/auth/me` 返回真实 401（`TokenInvalidationTest` 已提供范式）
+  3. 注销后：同名可重新注册；旧 token 401；原账本不再出现在回收站里（它挂在已注销用户下）
+  4. 注销时密码错 → 400，什么都不删
+
+### 10.2 邮箱找回密码（后做，等决定是否公网开放）
+
+前置条件（缺一不可）：
+
+- 发信通道：SMTP 或第三方（Resend / 阿里云邮件推送）。**没有它就没有任何可信的身份凭证**
+- `password_reset_token` 表：`user_id / token_hash / expires_at(15–30 分钟) / used_at`，一次性、用后作废
+- 限流：按 `IP + 账号` 限制发信次数（如 3 次/小时），否则可被用来轰炸邮箱
+- 防枚举：无论邮箱是否存在都返回同一句「如果该邮箱已注册，我们已发送邮件」
+
+接口草案：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/auth/forgot-password` | `{email}` → 永远 `code=200`，内部才判断邮箱是否存在 |
+| POST | `/api/auth/reset-password` | `{token, newPassword}` → 校验 token 未过期未使用 → 改密码 + `token_version + 1` |
+
+- **CLI `--reset-password` 继续保留**（§8 第 24 条）：邮箱找回是给「公网多用户」用的，单机救命通道不能删
+- 做完这条，§9 第 3 条的「无自助找回密码」才能划掉
