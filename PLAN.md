@@ -410,7 +410,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 |---|---|---|---|
 | **W1** | P2 分类 + 流水（book 隔离、分页筛选、余额校验）+ 单测 + `http/*.http` | 记一笔 + 明细列表（移动优先卡片） | `localhost` 能登录、能记一笔、列表能看到；**当天开始记真实班费** |
 | **W2** | `class` 收敛已提前完成；导出（CSV、UTF-8 BOM、逐行结余）+ 统计 summary/category + 公示页接口 ✅ 代码完成 | 统计卡片 + 导出按钮 + 公示页 | 导出的 CSV 发班群不丢人；公示链接免登录能看 |
-| **W3** | 单机打包：`repackage` fat jar + `deploy/nginx/nginx.conf` + 启停/备份脚本 | 生产构建（`dist` 交给 Nginx，history 路由 + `try_files`） | 双击 `start-all.bat` 能用；重启电脑数据还在；备份能恢复；手机同 WiFi 能开 |
+| **W3** | 单机打包：`repackage` fat jar + `deploy/nginx/nginx.conf` + 启停/备份脚本 ✅ | 生产构建（`dist` 交给 Nginx，history 路由 + `try_files`）✅ | 双击 `start-all.bat` 能用；重启电脑数据还在；备份能恢复；手机同 WiFi 能开 |
 | **W4** | Dockerfile + compose（本机跑通）→ 试用期上云：HTTPS、密钥外部化、登录限流（含 `X-Real-IP`）、导入真实数据、**备份恢复演练** | 无（前端产物复用） | 手机 4G 打开 `https://` 地址能记一笔；七项取证材料齐全 |
 | **W5** | 缓冲修 bug + 真实数据复盘 | 无 | README / `deploy/README.md` 能让别人 30 分钟复现；简历两行定稿；2 分钟 demo 录屏 |
 
@@ -476,7 +476,12 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 - **P3 + 导出（W2 后端，代码完成 / 待跑测试与手工验收）**：手算一个月数据，`summary`/`category` 与手算一致；
   导出的 CSV 用 Excel 打开中文不乱码、金额两位小数、逐行结余正确，合计行与 `summary` 对齐；
   公示链接免登录能看到本月收支。脚本：`http/statistics.http`、`http/public.http`
-- **本地部署（W3 周末）**：双击 `start-all.bat` 能用；重启电脑后数据还在；`backup\yyyyMMdd.sql` 能恢复到新库并查到数据；手机同 WiFi 打开 `http://电脑IP/` 可用；`netstat` 显示后端只监听 `127.0.0.1:8080`
+- **本地部署（W3 周末）✅**：`deploy/` 里有启停/备份/恢复脚本与 Nginx 配置模板；已实测双击 `start-all.bat` 起 Nginx(80) + 后端(`127.0.0.1:8080`)，
+  `/`、`/login`、`/report/xxx` 刷新都回落到 `index.html`，`/api/**` 经反代前缀不丢、未登录返回真实 401 JSON；
+  备份 → 删一行流水 → 恢复 → 行数复原；`netstat` 确认后端只监听 `127.0.0.1:8080`。
+  **仍待你亲自验的两条**：重启电脑后数据还在（MySQL84 已 `Automatic`）；手机同 WiFi 打开（需先放行 80 入站，`deploy/README.md` 有 `netsh` 命令）
+- **重置密码（提升到 W3 做完）**：`java -jar bookkeep.jar --reset-password=<用户名> <新密码>`，
+  不启 Web 容器（服务开着也能执行），不暴露成 HTTP 接口；旧 token 在过期前仍有效（JWT 无状态，见 §9 第 3 条）
 - **云端（W4 周末）**：手机 4G 打开 `https://` 地址能登录、能记一笔；`docker compose ps` 三个容器 healthy；限流生效（连错 6 次被拒）；取证材料七项齐全
 - **安全/运维（第 4–5 周）**：`--reset-password` 执行后**新密码能登录、旧密码返回 401**；`docker compose down && up` 后数据仍在（卷挂载正确）；备份恢复演练过一次
 - **联调（每模块一次，§6.2）**：逐条核对 §5.0 五项——分页是 `{total, list}`、金额是字符串、日期是 `yyyy-MM-dd`、401 清 token 跳登录、列表直接带名称
@@ -535,6 +540,12 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
     `update(set("deleted", 0))` 同样改不到——查回收站、恢复、物理删除都必须手写 `@Select/@Update/@Delete`
 31. **逻辑删除不会自动写时间列**：想知道「删了多久」必须另加 `deleted_at`（`updated_at` 是 ON UPDATE 自动列，
     改名也会动它）。`deleteById` 只写 `deleted=1`，回收站到期时间得自己 `set("deleted_at", now)`
+32. **Windows 批处理装不下 UTF-8 中文**：`.bat` 里写中文，配上 `chcp 65001` 后 cmd 仍会按字节错位解析
+    （典型症状是 `'ho' 不是内部或外部命令`、标签被吃掉一半）。带 LF 行尾时更糟。
+    所以 `deploy/*.bat` 只放 ASCII 启动器，逻辑和中文提示都在同名 `.ps1` 里（UTF-8 **带 BOM** + CRLF）；
+    改这几个文件时别把中文搬回 `.bat`
+33. **`mysql -e "source D:/..."` 在 Windows 会炸**：盘符的冒号让客户端把路径当标识符（`ERROR 1059`）。
+    恢复脚本改成 `Start-Process -RedirectStandardInput <dump 文件>`，把 SQL 直接喂给 mysql，绕开 `source`
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
@@ -550,6 +561,8 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 3. **无自助找回密码**：不做邮箱/手机验证（P1 没有邮件通道，且单机版的用户就是机器主人）。定位分两种：
    - **单机版**：用本机命令重置 —— `java -jar bookkeep.jar --reset-password=<username> <newPassword>`
      （能在这台机器上执行命令本身就是身份证明，不需要验证旧密码；**不要**做成 HTTP 接口，见 §8 第 24 条）
+     - 已实现：命中参数就 `WebApplicationType.NONE`，不启 Web 容器，所以服务开着也能重置，也不会去抢 8080
+     - **改密码不踢下线**：JWT 无状态，旧 token 在 7 天过期前仍然有效；要踢下线得给 `user` 加 `token_version`（暂不做）
    - **公网版**（将来若开放注册）：才需要邮箱验证，按「发信通道 + 一次性 token + 有效期」实现，并补失败限流
    - 功能未落地前忘记密码只能手工 `UPDATE user SET password=<BCrypt 哈希>`；
      **密码忘了不代表数据丢**——数据在 MySQL 里，随时可重置
