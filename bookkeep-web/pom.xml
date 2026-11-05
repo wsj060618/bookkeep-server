@@ -58,6 +58,8 @@
     </dependencies>
 
     <build>
+        <!-- 可执行 jar 固定叫 bookkeep.jar：部署脚本和 PLAN §9 的重置命令都按这个名字写 -->
+        <finalName>bookkeep</finalName>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

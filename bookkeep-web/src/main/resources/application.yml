@@ -1,5 +1,7 @@
 server:
   port: 8080
+  # 只绑回环：对外统一走 Nginx，局域网不能绕过反代直连后端（PLAN §1、§8 第 21 条）
+  address: 127.0.0.1
 
 spring:
   application:
@@ -28,5 +30,6 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  secret: bookkeep-jwt-secret-key-please-change-me-0123456789
+  # 部署时用环境变量 JWT_SECRET 覆盖（deploy/env.ps1）；换这个值会让已签发的 token 全部失效
+  secret: ${JWT_SECRET:bookkeep-jwt-secret-key-please-change-me-0123456789}
   expire: 604800
