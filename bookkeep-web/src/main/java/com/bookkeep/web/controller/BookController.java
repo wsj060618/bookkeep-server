@@ -4,6 +4,7 @@ import com.bookkeep.common.result.Result;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
+import com.bookkeep.model.dto.resp.ShareLinkResp;
 import com.bookkeep.service.BookService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,12 @@ public class BookController {
     @PostMapping
     public Result<BookResp> create(@Valid @RequestBody BookUpdateReq req) {
         return Result.success(bookService.create(req));
+    }
+
+    /** 分享：每次点都换新 token（3 天有效），旧链接立即失效 */
+    @PostMapping("/{id}/share")
+    public Result<ShareLinkResp> share(@PathVariable Long id) {
+        return Result.success(bookService.share(id));
     }
 
     /** 重命名：只改 name，shareToken 不动（改名不该让已发出去的公示链接失效） */

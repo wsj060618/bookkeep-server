@@ -55,6 +55,7 @@ CREATE TABLE book (
   name        VARCHAR(50) NOT NULL COMMENT '账本名',
   type        VARCHAR(10) NOT NULL DEFAULT 'class' COMMENT '账本类型，当前固定 class 班级',
   share_token VARCHAR(32) COMMENT '公示页随机 token（免登录只读，见 PLAN §5.9）',
+  share_token_expires_at DATETIME NULL COMMENT '公示链接到期时间；NULL 或已过期 = 链接失效（分享时重新生成，有效期 3 天）',
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删',

@@ -3,6 +3,7 @@ package com.bookkeep.service;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
+import com.bookkeep.model.dto.resp.ShareLinkResp;
 
 import java.util.List;
 
@@ -18,6 +19,9 @@ public interface BookService {
 
     /** 新建账本（预置 13 条分类），并自动切为当前 */
     BookResp create(BookUpdateReq req);
+
+    /** 生成 / 重置公示链接：每次调用都换新 token，有效期 3 天，旧链接立即失效 */
+    ShareLinkResp share(Long bookId);
 
     /** 重命名自己的账本 */
     BookResp rename(Long id, BookUpdateReq req);

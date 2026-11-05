@@ -17,6 +17,7 @@ import static com.bookkeep.web.support.AuthHelper.getJson;
 import static com.bookkeep.web.support.AuthHelper.loginData;
 import static com.bookkeep.web.support.AuthHelper.nextUsername;
 import static com.bookkeep.web.support.AuthHelper.registerAndLogin;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -72,7 +73,8 @@ class BookManageApiTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.name").value("二班账本"))
                 .andExpect(jsonPath("$.data.current").value(true))
-                .andExpect(jsonPath("$.data.shareToken").isNotEmpty());
+                // 新建账本也不再送公示链接：必须用户点「分享」才生成
+                .andExpect(jsonPath("$.data.shareToken").value(nullValue()));
 
         JsonNode books = getJson(mockMvc, objectMapper, "/api/books", token).path("data");
         assertEquals(2, books.size());

@@ -7,6 +7,7 @@ import com.bookkeep.common.util.SecurityUtil;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
+import com.bookkeep.model.dto.resp.ShareLinkResp;
 import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.Category;
 import com.bookkeep.model.entity.User;
@@ -45,6 +46,9 @@ public class BookServiceImpl implements BookService {
     /** 回收站保留天数 */
     public static final int RETENTION_DAYS = 15;
 
+    /** 公示链接有效期：每次分享重新计时，过期即 404 */
+    public static final int SHARE_LINK_DAYS = 3;
+
     private final BookMapper bookMapper;
     private final CategoryMapper categoryMapper;
     private final UserMapper userMapper;
@@ -70,8 +74,7 @@ public class BookServiceImpl implements BookService {
         book.setUserId(user.getId());
         book.setName(normalizeName(req));
         book.setType(CategoryTemplate.BOOK_CLASS);
-        // 每一本都有自己的公示 token：分享给一个班，不会串到另一本
-        book.setShareToken(UUID.randomUUID().toString().replace("-", ""));
+        // 公示 token 不在这里发：必须由用户点「分享」显式生成，链接才有 3 天有效期可言
         bookMapper.insert(book);
 
         // 与注册同一套模板：逐条 insert（同一事务、同一 SqlSession），不要用静态 Db.saveBatch
@@ -90,6 +93,28 @@ public class BookServiceImpl implements BookService {
         updateCurrentBookId(user.getId(), book.getId());
         log.info("新建账本：userId={}, bookId={}, name={}", user.getId(), book.getId(), book.getName());
         return BookResp.from(book, book.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ShareLinkResp share(Long bookId) {
+        User user = requireUser();
+        String token = UUID.randomUUID().toString().replace("-", "");
+        LocalDateTime expiresAt = LocalDateTime.now().plusDays(SHARE_LINK_DAYS);
+
+        // 归属条件写进 WHERE：知道别人的 id 也改不到，且只有一行受影响
+        int updated = bookMapper.update(null, Wrappers.<Book>update()
+                .eq("id", bookId)
+                .eq("user_id", user.getId())
+                .set("share_token", token)
+                .set("share_token_expires_at", expiresAt));
+        if (updated == 0) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "账本不存在");
+        }
+
+        // 每次分享都换新 token：旧链接立即失效（3 天是按最后一次分享算，不是按建账本算）
+        log.info("生成公示链接：userId={}, bookId={}, 有效期至 {}", user.getId(), bookId, expiresAt);
+        return new ShareLinkResp(token, expiresAt);
     }
 
     @Override

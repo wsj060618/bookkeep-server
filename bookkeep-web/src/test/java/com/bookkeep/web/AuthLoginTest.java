@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -75,8 +76,9 @@ class AuthLoginTest {
                 .andExpect(jsonPath("$.data.books.length()").value(1))
                 .andExpect(jsonPath("$.data.books[0].name").value("我的账本"))
                 .andExpect(jsonPath("$.data.books[0].type").value("class"))
-                // 公示页链接要靠它拼 /report/{token}，32 位 UUID（去横线），前后端契约的一部分
-                .andExpect(jsonPath("$.data.books[0].shareToken").isString())
+                // 公示链接改成「点分享才生成」：注册后应是没有链接的状态，有效期字段同为 null
+                .andExpect(jsonPath("$.data.books[0].shareToken").value(nullValue()))
+                .andExpect(jsonPath("$.data.books[0].shareTokenExpiresAt").value(nullValue()))
                 .andExpect(jsonPath("$.data.books[0].current").value(true))
                 .andReturn();
 

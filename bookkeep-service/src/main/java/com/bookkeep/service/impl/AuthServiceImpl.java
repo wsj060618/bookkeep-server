@@ -27,7 +27,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
-import java.util.UUID;
 
 /**
  * 认证业务实现
@@ -87,8 +86,7 @@ public class AuthServiceImpl implements AuthService {
                 ? req.bookName().trim()
                 : CategoryTemplate.DEFAULT_BOOK_NAME);
         book.setType(CategoryTemplate.BOOK_CLASS);
-        // 公示页 token：注册即生成，同学拿这个链接看账，不用登录（PLAN §5.9）
-        book.setShareToken(UUID.randomUUID().toString().replace("-", ""));
+        // 公示链接不在这里建：用户点「分享」才生成，链接只活 3 天（PLAN §5.9）
         bookMapper.insert(book);
 
         // 3) 预置分类模板：逐条 insert，和用户/账本共用同一个 SqlSession 与事务。

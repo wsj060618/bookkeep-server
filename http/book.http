@@ -59,3 +59,11 @@ Content-Type: application/json
 
 ### 10. 不带 token（预期：真实 HTTP 401 + {"code":401,...}）
 GET {{host}}/api/books
+
+### 11. 生成 / 重置换公示链接（每次调用换新 token，3 天有效）
+POST {{host}}/api/books/{{bookId}}/share
+Authorization: Bearer {{token}}
+
+### 12. 用上一步返回的 token 打开公示页（免登录）
+###     连点两次 11 后，第一次的 token 应返回 code=404（旧链接立即失效）
+GET {{host}}/api/public/report/{{shareToken}}

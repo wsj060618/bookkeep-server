@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
 
@@ -38,8 +39,10 @@ public class PublicReportServiceImpl implements PublicReportService {
     @Override
     @Transactional(readOnly = true)
     public PublicReportResp report(String shareToken, String month) {
+        // 过期判断放在 SQL 里：`share_token_expires_at > now`，过期 / 从未分享都查不到 → 统一 404
         Book book = bookMapper.selectOne(Wrappers.<Book>query()
-                .eq("share_token", shareToken));
+                .eq("share_token", shareToken)
+                .gt("share_token_expires_at", LocalDateTime.now()));
         if (book == null) {
             throw new BusinessException(ResultCode.NOT_FOUND, "公示页不存在或已失效");
         }

@@ -34,24 +34,27 @@ public final class AuthHelper {
     private AuthHelper() {
     }
 
-    /** 生成一个不撞唯一索引的用户名（长度 16，符合 4–20 位限制）。 */
+    /** 生成一个不撞唯一索引的用户名（长度 16，符合 4–20 位限制） */
     public static String nextUsername(String prefix) {
         return prefix + SEQ.incrementAndGet();
     }
 
     /**
-     * 再登录一次，取公示页 token（{@code books[0].shareToken}）。
-     * <p>单独再登录而不是复用 {@link #registerAndLogin} 的响应：那个方法只回 token，
-     * 每个需要 shareToken 的测试自己解析一遍登录体会把断言写散。
+     * 为该用户的第一本账本生成一个公示链接，返回 token。
+     * <p>链接是「点分享才生成」的（3 天有效），所以登录响应里没有 token 可用，
+     * 这里必须真的调一次 {@code POST /api/books/{id}/share}。
      */
     public static String shareToken(MockMvc mockMvc, ObjectMapper objectMapper, String username)
             throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"" + PASSWORD + "\"}"))
+        JsonNode data = loginData(mockMvc, objectMapper, username);
+        String token = data.path("token").asText();
+        long bookId = data.path("books").get(0).path("id").asLong();
+        MvcResult result = mockMvc.perform(post("/api/books/" + bookId + "/share")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn();
-        return json(result, objectMapper).path("data").path("books").get(0).path("shareToken").asText();
+        return json(result, objectMapper).path("data").path("token").asText();
     }
 
     /** 注册 + 登录，返回可直接放进 {@code Authorization} 头的 token。 */
@@ -82,7 +85,7 @@ public final class AuthHelper {
         return token;
     }
 
-    /** 登录并返回整个 data 节点（{token, user, books}），用于取 books 里的 id / name / shareToken */
+    /** 登录并返回整个 data 节点（{token, user, books}），用于取 books 里的 id / name */
     public static JsonNode loginData(MockMvc mockMvc, ObjectMapper objectMapper, String username)
             throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/login")

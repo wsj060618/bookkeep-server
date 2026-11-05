@@ -26,10 +26,13 @@ public class Book {
     private String type;
 
     /**
-     * 公示页随机 token（免登录只读，见 PLAN §5.9）。
-     * 注册时生成 32 位 UUID 去横线；同一本书唯一，用于 {@code GET /api/public/report/{token}}。
+     * 公示页随机 token（免登录只读，见 PLAN §5.9）。每次「分享」重新生成 32 位 UUID 去横线，
+     * 旧 token 立即被覆盖；有效期见 {@link #shareTokenExpiresAt}。从未分享过时为 null。
      */
     private String shareToken;
+
+    /** 公示链接到期时间：null 或已过期即链接失效（分享时生成 now + 3 天） */
+    private LocalDateTime shareTokenExpiresAt;
 
     private LocalDateTime createdAt;
 

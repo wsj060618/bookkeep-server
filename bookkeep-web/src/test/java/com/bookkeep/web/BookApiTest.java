@@ -37,14 +37,15 @@ class BookApiTest {
     private ObjectMapper objectMapper;
 
     @Test
-    @DisplayName("改名成功：登录响应里的账本名变了，shareToken 不变")
+    @DisplayName("改名成功：登录响应里的账本名变了，已有的 shareToken 不变（旧链接不失效）")
     void renameIsReflectedInNextLogin() throws Exception {
         String username = nextUsername("book");
         String token = registerAndLogin(mockMvc, objectMapper, username);
 
         JsonNode before = loginData(username).path("books").get(0);
         long bookId = before.path("id").asLong();
-        String shareToken = before.path("shareToken").asText();
+        // 先真的分享一次（链接是点分享才生成的），再改名，验证 token 不被改名覆盖
+        String shareToken = AuthHelper.shareToken(mockMvc, objectMapper, username);
         assertEquals("班级账本", before.path("name").asText());
 
         mockMvc.perform(put("/api/books/" + bookId)
