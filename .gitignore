@@ -19,3 +19,11 @@ Thumbs.db
 application-local.yml
 application-local.yaml
 .env
+
+# ---- deploy (机器相关 + 运行期产物) ----
+deploy/env.ps1
+deploy/nginx/runtime/
+deploy/nginx/nginx.generated.conf
+deploy/run/
+deploy/backup/
+deploy/logs/
