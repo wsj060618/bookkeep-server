@@ -67,20 +67,22 @@
 ```sql
 CREATE TABLE `user` (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-  username       VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL, -- 区分大小写
+  username       VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL, -- 显示名，可改
   password       VARCHAR(100) NOT NULL,          -- BCrypt
-  nickname       VARCHAR(50),
-  email          VARCHAR(100) NOT NULL,          -- 必填：找回密码的唯一通道（§5.1）
+  email          VARCHAR(100) NOT NULL,          -- 登录凭据：必填，未删除行内唯一
   avatar         VARCHAR(500),                   -- 头像 URL（预留列，当前不做上传，见 §2.4）
   current_book_id BIGINT,                        -- 当前打开的记账本
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted        TINYINT DEFAULT 0,
   -- 唯一性只约束未删除行：deleted=1 时为 NULL，MySQL 多个 NULL 不冲突
-  -- → 注销后用户名可被重新注册；活着的账号之间仍然互斥
+  -- → 注销后用户名/邮箱都可被重新注册；活着的账号之间仍然互斥
   username_active VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs
                   GENERATED ALWAYS AS (IF(`deleted` = 0, `username`, NULL)) STORED,
+  email_active    VARCHAR(100)
+                  GENERATED ALWAYS AS (IF(`deleted` = 0, `email`, NULL)) STORED,
   UNIQUE KEY uk_user_username_active (username_active),
+  UNIQUE KEY uk_user_email_active (email_active),
   KEY idx_user_username (username)               -- 按用户名查（唯一索引已不覆盖 username）
 );
 
@@ -249,18 +251,21 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 
 | 方法 | 路径 | 说明 | 请求体 / 参数 |
 |---|---|---|---|
-| POST | `/api/auth/register` | 注册并创建班级账本（预置 13 条分类） | `{username, password, nickname?, email, bookName?}` → 用户信息。**邮箱必填**（找回密码的唯一通道）；**没有 bookType**；`bookName` 为空默认「班级账本」 |
-| POST | `/api/auth/login` | 登录 | `{username, password}` → `{token, user:{id, username, nickname, email, avatar, currentBookId}, books:[{id, name, type, shareToken, shareTokenExpiresAt, current}]}` |
+| POST | `/api/auth/register` | 注册并创建班级账本（预置 13 条分类） | `{username, password, email, bookName?}` → 用户信息。**邮箱是登录凭据**：必填且未删除行内唯一；`username` 只是显示名；**没有 bookType / nickname**；`bookName` 为空默认「班级账本」 |
+| POST | `/api/auth/login` | 登录 | `{email, password}` → `{token, user:{id, username, email, avatar, currentBookId}, books:[{id, name, type, shareToken, shareTokenExpiresAt, current}]}` |
 | GET | `/api/auth/me` | 当前用户信息（含 currentBookId） | - |
-| POST | `/api/auth/forgot-password` | 申请重置密码（匿名） | `{username, email}` 必须**同时匹配**；永远返回同一句「如果账号信息匹配，我们已经发送重置邮件」 |
+| POST | `/api/auth/forgot-password` | 申请重置密码（匿名） | `{email}`；该邮箱已注册才发信，**永远**返回同一句「如果该邮箱已注册，我们已经发送重置邮件」 |
 | POST | `/api/auth/reset-password` | 用邮件里的一次性 token 重置（匿名） | `{token, newPassword}`；成功后 `token_version + 1`，旧会话全部失效 |
 
 > `books` 是平铺在外层（不是 `user.books`）。虽然当前只有一个账本，字段保留是为了兼容已有前端契约。
 > `shareToken` / `shareTokenExpiresAt` 是当前公示链接的状态：**从未分享过为 `null`**，链接 3 天有效；
 > 生成/更换链接走 `POST /api/books/{id}/share`（§5.2），前端不要自己拼 `book.id`。
-> **邮箱自本版起必填**：它是找回密码的唯一通道（见上面后两条接口）。注册、账号设置都必须给非空邮箱。
-> `user.email` 仍**不加唯一索引**（同一邮箱可以挂多个账号），所以找回密码必须 `username + email` 同时匹配，
-> 不能只凭邮箱找账号——否则「邮箱是否注册过」就成了可探测信息。
+> **登录凭据是邮箱**（未删除行内唯一，`uk_user_email_active`）：用户名只是显示名，可在账号设置里随便改，
+> 所以登录响应里没有 `nickname` 字段。邮箱比较不区分大小写（`utf8mb4_0900_ai_ci`），
+> 「邮箱或密码错误」是同一句提示，不让接口变成邮箱是否注册过的探测器。
+> **邮箱自本版起必填且唯一（未删除行内）**：它是登录凭据，也是找回密码的通道。
+> 目录规则：`email` 用表默认排序规则 `utf8mb4_0900_ai_ci`（大小写不敏感，符合邮箱语义）；
+> 唯一性由生成列 `email_active` 负责，注销后为 NULL → 邮箱随账号一起释放。
 
 ### 5.2 账本
 
@@ -294,7 +299,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| PUT | `/api/users/me` | 改昵称 / 邮箱 `{nickname?, email}`：**邮箱不能改成空**，昵称可空（✅ 已实现） |
+| PUT | `/api/users/me` | 改用户名 / 登录邮箱 `{username, email, password?}`：**改邮箱必须带当前密码**；用户名是显示名，改它不需要密码（✅ 已实现） |
 | PUT | `/api/users/me/password` | 改密码 `{oldPassword, newPassword}`；成功后 `token_version + 1`，所有旧 token 立即失效（✅ 已实现） |
 | DELETE | `/api/users/me` | 注销账户 `{password}` 二次确认：软删本人 + 名下账本，JWT 立即失效，用户名释放（✅ 已实现） |
 
@@ -304,7 +309,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
   - 名下 `book` 一并 `deleted=1 + deleted_at=now`，交给回收站 15 天清理任务物理删除（与单本删除同一套路径，别另写一份）
   - **不提供注销后自助恢复**：user 已软删，登录查不到；要恢复只能改库（单机场景可接受，写进 backlog 的取舍里）
   - 改密码 / 注销都让 `token_version + 1`，旧 token 立刻 401（见 §8 第 34 条）
-- 前端入口：顶栏用户名 → 下拉「账号设置」（`/settings`），含改昵称/邮箱、改密码、注销账户（危险操作单独二次确认）
+- 前端入口：顶栏用户名 → 下拉「账号设置」（`/settings`），含改用户名/邮箱（改邮箱要当前密码）、改密码、注销账户（危险操作单独二次确认）
 - 头像上传**不做**（避免引入 OSS 与外部依赖）。
 
 ### 5.4 分类（按当前账本）
@@ -504,7 +509,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
   `/`、`/login`、`/report/xxx` 刷新都回落到 `index.html`，`/api/**` 经反代前缀不丢、未登录返回真实 401 JSON；
   备份 → 删一行流水 → 恢复 → 行数复原；`netstat` 确认后端只监听 `127.0.0.1:8080`。
   **仍待你亲自验的两条**：重启电脑后数据还在（MySQL84 已 `Automatic`）；手机同 WiFi 打开（需先放行 80 入站，`deploy/README.md` 有 `netsh` 命令）
-- **找回密码（邮箱一次性 token）**：注册时邮箱必填；忘记密码要 `username + email` 同时匹配，
+- **找回密码（邮箱一次性 token）**：注册时邮箱必填（也是登录凭据），忘记密码只填邮箱，
   邮件里给 15 分钟有效的一次性链接；重置成功即 `token_version + 1`，旧会话全部失效。
   **命令行的 `--reset-password` 已删除**——邮箱是唯一的重置通道，SMTP 必须配好（`deploy/env.ps1` 的 `MAIL_*`）
 - **云端（W4 周末）**：手机 4G 打开 `https://` 地址能登录、能记一笔；`docker compose ps` 三个容器 healthy；限流生效（连错 6 次被拒）；取证材料七项齐全
@@ -542,8 +547,8 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
     会变成找静态文件 → 404。Nginx 加 `try_files $uri $uri/ /index.html`；单体 jar 方案则改用 hash 路由
 23. **MySQL 必须 8.0+**：schema 用了 `utf8mb4_0900_as_cs`（5.7 没有）和生成列唯一索引
     `uk_user_username_active`。安装/部署脚本要检查版本，否则建表直接失败
-24. **找回密码只能走邮箱一次性 token，绝不能开「无密码改任意账号」的接口**：`forgot-password` 必须
-    `username + email` 同时匹配且永远返回同一句提示（防枚举），`reset-password` 只认 15 分钟有效、
+24. **找回密码只能走邮箱一次性 token，绝不能开「无密码改任意账号」的接口**：`forgot-password` 只收邮箱、
+    无论是否存在都返回同一句提示（防枚举），`reset-password` 只认 15 分钟有效、
     用过即废的 token（库里存 sha256，不存明文）。SMTP 配在 `deploy/env.ps1`（`MAIL_USERNAME` /
     `MAIL_PASSWORD` / `MAIL_FROM`），不要写进仓库；改密码成功后一律 `token_version + 1`（见第 34 条）
 25. **服务器试用期是稀缺资源**：功能没做完就先别申请，否则期限在写代码时被烧掉。
@@ -588,16 +593,17 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 1. **无限流**（**公网部署的前置条件**）：注册 / 登录都没有失败计数、验证码或 IP 限流，可被脚本批量注册和撞库；
    BCrypt 每次校验约 60–100 ms，几十个并发登录就能打满 1 核小机器的 CPU。
    登录侧「用户不存在与密码错误同一提示」只防枚举，不防暴力尝试。
-   计划（W4 上线前必须完成）：内存版 Caffeine，**按 `IP + username` 计失败次数，5 次 / 5 分钟**，
+   计划（W4 上线前必须完成）：内存版 Caffeine，**按 `IP + email` 计失败次数，5 次 / 5 分钟**，
    成功登录后清零；再补一条**单 IP 每分钟 30 次**的粗粒度限制（防用户名喷洒）。
    Nginx 必须透传 `X-Real-IP`（见 §8 第 21 条），否则按 IP 限流形同虚设。
    **本地 / 局域网使用不需要限流**（外网访问不到）。
-2. **邮箱必填但不唯一**：`user.email` 自本版起必填（找回密码唯一通道），仍**不加唯一索引**——
-   同一邮箱可以挂多个账号。因此找回密码必须 `username + email` 同时匹配，不能只凭邮箱定位账号，
-   否则接口就成了「这个邮箱注册过没有」的探测器。邮箱**不做验证**（不发确认邮件），前端不得展示「已验证」。
+2. **邮箱必填且唯一，但未验证**：`user.email` 自本版起是登录凭据，必填、未删除行内唯一
+   （`email_active` 生成列 + 唯一索引），注销后随账号释放。邮箱**不做验证**（不发确认邮件），
+   前端不得展示「已验证」；同一邮箱不能挂多个账号（注册会 400）。
+   这样 `forgot-password` 只凭邮箱就能定位账号，不用再让用户记用户名。
 3. **找回密码已由邮箱一次性 token 承担**（`forgot-password` + `reset-password`，见 §10.2）：
    - token 只存 sha256、15 分钟有效、用过即废；重置成功 `token_version + 1`，旧会话全部失效
-   - `forgot-password` 永远返回同一句提示，内部对 `username + email` 组合与 IP 做进程内限流
+   - `forgot-password` 永远返回同一句提示，内部对邮箱与 IP 做进程内限流
    - **`--reset-password` 命令行入口已删除**：邮箱是唯一的重置通道，SMTP 必须配置好；
      缺点写在这里——SMTP 未配或密码丢失时，只能由维护者手工 `UPDATE user SET password=<BCrypt 哈希>`
    - 想彻底关掉「万一 SMTP 挂了」的死角：`deploy/README.md` 里保留手工改库的步骤，或用 `deploy/backup` 的库恢复到新环境
@@ -654,12 +660,12 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/auth/forgot-password` | `{username, email}` 同时匹配才发信；**永远** `code=200` 同一句提示 |
+| POST | `/api/auth/forgot-password` | `{email}`；已注册才发信，**永远** `code=200` 同一句提示 |
 | POST | `/api/auth/reset-password` | `{token, newPassword}` → 校验未过期未使用 → 改密码 + `token_version + 1` |
 
 限流（进程内，`support/SimpleRateLimiter`，W4 换 Caffeine 时整块替换）：
 
-- 同一 `username + email` 组合：3 次/小时
+- 同一邮箱：3 次/小时
 - 同一 IP（优先 `X-Real-IP`）：10 次/小时
 - 超限**不发信但照旧返回 200**，只记 WARN——不能让限流本身变成探测手段
 
