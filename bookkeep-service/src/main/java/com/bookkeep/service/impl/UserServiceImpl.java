@@ -1,0 +1,99 @@
+package com.bookkeep.service.impl;
+
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.bookkeep.common.exception.BusinessException;
+import com.bookkeep.common.result.ResultCode;
+import com.bookkeep.common.util.SecurityUtil;
+import com.bookkeep.model.dto.req.AccountDeleteReq;
+import com.bookkeep.model.dto.req.PasswordUpdateReq;
+import com.bookkeep.model.dto.req.UserUpdateReq;
+import com.bookkeep.model.dto.resp.UserResp;
+import com.bookkeep.model.entity.User;
+import com.bookkeep.service.UserService;
+import com.bookkeep.service.mapper.BookMapper;
+import com.bookkeep.service.mapper.UserMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+/**
+ * 用户自助管理实现。
+ * <p>写密码的两处（这里 + {@code ResetPasswordRunner}）都必须自增 {@code token_version}，
+ * 否则旧 token 能一直用到过期（PLAN §8 第 34 条）。
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class UserServiceImpl implements UserService {
+
+    private final UserMapper userMapper;
+    private final BookMapper bookMapper;
+    private final PasswordEncoder passwordEncoder;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public UserResp updateProfile(UserUpdateReq req) {
+        User user = requireCurrentUser();
+        String nickname = trimToNull(req.nickname());
+        String email = trimToNull(req.email());
+
+        // 只 set 会变的列，不用 updateById：避免把密码、token_version 整行再写一遍
+        userMapper.update(null, Wrappers.<User>update()
+                .eq("id", user.getId())
+                .set("nickname", nickname)
+                .set("email", email));
+
+        user.setNickname(nickname);
+        user.setEmail(email);
+        return UserResp.from(user);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updatePassword(PasswordUpdateReq req) {
+        User user = requireCurrentUser();
+        if (!passwordEncoder.matches(req.oldPassword(), user.getPassword())) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "旧密码不正确");
+        }
+
+        // 版本用 SQL 原子自增，别读出来 +1 再写（并发两次改密码会丢一次）
+        userMapper.update(null, Wrappers.<User>update()
+                .eq("id", user.getId())
+                .set("password", passwordEncoder.encode(req.newPassword()))
+                .setSql("token_version = token_version + 1"));
+
+        log.info("修改密码：userId={}，旧 token 已全部失效", user.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteAccount(AccountDeleteReq req) {
+        User user = requireCurrentUser();
+        if (!passwordEncoder.matches(req.password(), user.getPassword())) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "密码不正确");
+        }
+
+        // 名下账本一起进回收站（deleted=1 + deleted_at），15 天后由 BookPurgeJob 连同分类/流水物理删除。
+        // 手写 SQL：这里要一次改多行，且必须自己写 deleted_at（MP 的逻辑删除只写 deleted=1）
+        int books = bookMapper.softDeleteAllByUser(user.getId());
+        userMapper.deleteById(user.getId()); // 逻辑删除：username_active 变 NULL → 用户名可重新注册
+
+        log.info("注销账户：userId={}，username={}，回收站账本 {} 本", user.getId(), user.getUsername(), books);
+    }
+
+    private User requireCurrentUser() {
+        User user = userMapper.selectById(SecurityUtil.getUserId());
+        if (user == null) {
+            // token 过了版本校验但用户已被删：统一按未登录处理
+            throw new BusinessException(ResultCode.UNAUTHORIZED, "用户不存在或已注销");
+        }
+        return user;
+    }
+
+    private static String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+}

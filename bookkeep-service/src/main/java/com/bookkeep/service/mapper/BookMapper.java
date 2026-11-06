@@ -28,6 +28,13 @@ public interface BookMapper extends BaseMapper<Book> {
     @Select("SELECT id FROM book WHERE deleted = 1 AND deleted_at IS NOT NULL AND deleted_at < #{deadline}")
     List<Long> selectExpiredIds(@Param("deadline") LocalDateTime deadline);
 
+    /**
+     * 注销账户时把名下账本一次性送进回收站。
+     * <p>手写的原因：一次改多行、且必须自己写 {@code deleted_at}（MP 的 {@code deleteById} 只写 {@code deleted=1}）。
+     */
+    @Update("UPDATE book SET deleted = 1, deleted_at = NOW() WHERE user_id = #{userId} AND deleted = 0")
+    int softDeleteAllByUser(@Param("userId") Long userId);
+
     @Delete("DELETE FROM category WHERE book_id = #{bookId}")
     int hardDeleteCategories(@Param("bookId") Long bookId);
 
