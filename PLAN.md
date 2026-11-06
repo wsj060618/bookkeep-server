@@ -301,14 +301,14 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 |---|---|---|
 | PUT | `/api/users/me` | 改用户名 / 登录邮箱 `{username, email, password?}`：**改邮箱必须带当前密码**；用户名是显示名，改它不需要密码（✅ 已实现） |
 | PUT | `/api/users/me/password` | 改密码 `{oldPassword, newPassword}`；成功后 `token_version + 1`，所有旧 token 立即失效（✅ 已实现） |
-| DELETE | `/api/users/me` | 注销账户 `{password}` 二次确认：软删本人 + 名下账本，JWT 立即失效，用户名释放（✅ 已实现） |
+| DELETE | `/api/users/me` | 注销账户 `{password}` 二次确认：**立即物理删除**本人 + 名下账本/分类/流水/token，JWT 立即失效，用户名与邮箱释放（✅ 已实现） |
 
 - 改密码**必须校验旧密码**（否则拿到手机的人可以直接改掉），规则与注册一致（6–32 位）
 - 注销账户的定稿口径：
-  - 带当前密码二次确认；逻辑删除 `user.deleted=1`，生成列 `username_active` 变 NULL → **用户名可重新注册**（沿用现有设计）
-  - 名下 `book` 一并 `deleted=1 + deleted_at=now`，交给回收站 15 天清理任务物理删除（与单本删除同一套路径，别另写一份）
-  - **不提供注销后自助恢复**：user 已软删，登录查不到；要恢复只能改库（单机场景可接受，写进 backlog 的取舍里）
-  - 改密码 / 注销都让 `token_version + 1`，旧 token 立刻 401（见 §8 第 34 条）
+  - 带当前密码确认；**不做软删除、不进回收站**：直接删 user / book / category / transaction / password_reset_token
+  - 因此用户名与邮箱立即释放，可重新注册；数据**不可恢复**（要留档请在注销前用导出 CSV 或备份库）
+  - 删除顺序必须是子表优先：流水 → 分类 → 账本 → 用户（子查询依赖 book 还在，别把顺序写反）
+  - 旧 token 因用户行已不存在，在业务层返回 401（HTTP 200，沿用既有策略）
 - 前端入口：顶栏用户名 → 下拉「账号设置」（`/settings`），含改用户名/邮箱（改邮箱要当前密码）、改密码、注销账户（危险操作单独二次确认）
 - 头像上传**不做**（避免引入 OSS 与外部依赖）。
 

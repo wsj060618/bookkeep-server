@@ -11,6 +11,7 @@ import com.bookkeep.model.dto.resp.UserResp;
 import com.bookkeep.model.entity.User;
 import com.bookkeep.service.UserService;
 import com.bookkeep.service.mapper.BookMapper;
+import com.bookkeep.service.mapper.PasswordResetTokenMapper;
 import com.bookkeep.service.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +33,7 @@ public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
     private final BookMapper bookMapper;
+    private final PasswordResetTokenMapper tokenMapper;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -101,12 +103,14 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException(ResultCode.BAD_REQUEST, "密码不正确");
         }
 
-        // 名下账本一起进回收站（deleted=1 + deleted_at），15 天后由 BookPurgeJob 连同分类/流水物理删除。
-        // 手写 SQL：这里要一次改多行，且必须自己写 deleted_at（MP 的逻辑删除只写 deleted=1）
-        int books = bookMapper.softDeleteAllByUser(user.getId());
-        userMapper.deleteById(user.getId()); // 逻辑删除：username_active 变 NULL → 用户名可重新注册
+        // 注销 = 立即清空，不进回收站、不等 15 天：子表先删，账本最后删（子查询依赖 book 还在）
+        bookMapper.hardDeleteTransactionsByUser(user.getId());
+        bookMapper.hardDeleteCategoriesByUser(user.getId());
+        int books = bookMapper.hardDeleteBooksByUser(user.getId());
+        tokenMapper.deleteByUser(user.getId());
+        userMapper.hardDeleteById(user.getId());
 
-        log.info("注销账户：userId={}，username={}，回收站账本 {} 本", user.getId(), user.getUsername(), books);
+        log.info("注销账户（已物理删除）：userId={}，username={}，删除账本 {} 本", user.getId(), user.getUsername(), books);
     }
 
     private User requireCurrentUser() {

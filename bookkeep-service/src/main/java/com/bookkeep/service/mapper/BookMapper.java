@@ -30,10 +30,24 @@ public interface BookMapper extends BaseMapper<Book> {
 
     /**
      * 注销账户时把名下账本一次性送进回收站。
-     * <p>手写的原因：一次改多行、且必须自己写 {@code deleted_at}（MP 的 {@code deleteById} 只写 {@code deleted=1}）。
+     * <p>⚠️ 现在不用了：账号注销改为「立即物理删除」，见下方 hardDelete*ByUser。
+     * <p>保留注释是因为单本删除仍走 {@code deleted=1 + deleted_at} 那条路，别把两者混用。
      */
     @Update("UPDATE book SET deleted = 1, deleted_at = NOW() WHERE user_id = #{userId} AND deleted = 0")
     int softDeleteAllByUser(@Param("userId") Long userId);
+
+    /**
+     * 注销账户 = 立即清空：不受 15 天回收站限制。
+     * <p>顺序必须是流水 → 分类 → 账本（子表到父表）；子查询会连着回收站里的账本一起选中。
+     */
+    @Delete("DELETE FROM `transaction` WHERE book_id IN (SELECT id FROM book WHERE user_id = #{userId})")
+    int hardDeleteTransactionsByUser(@Param("userId") Long userId);
+
+    @Delete("DELETE FROM category WHERE book_id IN (SELECT id FROM book WHERE user_id = #{userId})")
+    int hardDeleteCategoriesByUser(@Param("userId") Long userId);
+
+    @Delete("DELETE FROM book WHERE user_id = #{userId}")
+    int hardDeleteBooksByUser(@Param("userId") Long userId);
 
     /** 「立即彻底删除」前先确认这本确实在**自己**的回收站里：活着的一律当作不存在 */
     @Select("SELECT id FROM book WHERE id = #{bookId} AND user_id = #{userId} AND deleted = 1")

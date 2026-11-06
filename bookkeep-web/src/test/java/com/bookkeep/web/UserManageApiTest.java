@@ -17,13 +17,11 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
-import java.sql.Timestamp;
 
 import static com.bookkeep.web.support.AuthHelper.PASSWORD;
 import static com.bookkeep.web.support.AuthHelper.nextUsername;
 import static com.bookkeep.web.support.AuthHelper.registerAndLogin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -166,7 +164,7 @@ class UserManageApiTest {
     }
 
     @Test
-    @DisplayName("注销成功：登录失效、旧 token 401、账本进回收站、同名可重新注册")
+    @DisplayName("注销成功：立即物理删除（用户/账本/分类/流水/token 全没了）、旧 token 401、同名可重新注册")
     void deleteAccount() throws Exception {
         String username = nextUsername("usr");
         String token = registerAndLogin(mockMvc, objectMapper, username);
@@ -190,14 +188,13 @@ class UserManageApiTest {
                 .andReturn());
         assertEquals(401, me.path("code").asInt());
 
-        // 数据不是删掉而是进回收站：deleted=1 且 deleted_at 有值
-        assertEquals(1, jdbcTemplate.queryForObject(
-                "SELECT deleted FROM book WHERE id = ?", Integer.class, bookId));
-        Timestamp deletedAt = jdbcTemplate.queryForObject(
-                "SELECT deleted_at FROM book WHERE id = ?", Timestamp.class, bookId);
-        assertNotNull(deletedAt, "deleted_at 必须写，否则 15 天清理任务永远选不到它");
+        // 注销 = 立即清空，不留墓碑、不进回收站
+        assertEquals(0, count("SELECT COUNT(*) FROM user WHERE username = ?", username));
+        assertEquals(0, count("SELECT COUNT(*) FROM book WHERE id = ?", bookId));
+        assertEquals(0, count("SELECT COUNT(*) FROM category WHERE book_id = ?", bookId));
+        assertEquals(0, count("SELECT COUNT(*) FROM `transaction` WHERE book_id = ?", bookId));
 
-        // 用户名释放：同一名字可以重新注册（生成列 username_active 变 NULL）
+        // 用户名/邮箱都释放了：同名同邮箱可以重新注册
         AuthHelper.register(mockMvc, objectMapper, username);
         assertEquals(200, loginCode(username, PASSWORD));
     }
@@ -217,6 +214,11 @@ class UserManageApiTest {
     private int tokenVersionOf(String username) {
         return jdbcTemplate.queryForObject(
                 "SELECT token_version FROM user WHERE username = ?", Integer.class, username);
+    }
+
+    private int count(String sql, Object arg) {
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class, arg);
+        return value == null ? 0 : value;
     }
 
     private JsonNode json(MvcResult result) throws Exception {

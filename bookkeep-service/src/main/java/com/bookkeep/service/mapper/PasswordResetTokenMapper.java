@@ -16,6 +16,10 @@ public interface PasswordResetTokenMapper extends BaseMapper<PasswordResetToken>
     @Update("UPDATE password_reset_token SET used_at = NOW() WHERE user_id = #{userId} AND used_at IS NULL")
     int invalidateAll(@Param("userId") Long userId);
 
+    /** 注销账户时直接清掉该用户的 token 记录（用户已物理删除，留着属于孤儿数据） */
+    @org.apache.ibatis.annotations.Delete("DELETE FROM password_reset_token WHERE user_id = #{userId}")
+    int deleteByUser(@Param("userId") Long userId);
+
     /** 标记单个 token 已使用（配合 condition 里的 used_at IS NULL 做到「只能用一次」） */
     @Update("UPDATE password_reset_token SET used_at = NOW() WHERE id = #{id} AND used_at IS NULL")
     int markUsed(@Param("id") Long id);
