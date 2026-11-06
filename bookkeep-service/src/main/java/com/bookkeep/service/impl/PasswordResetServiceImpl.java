@@ -59,21 +59,18 @@ public class PasswordResetServiceImpl implements PasswordResetService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void requestReset(ForgotPasswordReq req, String clientIp) {
-        String username = req.username().trim();
         String email = req.email().trim();
 
-        boolean withinPair = rateLimiter.tryAcquire(
-                "forgot:" + username + "|" + email.toLowerCase(Locale.ROOT), 3, Duration.ofHours(1));
+        boolean withinAccount = rateLimiter.tryAcquire(
+                "forgot:" + email.toLowerCase(Locale.ROOT), 3, Duration.ofHours(1));
         boolean withinIp = rateLimiter.tryAcquire("forgot-ip:" + clientIp, 10, Duration.ofHours(1));
-        if (!withinPair || !withinIp) {
-            log.warn("找回密码触发限流：username={}, ip={}", username, clientIp);
+        if (!withinAccount || !withinIp) {
+            log.warn("找回密码触发限流：ip={}", clientIp);
             return;
         }
 
-        // 用户名区分大小写、邮箱不区分：库里 username 是 as_cs，email 是 ai_ci，交给列排序规则比较
-        User user = userMapper.selectOne(Wrappers.<User>query()
-                .eq("username", username)
-                .eq("email", email));
+        // 邮箱是登录凭据且未删除行内唯一（uk_user_email_active），不用再拿用户名兜底
+        User user = userMapper.selectOne(Wrappers.<User>query().eq("email", email));
         if (user == null) {
             log.info("找回密码：账号信息不匹配，不发送（ip={}）", clientIp);
             return;

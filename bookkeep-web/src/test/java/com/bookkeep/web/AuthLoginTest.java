@@ -69,7 +69,6 @@ class AuthLoginTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.token").isNotEmpty())
                 .andExpect(jsonPath("$.data.user.username").value(username))
-                .andExpect(jsonPath("$.data.user.nickname").value(username))   // 注册时昵称留空 → 默认用户名
                 .andExpect(jsonPath("$.data.user.currentBookId").isNumber())
                 .andExpect(jsonPath("$.data.user.password").doesNotExist())    // 响应体绝不能带密码
                 .andExpect(jsonPath("$.data.user.deleted").doesNotExist())
@@ -100,7 +99,7 @@ class AuthLoginTest {
         login(username, "wrong-password")
                 .andExpect(status().isOk())                        // 业务错误仍走 HTTP 200 + body.code
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("用户名或密码错误"))
+                .andExpect(jsonPath("$.message").value("邮箱或密码错误"))
                 .andExpect(jsonPath("$.data").doesNotExist());
     }
 
@@ -117,7 +116,7 @@ class AuthLoginTest {
         JsonNode b = json(unknownUser);
         assertEquals(a.path("code").asInt(), b.path("code").asInt());
         assertEquals(a.path("message").asText(), b.path("message").asText());
-        assertEquals("用户名或密码错误", b.path("message").asText());
+        assertEquals("邮箱或密码错误", b.path("message").asText());
     }
 
     @Test
@@ -131,7 +130,7 @@ class AuthLoginTest {
         login(username, PASSWORD)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("用户名或密码错误"));
+                .andExpect(jsonPath("$.message").value("邮箱或密码错误"));
     }
 
     @Test
@@ -185,14 +184,15 @@ class AuthLoginTest {
     }
 
     private org.springframework.test.web.servlet.ResultActions register(String username, String bookName) throws Exception {
-        RegisterReq req = new RegisterReq(username, PASSWORD, null, username + "@example.com", bookName);
+        RegisterReq req = new RegisterReq(username, PASSWORD, username + "@example.com", bookName);
         return mockMvc.perform(post("/api/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)));
     }
 
     private org.springframework.test.web.servlet.ResultActions login(String username, String password) throws Exception {
-        LoginReq req = new LoginReq(username, password);
+        // 登录凭据是邮箱；测试约定 用户名@example.com
+        LoginReq req = new LoginReq(username + "@example.com", password);
         return mockMvc.perform(post("/api/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)));

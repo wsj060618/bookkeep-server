@@ -39,6 +39,7 @@ import jakarta.validation.constraints.Size;
 //}
 public record RegisterReq(
 
+        /** 显示名（不再是登录凭据）：4–20 位，区分大小写的字符串都行 */
         @NotBlank(message = "用户名不能为空")
         @Size(min = 4, max = 20, message = "用户名长度需为 4–20 位")
         @Pattern(regexp = "^[a-zA-Z0-9_]+$", message = "用户名只能包含字母、数字和下划线")
@@ -48,9 +49,7 @@ public record RegisterReq(
         @Size(min = 6, max = 32, message = "密码长度需为 6–32 位")
         String password,
 
-        @Size(max = 50, message = "昵称不能超过 50 个字符")
-        String nickname,
-
+        /** 登录凭据：必填且未删除行内唯一 */
         @NotBlank(message = "邮箱不能为空")
         @Email(message = "邮箱格式不正确")
         @Size(max = 100, message = "邮箱不能超过 100 个字符")

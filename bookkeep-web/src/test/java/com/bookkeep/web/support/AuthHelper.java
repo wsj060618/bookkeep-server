@@ -65,8 +65,8 @@ public final class AuthHelper {
     }
 
     public static void register(MockMvc mockMvc, ObjectMapper objectMapper, String username) throws Exception {
-        // 邮箱自本版起必填（找回密码通道），测试统一给一个不会真发信的地址
-        RegisterReq req = new RegisterReq(username, PASSWORD, null, username + "@example.com", null);
+        // 邮箱现在是登录凭据且必填：测试统一用「用户名@example.com」，不会真发信
+        RegisterReq req = new RegisterReq(username, PASSWORD, emailOf(username), null);
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
@@ -74,10 +74,21 @@ public final class AuthHelper {
                 .andExpect(jsonPath("$.code").value(200));
     }
 
+    /** 测试账号的登录邮箱约定：{@code 用户名@example.com} */
+    public static String emailOf(String username) {
+        return username + "@example.com";
+    }
+
     public static String login(MockMvc mockMvc, ObjectMapper objectMapper, String username) throws Exception {
+        return loginByEmail(mockMvc, objectMapper, emailOf(username), PASSWORD);
+    }
+
+    /** 登录（邮箱 + 密码），返回 token */
+    public static String loginByEmail(MockMvc mockMvc, ObjectMapper objectMapper, String email, String password)
+            throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"" + PASSWORD + "\"}"))
+                        .content("{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn();
@@ -91,7 +102,7 @@ public final class AuthHelper {
             throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"" + PASSWORD + "\"}"))
+                        .content("{\"email\":\"" + emailOf(username) + "\",\"password\":\"" + PASSWORD + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn();

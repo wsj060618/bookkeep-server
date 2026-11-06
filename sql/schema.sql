@@ -28,11 +28,10 @@ USE bookkeep;
 CREATE TABLE `user` (
   id              BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   username        VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs
-                    NOT NULL COMMENT '登录名，区分大小写',
+                    NOT NULL COMMENT '显示名，区分大小写；可在账号设置里改',
   password        VARCHAR(100) NOT NULL COMMENT 'BCrypt 密文，禁止存明文',
   token_version   INT NOT NULL DEFAULT 0 COMMENT '令牌版本：改密码/重置时 +1，旧 JWT 立即失效',
-  nickname        VARCHAR(50)  COMMENT '昵称',
-  email           VARCHAR(100) NOT NULL COMMENT '邮箱，必填：找回密码的唯一通道',
+  email           VARCHAR(100) NOT NULL COMMENT '邮箱，登录凭据：必填且未删除行内唯一',
   avatar          VARCHAR(500) COMMENT '头像 URL，可空',
   current_book_id BIGINT       COMMENT '当前账本 id，可空（删除账本时会重指）',
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -41,7 +40,11 @@ CREATE TABLE `user` (
   username_active VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs
                     GENERATED ALWAYS AS (IF(`deleted` = 0, `username`, NULL)) STORED
                     COMMENT '仅未删除行等于 username，用于唯一约束',
+  email_active    VARCHAR(100)
+                    GENERATED ALWAYS AS (IF(`deleted` = 0, `email`, NULL)) STORED
+                    COMMENT '仅未删除行等于 email，用于唯一约束',
   UNIQUE KEY uk_user_username_active (username_active),
+  UNIQUE KEY uk_user_email_active (email_active),
   KEY idx_user_username (username)
 ) COMMENT='用户表';
 

@@ -53,28 +53,51 @@ class UserManageApiTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("改昵称/邮箱：/me 立刻反映；非法邮箱 → code=400")
+    @DisplayName("改用户名/邮箱：改名不需要密码，改邮箱要密码；非法邮箱 400")
     void updateProfile() throws Exception {
         String username = nextUsername("usr");
         String token = registerAndLogin(mockMvc, objectMapper, username);
+        String email = AuthHelper.emailOf(username);
+        String renamed = username + "x";
 
+        // 1) 只改显示名：邮箱原样带回，不需要密码
         mockMvc.perform(put("/api/users/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"nickname\":\"新昵称\",\"email\":\"me@example.com\"}"))
+                        .content("{\"username\":\"" + renamed + "\",\"email\":\"" + email + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.nickname").value("新昵称"))
+                .andExpect(jsonPath("$.data.username").value(renamed))
+                .andExpect(jsonPath("$.data.email").value(email));
+
+        // 2) 改邮箱但不带密码：拒绝（邮箱是登录凭据）
+        mockMvc.perform(put("/api/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + renamed + "\",\"email\":\"me@example.com\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("修改邮箱需要输入当前密码"));
+
+        // 3) 带对密码：改成功，/me 立刻反映
+        mockMvc.perform(put("/api/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + renamed + "\",\"email\":\"me@example.com\","
+                                + "\"password\":\"" + PASSWORD + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.email").value("me@example.com"));
 
         mockMvc.perform(get("/api/auth/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
-                .andExpect(jsonPath("$.data.nickname").value("新昵称"))
+                .andExpect(jsonPath("$.data.username").value(renamed))
                 .andExpect(jsonPath("$.data.email").value("me@example.com"));
 
+        // 4) 非法邮箱：参数校验拦下
         mockMvc.perform(put("/api/users/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"not-an-email\"}"))
+                        .content("{\"username\":\"" + renamed + "\",\"email\":\"not-an-email\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400));
     }
@@ -184,7 +207,8 @@ class UserManageApiTest {
     private int loginCode(String username, String password) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new LoginReq(username, password))))
+                        .content(objectMapper.writeValueAsString(
+                                new LoginReq(AuthHelper.emailOf(username), password))))
                 .andExpect(status().isOk())
                 .andReturn();
         return json(result).path("code").asInt();

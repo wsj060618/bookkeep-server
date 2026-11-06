@@ -14,6 +14,7 @@ import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,17 +38,40 @@ public class UserServiceImpl implements UserService {
     @Transactional(rollbackFor = Exception.class)
     public UserResp updateProfile(UserUpdateReq req) {
         User user = requireCurrentUser();
-        String nickname = trimToNull(req.nickname());
-        // 邮箱必填（DB 也是 NOT NULL）：@NotBlank 已拦住空串，这里只做 trim
+        String username = req.username().trim();
         String email = req.email().trim();
 
-        // 只 set 会变的列，不用 updateById：避免把密码、token_version 整行再写一遍
-        userMapper.update(null, Wrappers.<User>update()
-                .eq("id", user.getId())
-                .set("nickname", nickname)
-                .set("email", email));
+        boolean usernameChanged = !username.equals(user.getUsername());
+        boolean emailChanged = !email.equalsIgnoreCase(user.getEmail());
 
-        user.setNickname(nickname);
+        if (usernameChanged && userMapper.selectCount(Wrappers.<User>query()
+                .eq("username", username).ne("id", user.getId())) > 0) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "用户名已被使用");
+        }
+        if (emailChanged) {
+            // 邮箱是登录凭据，改它等于改登录名：必须证明自己是本人
+            if (!StringUtils.hasText(req.password())
+                    || !passwordEncoder.matches(req.password(), user.getPassword())) {
+                throw new BusinessException(ResultCode.BAD_REQUEST, "修改邮箱需要输入当前密码");
+            }
+            if (userMapper.selectCount(Wrappers.<User>query()
+                    .eq("email", email).ne("id", user.getId())) > 0) {
+                throw new BusinessException(ResultCode.BAD_REQUEST, "邮箱已被注册");
+            }
+        }
+
+        // 只 set 会变的列，不用 updateById：避免把密码、token_version 整行再写一遍
+        try {
+            userMapper.update(null, Wrappers.<User>update()
+                    .eq("id", user.getId())
+                    .set("username", username)
+                    .set("email", email));
+        } catch (DuplicateKeyException e) {
+            // 并发下两个账号同时改成同一个名字/邮箱，由唯一索引兜底
+            throw new BusinessException(ResultCode.BAD_REQUEST, "用户名或邮箱已被使用");
+        }
+
+        user.setUsername(username);
         user.setEmail(email);
         return UserResp.from(user);
     }
@@ -92,9 +116,5 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException(ResultCode.UNAUTHORIZED, "用户不存在或已注销");
         }
         return user;
-    }
-
-    private static String trimToNull(String value) {
-        return StringUtils.hasText(value) ? value.trim() : null;
     }
 }

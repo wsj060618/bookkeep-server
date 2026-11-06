@@ -6,12 +6,10 @@ import jakarta.validation.constraints.Size;
 
 /**
  * 申请重置密码（POST /api/auth/forgot-password）。
- * <p>用户名 + 邮箱必须同时匹配：`user.email` 没有唯一索引，只凭邮箱定位不到唯一账号。
+ * <p>邮箱现在是登录凭据且唯一（`uk_user_email_active`），所以只凭邮箱就能定位账号，
+ * 不用再让用户记一个「用户名」。
  */
 public record ForgotPasswordReq(
-
-        @NotBlank(message = "用户名不能为空")
-        String username,
 
         @NotBlank(message = "邮箱不能为空")
         @Email(message = "邮箱格式不正确")

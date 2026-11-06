@@ -5,6 +5,7 @@ import com.bookkeep.model.dto.req.LoginReq;
 import com.bookkeep.model.dto.req.ResetPasswordReq;
 import com.bookkeep.service.mail.PasswordResetMailer;
 import com.bookkeep.service.support.SimpleRateLimiter;
+import com.bookkeep.web.support.AuthHelper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -84,7 +85,7 @@ class PasswordResetApiTest {
         String username = nextUsername("rst");
         registerAndLogin(mockMvc, objectMapper, username);
 
-        forgot(username, "someone-else@example.com")
+        forgot("someone-else@example.com")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
@@ -98,7 +99,7 @@ class PasswordResetApiTest {
         registerAndLogin(mockMvc, objectMapper, username);
         String email = username + "@example.com";
 
-        forgot(username, email)
+        forgot(email)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
@@ -121,7 +122,7 @@ class PasswordResetApiTest {
         String oldToken = registerAndLogin(mockMvc, objectMapper, username);
         String email = username + "@example.com";
 
-        forgot(username, email).andExpect(jsonPath("$.code").value(200));
+        forgot(email).andExpect(jsonPath("$.code").value(200));
         String token = tokenOf(capturedLink(email));
 
         submitReset(token, NEW_PASSWORD)
@@ -147,7 +148,7 @@ class PasswordResetApiTest {
         String username = nextUsername("rst");
         registerAndLogin(mockMvc, objectMapper, username);
 
-        forgot(username, username + "@example.com");
+        forgot(username + "@example.com");
         String token = tokenOf(capturedLink(username + "@example.com"));
 
         jdbcTemplate.update("UPDATE password_reset_token SET expires_at = DATE_SUB(NOW(), INTERVAL 1 MINUTE) "
@@ -167,7 +168,7 @@ class PasswordResetApiTest {
         String email = username + "@example.com";
 
         for (int i = 0; i < 4; i++) {
-            forgot(username, email).andExpect(jsonPath("$.code").value(200));
+            forgot(email).andExpect(jsonPath("$.code").value(200));
         }
 
         verify(mailer, times(3)).send(eq(email), eq(username), anyString(), anyInt());
@@ -180,9 +181,9 @@ class PasswordResetApiTest {
         registerAndLogin(mockMvc, objectMapper, username);
         String email = username + "@example.com";
 
-        forgot(username, email);
+        forgot(email);
         String first = tokenOf(capturedLink(email));
-        forgot(username, email);
+        forgot(email);
         String second = tokenOf(capturedLink(email));
 
         submitReset(first, NEW_PASSWORD)
@@ -193,9 +194,9 @@ class PasswordResetApiTest {
 
     // ---------- 辅助方法 ----------
 
-    private org.springframework.test.web.servlet.ResultActions forgot(String username, String email)
+    private org.springframework.test.web.servlet.ResultActions forgot(String email)
             throws Exception {
-        ForgotPasswordReq req = new ForgotPasswordReq(username, email);
+        ForgotPasswordReq req = new ForgotPasswordReq(email);
         return mockMvc.perform(post("/api/auth/forgot-password")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)));
@@ -224,7 +225,7 @@ class PasswordResetApiTest {
     private int loginCode(String username, String password) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new LoginReq(username, password))))
+                        .content(objectMapper.writeValueAsString(new LoginReq(AuthHelper.emailOf(username), password))))
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8));

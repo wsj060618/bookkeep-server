@@ -52,7 +52,7 @@ class AuthRegisterTest {
     @DisplayName("注册成功：用户落库（BCrypt）、班级账本建好、13 条模板分类、current_book_id 回写")
     void registerSuccess() throws Exception {
         String username = nextUsername();
-        RegisterReq req = new RegisterReq(username, "abc123456", "小明", "ming@example.com", "我的账本");
+        RegisterReq req = new RegisterReq(username, "abc123456", "ming@example.com", "我的账本");
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -60,7 +60,6 @@ class AuthRegisterTest {
                 .andExpect(status().isOk())                       // 业务错误才走 200 + code，成功就是 200
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.username").value(username))
-                .andExpect(jsonPath("$.data.nickname").value("小明"))
                 .andExpect(jsonPath("$.data.email").value("ming@example.com"))
                 .andExpect(jsonPath("$.data.currentBookId").isNumber())
                 .andExpect(jsonPath("$.data.password").doesNotExist()); // 响应体绝不能带密码
@@ -90,17 +89,18 @@ class AuthRegisterTest {
     }
 
     @Test
-    @DisplayName("账本名和昵称都可以不填：账本名默认「班级账本」，昵称默认用户名")
-    void bookNameAndNicknameHaveDefaults() throws Exception {
+    @DisplayName("账本名可以不填：默认「班级账本」")
+    void bookNameHasDefault() throws Exception {
         String username = nextUsername();
-        RegisterReq req = new RegisterReq(username, "abc123456", null, "u@example.com", null);
+        RegisterReq req = new RegisterReq(username, "abc123456", "u@example.com", null);
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.nickname").value(username));
+                .andExpect(jsonPath("$.data.username").value(username))
+                .andExpect(jsonPath("$.data.email").value("u@example.com"));
 
         Long bookId = jdbcTemplate.queryForObject(
                 "SELECT current_book_id FROM user WHERE username = ?", Long.class, username);
@@ -174,8 +174,8 @@ class AuthRegisterTest {
         String upper = Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
         assertNotEquals(lower, upper);
 
-        register(upper).andExpect(jsonPath("$.code").value(200));
-        register(lower).andExpect(jsonPath("$.code").value(200));
+        registerWithEmail(upper, lower + ".upper@example.com").andExpect(jsonPath("$.code").value(200));
+        registerWithEmail(lower, lower + ".lower@example.com").andExpect(jsonPath("$.code").value(200));
 
         // 只按 username 查会查出两行（正好验证 idx_user_username 不唯一），
         // 所以业务查询必须带 deleted = 0 —— 现有 MP 查询都会自动拼
@@ -193,7 +193,7 @@ class AuthRegisterTest {
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RegisterReq(username, "123", null, "u@example.com", "账本"))))
+                                new RegisterReq(username, "123", "u@example.com", "账本"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message", containsString("密码长度")));
@@ -202,7 +202,7 @@ class AuthRegisterTest {
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RegisterReq("bad name!", "abc123456", null, "u@example.com", "账本"))))
+                                new RegisterReq("bad name!", "abc123456", "u@example.com", "账本"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message", containsString("用户名只能包含")));
@@ -219,7 +219,12 @@ class AuthRegisterTest {
 
     /** 发一次注册请求（不含断言，交给调用方继续链式断言） */
     private ResultActions register(String username) throws Exception {
-        RegisterReq req = new RegisterReq(username, "abc123456", null, "u@example.com", "测试账本");
+        return registerWithEmail(username, username + "@example.com");
+    }
+
+    /** 指定邮箱注册（用户名只差大小写时，邮箱必须给不同的值：email 唯一索引是 ai_ci，大小写不敏感） */
+    private ResultActions registerWithEmail(String username, String email) throws Exception {
+        RegisterReq req = new RegisterReq(username, "abc123456", email, "测试账本");
         return mockMvc.perform(post("/api/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)));

@@ -55,28 +55,30 @@ public class AuthServiceImpl implements AuthService {
     @Transactional(rollbackFor = Exception.class)
     public UserResp register(RegisterReq req) {
         String username = req.username().trim();
+        String email = req.email().trim();
         // 只有一种账本类型（班级），模板固定取 class；请求里不再有 bookType 字段
         List<CategoryTemplate.Seed> seeds = CategoryTemplate.classCategories();
 
-        // 用户名预检：只是为了给出友好提示，真正的唯一性由 uk_user_username_active 保证
-        // MP 的逻辑删除会自动给这里拼 deleted = 0，墓碑行查不出来 —— 这正是现在的语义：
-        // 注销后的名字可以重新注册（墓碑行的 username_active 是 NULL，不参与唯一约束）
+        // 预检只是为了给出友好提示，真正的唯一性由生成列唯一索引保证：
+        // 用户名 → uk_user_username_active，邮箱 → uk_user_email_active（都是「仅未删除行」）
         if (userMapper.selectCount(Wrappers.<User>query().eq("username", username)) > 0) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "用户名已存在");
         }
+        if (userMapper.selectCount(Wrappers.<User>query().eq("email", email)) > 0) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "邮箱已被注册");
+        }
 
-        // 1) 用户：密码只存 BCrypt 哈希；昵称留空则默认用用户名，前端不用再判空
+        // 1) 用户：密码只存 BCrypt 哈希；邮箱是登录凭据，用户名只是显示名
         User user = new User();
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(req.password()));
-        user.setNickname(StringUtils.hasText(req.nickname()) ? req.nickname().trim() : username);
-        user.setEmail(req.email().trim());
+        user.setEmail(email);
         try {
             userMapper.insert(user);
         } catch (DuplicateKeyException e) {
-            // 并发注册同一用户名（两个请求都通过了预检）→ 统一按业务异常处理。
-            // 墓碑行不会走到这里：它们在 uk_user_username_active 里的值是 NULL
-            throw new BusinessException(ResultCode.BAD_REQUEST, "用户名已存在");
+            // 并发注册同一用户名/邮箱（都通过了预检）→ 统一按业务异常处理。
+            // 墓碑行不会走到这里：它们在生成列里是 NULL
+            throw new BusinessException(ResultCode.BAD_REQUEST, "用户名或邮箱已被注册");
         }
 
         // 2) 班级账本：注册必建，名字可空（为空用默认「班级账本」）
@@ -121,11 +123,13 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(readOnly = true)
     public LoginResp login(LoginReq req) {
-        String username = req.username().trim();
+        String email = req.email().trim();
 
-        User user = userMapper.selectOne(Wrappers.<User>query().eq("username", username));
+        // 邮箱未删除行内唯一（uk_user_email_active），所以能直接定位到唯一账号
+        User user = userMapper.selectOne(Wrappers.<User>query().eq("email", email));
         if (user == null || !passwordEncoder.matches(req.password(), user.getPassword())) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "用户名或密码错误");
+            // 与「密码错」同一句：不让接口变成邮箱是否注册过的探测器
+            throw new BusinessException(ResultCode.BAD_REQUEST, "邮箱或密码错误");
         }
 
         // 账本按 id 升序，第一本（注册时建的）排在最前，前端切换列表的顺序才稳定
@@ -136,7 +140,7 @@ public class AuthServiceImpl implements AuthService {
                 .map(book -> BookResp.from(book, user.getCurrentBookId()))
                 .toList();
 
-        log.info("登录成功：userId={}, username={}, 账本 {} 本", user.getId(), username, books.size());
+        log.info("登录成功：userId={}, email={}, 账本 {} 本", user.getId(), email, books.size());
         return new LoginResp(jwtUtil.generateToken(user.getId(), user.getTokenVersion()),
                 UserResp.from(user), books);
     }
