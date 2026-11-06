@@ -274,8 +274,8 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/books` | 我的账本（不含回收站），带 `current` 标记 |
-| POST | `/api/books` | 新建 `{name}`，事务内预置 13 条分类，并自动切为当前 |
-| PUT | `/api/books/{id}` | 重命名 `{name}`，已有 `shareToken` 不变 |
+| POST | `/api/books` | 新建 `{name, semesterEnd?}`，事务内预置 13 条分类，并自动切为当前 |
+| PUT | `/api/books/{id}` | **修改账本** `{name, semesterEnd?}`（改名 + 改学期，一次提交）；已有 `shareToken` 不变 |
 | POST | `/api/books/{id}/share` | 生成 / 重生公示链接 → `{token, expiresAt}`；**每次调用都换新 token** |
 | PUT | `/api/books/{id}/current` | 切换当前账本，返回切换后的完整列表 |
 | DELETE | `/api/books/{id}` | 删除 → 进回收站；**至少保留一本** |
@@ -745,12 +745,12 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/books` | `{name, semesterEnd?}`（`yyyy-MM-dd`，可空） |
-| PUT | `/api/books/{id}` | 改名时也可改 `semesterEnd` |
+| PUT | `/api/books/{id}` | **修改账本**：`{name, semesterEnd?}`（改名 + 改学期一次提交；`semesterEnd: null` 表示清空） |
 | PUT | `/api/books/{id}/archive` | `{archived: true/false}`；**幂等**，重复调用返回当前状态 |
 | GET | `/api/books` | `BookResp` 增加 `semesterEnd`、`archived` |
 
 **改动清单**
 
 - 后端：迁移（两列 + `archived` 默认 0）+ `BookResp`/`BookUpdateReq` + `BookService` 归档开关 + **写操作统一校验**（`TransactionService` 与 `CategoryService` 落库前查当前账本是否 archived，返回 `400 该学期已归档，先取消归档再记账`）+ `BookManageApiTest` 补「归档后写流水/改分类 400」「取消归档后恢复可写」「历史账本 semester_end 为 NULL 正常」
-- 前端：建账本/改名弹窗加截止日期；账本页加「归档/取消归档」开关与徽标；顶栏显示截止日期；归档账本上「记一笔」按钮禁用并给提示
+- 前端：建账本弹窗加截止日期；账本页把「改名」改成「修改」弹窗（名字 + 截止日期，一次提交）；加「归档/取消归档」开关与徽标；顶栏显示截止日期；归档账本上「记一笔」按钮禁用并给提示
 - 文档：`docs/接口文档.md` 账本字段与三个接口、PLAN §5.2 契约
