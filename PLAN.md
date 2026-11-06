@@ -589,16 +589,23 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
     `LocalDateTime.now()`（应用时钟）。别一边写 `NOW()` 一边用 Java 时间——容器/DB 时钟差几秒，
     就会出现「刚生成的链接偶发 404」或「过期链接多活一会儿」。迁移里补老数据用 `DATE_ADD(NOW(), …)`
     只是一次性补值，不参与运行时判断
+36. **Nginx 配置不能带 UTF-8 BOM**：Windows PowerShell 写文件很容易带上 BOM，nginx 会把 BOM 当成
+    第一个指令的一部分，报 `unknown directive "﻿"`（且行号指向第 5 行，极具误导性）。
+    改完 `deploy/nginx/nginx.conf` 后用 `UTF8Encoding($false)` 重写，或先跑 `nginx -t`
+37. **`add_header` 不继承**：`location` 里只要出现任何一条 `add_header`，`server` 级的安全头就全部失效。
+    `/index.html`（Cache-Control）和云端各 location 都必须把安全头再写一遍，否则「看起来配了其实没生效」
+38. **Docker 里后端必须监听 0.0.0.0**：默认 `server.address=127.0.0.1` 只适合 Windows 直跑；
+    compose 里用 `SERVER_ADDRESS=0.0.0.0` 让 nginx 容器能访问，同时**绝不能 publish 8080**，
+    否则回环隔离就白做了
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
-1. **无限流**（**公网部署的前置条件**）：注册 / 登录都没有失败计数、验证码或 IP 限流，可被脚本批量注册和撞库；
-   BCrypt 每次校验约 60–100 ms，几十个并发登录就能打满 1 核小机器的 CPU。
-   登录侧「用户不存在与密码错误同一提示」只防枚举，不防暴力尝试。
-   计划（W4 上线前必须完成）：内存版 Caffeine，**按 `IP + email` 计失败次数，5 次 / 5 分钟**，
-   成功登录后清零；再补一条**单 IP 每分钟 30 次**的粗粒度限制（防用户名喷洒）。
-   Nginx 必须透传 `X-Real-IP`（见 §8 第 21 条），否则按 IP 限流形同虚设。
-   **本地 / 局域网使用不需要限流**（外网访问不到）。
+1. **限流 ✅ 已实现（2026-11-07，公网前置条件）**：`support/AuthThrottle`（Caffeine，进程内）：
+   - 同一 `IP + email` 连续失败 **5 次锁 5 分钟**，登录成功清零；单 IP **30 次/分钟**登录请求上限
+   - 单 IP **5 次/小时**成功注册上限（防批量注册）
+   - 严格值只在 `application-prod.yml`；开发/局域网默认放宽到几乎不限
+   - Nginx 侧对 `/api/auth/(login|register|forgot-password)` 另加 20 次/分钟（防绕过应用层）
+   - 仍属**单实例内存**计数：多副本部署需换共享存储；`X-Real-IP` 已透传（§8 第 21 条）
 2. **邮箱必填且唯一，但未验证**：`user.email` 自本版起是登录凭据，必填、未删除行内唯一
    （`email_active` 生成列 + 唯一索引），注销后随账号释放。邮箱**不做验证**（不发确认邮件），
    前端不得展示「已验证」；同一邮箱不能挂多个账号（注册会 400）。
