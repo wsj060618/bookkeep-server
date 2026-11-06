@@ -70,7 +70,7 @@ public class AuthServiceImpl implements AuthService {
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(req.password()));
         user.setNickname(StringUtils.hasText(req.nickname()) ? req.nickname().trim() : username);
-        user.setEmail(StringUtils.hasText(req.email()) ? req.email().trim() : null);
+        user.setEmail(req.email().trim());
         try {
             userMapper.insert(user);
         } catch (DuplicateKeyException e) {

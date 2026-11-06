@@ -41,7 +41,8 @@ public class SecurityConfig {
         http.csrf(AbstractHttpConfigurer::disable) // 无状态 + Bearer token，不需要 CSRF token
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)) // 不建 session
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/register", "/api/auth/login").permitAll() // 登录前唯一可访问的两个接口
+                        .requestMatchers("/api/auth/register", "/api/auth/login",
+                                "/api/auth/forgot-password", "/api/auth/reset-password").permitAll() // 登录/找回密码，其余 /api/auth/** 仍需认证
                         // 公示页：同学看账不需要账号，这是公网唯一放行的只读入口（PLAN §5.9）
                         .requestMatchers("/api/public/report/**").permitAll()
                         .requestMatchers("/error").permitAll() // 容器错误转发也是过滤器链的一环，放行避免 401 盖掉真实错误

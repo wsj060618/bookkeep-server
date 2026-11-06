@@ -25,6 +25,7 @@ class UserMapperTest {
         User user = new User();
         user.setUsername("test_user_" + System.currentTimeMillis());
         user.setPassword("irrelevant");
+        user.setEmail("mapper@example.com"); // email 必填（NOT NULL）
         userMapper.insert(user);
         assertNotNull(user.getId());
 

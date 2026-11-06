@@ -2,12 +2,17 @@ package com.bookkeep.web.controller;
 
 import com.bookkeep.common.result.Result;
 import com.bookkeep.service.AuthService;
+import com.bookkeep.service.PasswordResetService;
+import com.bookkeep.model.dto.req.ForgotPasswordReq;
 import com.bookkeep.model.dto.req.LoginReq;
 import com.bookkeep.model.dto.req.RegisterReq;
+import com.bookkeep.model.dto.req.ResetPasswordReq;
 import com.bookkeep.model.dto.resp.LoginResp;
 import com.bookkeep.model.dto.resp.UserResp;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -25,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final PasswordResetService passwordResetService;
 
     /**
      * 注册并创建第一本账本
@@ -54,5 +60,33 @@ public class AuthController {
     @GetMapping("/me")
     public Result<UserResp> me() {
         return Result.success(authService.getCurrentUser());
+    }
+
+    /**
+     * 申请重置密码（匿名）
+     * <p><strong>永远返回同一句提示</strong>：账号信息是否匹配、是否限流、SMTP 是否可用都不对外暴露，
+     * 否则这个接口就成了「这个账号/邮箱存不存在」的探测器。
+     */
+    @PostMapping("/forgot-password")
+    public Result<Void> forgotPassword(@Valid @RequestBody ForgotPasswordReq req,
+                                       HttpServletRequest request) {
+        passwordResetService.requestReset(req, clientIp(request));
+        return Result.success();
+    }
+
+    /**
+     * 用邮件里的一次性 token 重置密码（匿名）
+     * <p>成功后该用户所有旧 token 立即失效（`token_version + 1`）。
+     */
+    @PostMapping("/reset-password")
+    public Result<Void> resetPassword(@Valid @RequestBody ResetPasswordReq req) {
+        passwordResetService.resetPassword(req);
+        return Result.success();
+    }
+
+    /** Nginx 反代后 getRemoteAddr() 永远是 127.0.0.1，真实 IP 在 X-Real-IP（PLAN §8 第 21 条） */
+    private static String clientIp(HttpServletRequest request) {
+        String realIp = request.getHeader("X-Real-IP");
+        return StringUtils.hasText(realIp) ? realIp.trim() : request.getRemoteAddr();
     }
 }

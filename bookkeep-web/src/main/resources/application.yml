@@ -14,6 +14,26 @@ spring:
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: GMT+8
+  # 找回密码发信（QQ 邮箱 SMTP）。三个值都来自环境变量；没配时启动照常，
+  # forgot-password 仍回 200 但不发信（见 PasswordResetServiceImpl）
+  mail:
+    host: ${MAIL_HOST:smtp.qq.com}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    default-encoding: UTF-8
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.ssl.enable: true
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 10000
+
+app:
+  mail:
+    # 发件人，必须是 MAIL_USERNAME 那个邮箱（QQ 会校验发件人一致）
+    from: ${MAIL_FROM:}
+  # 拼重置链接用（邮件里点到哪台机器）；本机部署填局域网地址
+  base-url: ${APP_BASE_URL:http://localhost}
 
 mybatis-plus:
   # 手写 SQL 放 XML：默认值就是 classpath*:/mapper/**/*.xml，这里显式写出来，

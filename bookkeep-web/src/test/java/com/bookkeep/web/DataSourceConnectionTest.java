@@ -44,6 +44,6 @@ class DataSourceConnectionTest {
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'bookkeep'",
                 Integer.class);
         assertNotNull(count);
-        assertEquals(5, count, "bookkeep 库应有 5 张表");
+        assertEquals(6, count, "bookkeep 库应有 6 张表（多了 password_reset_token）");
     }
 }

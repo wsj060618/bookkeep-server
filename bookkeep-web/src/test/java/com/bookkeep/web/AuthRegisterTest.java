@@ -93,7 +93,7 @@ class AuthRegisterTest {
     @DisplayName("账本名和昵称都可以不填：账本名默认「班级账本」，昵称默认用户名")
     void bookNameAndNicknameHaveDefaults() throws Exception {
         String username = nextUsername();
-        RegisterReq req = new RegisterReq(username, "abc123456", null, null, null);
+        RegisterReq req = new RegisterReq(username, "abc123456", null, "u@example.com", null);
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -106,6 +106,25 @@ class AuthRegisterTest {
                 "SELECT current_book_id FROM user WHERE username = ?", Long.class, username);
         assertEquals("班级账本", jdbcTemplate.queryForObject(
                 "SELECT name FROM book WHERE id = ?", String.class, bookId));
+    }
+
+    @Test
+    @DisplayName("邮箱必填：不传或格式错 → 400（它是找回密码的唯一通道）")
+    void emailIsRequired() throws Exception {
+        String username = nextUsername();
+
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + username + "\",\"password\":\"abc123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400));
+
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + username + "\",\"password\":\"abc123456\","
+                                + "\"email\":\"not-an-email\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400));
     }
 
     @Test
@@ -128,8 +147,8 @@ class AuthRegisterTest {
     void softDeletedUsernameCanBeReused() throws Exception {
         String username = nextUsername();
         // 造一条已注销的历史账号：deleted=1 → 生成列 username_active 为 NULL
-        jdbcTemplate.update("INSERT INTO user (username, password, deleted) VALUES (?, ?, 1)",
-                username, "$2a$10$abcdefghijklmnopqrstuv");
+        jdbcTemplate.update("INSERT INTO user (username, password, email, deleted) VALUES (?, ?, ?, 1)",
+                username, "$2a$10$abcdefghijklmnopqrstuv", username + "@example.com");
 
         register(username)
                 .andExpect(status().isOk())
@@ -174,7 +193,7 @@ class AuthRegisterTest {
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RegisterReq(username, "123", null, null, "账本"))))
+                                new RegisterReq(username, "123", null, "u@example.com", "账本"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message", containsString("密码长度")));
@@ -183,7 +202,7 @@ class AuthRegisterTest {
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RegisterReq("bad name!", "abc123456", null, null, "账本"))))
+                                new RegisterReq("bad name!", "abc123456", null, "u@example.com", "账本"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message", containsString("用户名只能包含")));
@@ -200,7 +219,7 @@ class AuthRegisterTest {
 
     /** 发一次注册请求（不含断言，交给调用方继续链式断言） */
     private ResultActions register(String username) throws Exception {
-        RegisterReq req = new RegisterReq(username, "abc123456", null, null, "测试账本");
+        RegisterReq req = new RegisterReq(username, "abc123456", null, "u@example.com", "测试账本");
         return mockMvc.perform(post("/api/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)));

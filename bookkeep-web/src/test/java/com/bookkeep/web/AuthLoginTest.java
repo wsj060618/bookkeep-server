@@ -125,8 +125,8 @@ class AuthLoginTest {
     void softDeletedUserRejected() throws Exception {
         String username = nextUsername();
         // 密码哈希随便给：这条记录根本查不出来，走的是「用户不存在」分支
-        jdbcTemplate.update("INSERT INTO user (username, password, deleted) VALUES (?, ?, 1)",
-                username, "$2a$10$abcdefghijklmnopqrstuv");
+        jdbcTemplate.update("INSERT INTO user (username, password, email, deleted) VALUES (?, ?, ?, 1)",
+                username, "$2a$10$abcdefghijklmnopqrstuv", username + "@example.com");
 
         login(username, PASSWORD)
                 .andExpect(status().isOk())
@@ -185,7 +185,7 @@ class AuthLoginTest {
     }
 
     private org.springframework.test.web.servlet.ResultActions register(String username, String bookName) throws Exception {
-        RegisterReq req = new RegisterReq(username, PASSWORD, null, null, bookName);
+        RegisterReq req = new RegisterReq(username, PASSWORD, null, username + "@example.com", bookName);
         return mockMvc.perform(post("/api/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)));

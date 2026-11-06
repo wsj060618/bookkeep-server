@@ -65,7 +65,8 @@ public final class AuthHelper {
     }
 
     public static void register(MockMvc mockMvc, ObjectMapper objectMapper, String username) throws Exception {
-        RegisterReq req = new RegisterReq(username, PASSWORD, null, null, null);
+        // 邮箱自本版起必填（找回密码通道），测试统一给一个不会真发信的地址
+        RegisterReq req = new RegisterReq(username, PASSWORD, null, username + "@example.com", null);
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))

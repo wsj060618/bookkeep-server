@@ -32,7 +32,7 @@ CREATE TABLE `user` (
   password        VARCHAR(100) NOT NULL COMMENT 'BCrypt 密文，禁止存明文',
   token_version   INT NOT NULL DEFAULT 0 COMMENT '令牌版本：改密码/重置时 +1，旧 JWT 立即失效',
   nickname        VARCHAR(50)  COMMENT '昵称',
-  email           VARCHAR(100) COMMENT '邮箱',
+  email           VARCHAR(100) NOT NULL COMMENT '邮箱，必填：找回密码的唯一通道',
   avatar          VARCHAR(500) COMMENT '头像 URL，可空',
   current_book_id BIGINT       COMMENT '当前账本 id，可空（删除账本时会重指）',
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -44,6 +44,22 @@ CREATE TABLE `user` (
   UNIQUE KEY uk_user_username_active (username_active),
   KEY idx_user_username (username)
 ) COMMENT='用户表';
+
+-- ------------------------------------------------------------
+-- 3.1) password_reset_token 找回密码一次性 token
+--    token_hash = sha256(明文 token)：库被拖走也拿不到可用链接
+--    used_at 非空即已作废；重新申请会把该用户其它未用 token 一起作废
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS password_reset_token (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  user_id    BIGINT      NOT NULL COMMENT 'user.id',
+  token_hash CHAR(64)    NOT NULL COMMENT 'sha256(明文 token)，库里不存明文',
+  expires_at DATETIME    NOT NULL COMMENT '过期时间：签发后 15 分钟',
+  used_at    DATETIME    NULL COMMENT '使用时间；非空即已作废',
+  created_at DATETIME    DEFAULT CURRENT_TIMESTAMP COMMENT '签发时间',
+  UNIQUE KEY uk_prt_token_hash (token_hash),
+  KEY idx_prt_user (user_id)
+) COMMENT='找回密码一次性 token';
 
 -- ------------------------------------------------------------
 -- 4) book 账本表：一本账本 = 一套独立数据（分类/流水/预算）

@@ -38,7 +38,8 @@ public class UserServiceImpl implements UserService {
     public UserResp updateProfile(UserUpdateReq req) {
         User user = requireCurrentUser();
         String nickname = trimToNull(req.nickname());
-        String email = trimToNull(req.email());
+        // 邮箱必填（DB 也是 NOT NULL）：@NotBlank 已拦住空串，这里只做 trim
+        String email = req.email().trim();
 
         // 只 set 会变的列，不用 updateById：避免把密码、token_version 整行再写一遍
         userMapper.update(null, Wrappers.<User>update()
