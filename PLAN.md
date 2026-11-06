@@ -8,10 +8,12 @@
   - 选 TS 的理由：接口字段写错在 `npm run build`（`vue-tsc`）就报错，而不是等联调；代价是本人要先过一遍 TS 基本概念（`bookkeep-web/README.md` 有速查）
   - 独立 git 仓库；`src/types/api.ts` 是后端 DTO 的镜像，**后端改 DTO 必须先改它**
 - 技术栈：
-  - Spring Boot 3.3.x + JDK 17 + Maven
+  - Spring Boot 3.5.x + JDK 17 + Maven
   - MyBatis-Plus（`mybatis-plus-spring-boot3-starter`）+ MySQL 8
   - Lombok + spring-boot-starter-validation
   - Spring Security + JWT（jjwt 0.12.x）
+  - **AI 边车（可选，§10.8）**：Python 3.12 + FastAPI + LangChain + **LangGraph**；
+    只监听 `127.0.0.1:8000`，不对外、不连数据库，Java 侧 `RestClient` 调它并自带降级
 - 工程结构：**Maven 父子工程（多模块）**，父工程 `bookkeep-server` 下拆四个子模块（`common` / `model` / `service` / `web`，见 §4）
 - 部署形态（第 7 天定稿，一套代码两种部署目标，差异只在配置）：
   - **本地单机（日常使用，主目标）**：Windows + 本机 MySQL 8 + Nginx for Windows 托管前端静态文件，
@@ -650,7 +652,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 >    - 唯一不依赖前两项的独立模块，工作量也最大，放最后整块做；时间够也可以提前单独做
 > 4. **票据簇**：§10.9 票据上传/命名/按账本月份存储/导出 + 公示页只读票据
 >    - 一次做完，别只做上传不做公示页：公示页票据复用了同一张表、同一套魔数校验，拆开做要回归两遍
-> 5. **拓展（部署稳定之后）**：§10.8 AI 功能（一句话记账 → 月度综述 → 智能分类建议）
+> 5. **拓展（部署稳定之后）**：§10.8 AI 功能（**Python 边车：FastAPI + LangChain + LangGraph**；一句话记账 → 月度综述 → 智能分类建议）
 >
 > 理由：按「数据表 + 页面」归堆，避免同一张表/同一个弹窗被来回改三次、测试写三遍；
 > AI 属于加分项，必须等部署与分类体系稳定后再做，否则评测和输出校验都要返工。
@@ -893,28 +895,94 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 2. **fail-open**：超时/额度耗尽/未配置 → 静默退回手工表单，主流程不阻塞
 3. **不给模型自由 SQL / 自由工具**：问答类只做受限意图（预定义查询映射到现有统计接口）
 
-实施顺序（每个都可单独验收）：
+实施顺序（每个都可单独验收；先搭边车骨架，再接功能）：
 
-| 顺序 | 功能 | 接口 | 要点 |
+| 顺序 | 功能 | 接口（Java 对外） | 要点 |
 |---|---|---|---|
+| ⓪ | AI 边车骨架 | `GET /health`（Python 内部）；Java 无对外接口 | FastAPI + LangGraph 空图跑通；`HttpAiClient` 能调通、能超时降级；`DisabledAiClient` 让未配置时整体隐藏 |
 | ① | 一句话记账 | `POST /api/ai/parse-transaction {text}` → `{amount,type,categoryId?,transDate,note,confidence}` | 规则优先（金额/日期/收支词/关键词）、模型兜底；结果只回填表单不保存 |
 | ② | 月度综述 | `POST /api/ai/monthly-insight {month?}` → `{text}` | **数字全部来自 `StatisticCalculator`**，模型只负责措辞；同账本同月同数据版本缓存；不可用时用模板句兜底 |
 | ③ | 智能分类建议 | `POST /api/ai/suggest-category {note,type}` → `{categoryId,categoryName,confidence}` | 只在当前账本该方向的候选分类里选；备注失焦时展示，不自动改动用户选择 |
 
-横切设计：
+横切设计（2026-11-07 定稿：**Python LangChain + LangGraph 边车**）：
 
-- `AiClient` 接口 + 三个实现：`OllamaClient`（默认，零成本）/ `OpenAiCompatibleClient`（DeepSeek、通义、GLM 等）/ `DisabledClient`
-- 配置：`app.ai.provider`、`base-url`、`model`、`timeout=8s`；环境变量 `AI_PROVIDER`/`AI_BASE_URL`/`AI_MODEL`/`AI_API_KEY`，只进 `deploy/env.ps1`
-- 底线：8s 超时、单用户 20 次/天（复用 `SimpleRateLimiter`）、同文本 24h 缓存、输入 ≤200 字
-- 隐私：只发备注/金额/候选分类名；不发用户名、邮箱、全量流水；日志不打印原文
-- 可观测：latency、tokens、失败率、解析成功率（不含敏感内容）
-- **Eval（必做）**：`src/test/resources/ai-evals/booking.json` 30 条样例 + 离线评测，`docs/ai.md` 输出金额/类型/分类 Top-1 准确率
+> 选型决定：用户已学 Python LangChain，明确要求用起来，并直接使用 **LangGraph**。
+> 因此 AI 部分不嵌进 JVM，也不引 LangChain4j/Spring AI，而是单独一个 Python 无状态服务。
+> 这是**外部能力边车**，不是微服务拆分：它不连数据库、不保存用户数据、不参与业务事务，
+> 失败时 Java 侧静默降级，主流程不受影响。
 
-不做：自动记账/自动删除、自由 SQL 问答、预算预测、票据 OCR、语音记账、key 进前端。
+技术栈：
 
-最低交付（时间不够时）：① + eval + `docs/ai.md`，足够支撑 3 分钟面试讲解。
+| 层 | 选型 |
+|---|---|
+| 运行时 | Python 3.12 + FastAPI + uvicorn |
+| 编排 | **LangGraph**（`StateGraph` + 条件边 + 重试环） |
+| 模型 SDK | LangChain：`langchain-core` + `langchain-openai` + `langchain-ollama` |
+| 校验 | Pydantic v2（请求/响应 + 模型输出二次校验） |
+| 依赖锁定 | `requirements.txt` 全量固定版本（或 `uv.lock`），禁止部署时 `pip install -U` |
+| 测试/评测 | pytest + 30 条 JSON 样例 |
 
-面试叙事：① AI 只生成草稿、写库走确定性接口；② 规则优先 + 超时降级，说明考虑成本与可用性；③ 有固定样例的准确率评测，不靠「感觉效果不错」。
+服务形态：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/v1/parse-transaction` | 文本 + 候选分类 → 草稿 |
+| POST | `/v1/monthly-insight` | 事实 JSON → 综述文本 |
+| POST | `/v1/suggest-category` | 备注 + 类型 + 候选分类 → 分类建议 |
+| GET | `/health` | 存活探针，不触发模型调用 |
+
+- 只绑 `127.0.0.1:8000`，**不 publish 端口**；云上只在 compose 内网暴露给 `app`
+- 模型 key 只存在 Python 侧（`AI_API_KEY`），Java 侧不持有
+- 请求带 `X-AI-Token`（部署时生成的共享串），防止同机其它进程白嫖
+- 无状态：不落库、不写文件、不存对话；**LangGraph 不使用 checkpointer**，不需要持久化状态
+- 单次请求硬超时 8s（Java 侧兜底 + Python 侧 `asyncio.timeout`），`recursion_limit` 限制图循环次数
+
+LangGraph 具体怎么用（避免“为了用而用”）：
+
+- **parse 图**：`normalize → rule_extract → (金额/分类齐全?)`
+  - 是 → `finalize`
+  - 否 → `llm_extract → validate → (合法?)`
+    - 是 → `finalize`
+    - 否 → `repair`（最多 1 次，把校验错误回灌给模型）→ `finalize`
+- **insight 图**：`facts → generate → numeric_guard`
+  - 数字全部能在事实表里找到 → `finalize`
+  - 否则 → `template_fallback`
+- 条件边只做「继续 / 重试 / 降级」三种决策；**不做多智能体、不做工具调用、不做 RAG**
+  （13 个分类直接进 prompt，上向量库是过度设计）
+- LangGraph 在这里解决的是「多步 + 条件 + 重试」，不是包一层单次 LLM 调用——这是面试要讲清楚的点
+
+Java 侧（`bookkeep-service/ai`，只做网关与降级）：
+
+- `AiClient` 接口 + 两个实现：`HttpAiClient`（Spring 6 `RestClient` 调边车）/ `DisabledAiClient`（未配置或 `app.ai.enabled=false`）
+- 超时 8s、失败只记日志、返回空结果；前端功能整体隐藏，不弹错误
+- 单用户 20 次/天（`SimpleRateLimiter`）、同文本 24h 缓存仍留在 Java 侧（边车不承担业务限流）
+- Controller 路径不变：`/api/ai/*`；前端只认 Java，**绝不直连 Python**
+- Java 不做任何 AI SDK 依赖；`langchain4j`/`spring-ai` 一个都不加
+
+契约与评测：
+
+- `docs/ai-contract.md` 固化请求/响应 JSON Schema + 错误码；Java DTO 与 Pydantic 模型按同一份写
+- Eval 放 Python 侧 `ai-service/evals/booking.json` 30 条 + `pytest`，
+  输出金额/类型/分类 Top-1 准确率与 P95 延迟到 `docs/ai.md`
+- Java 侧只测「边车不可用」的降级路径（MockMvc + `DisabledAiClient`），不重复跑模型
+
+部署变化（明确接受的成本）：
+
+- 仓库新增 `ai-service/`（FastAPI 源码 + `requirements.txt` + `README.md` + `evals/`）
+- 本机：`deploy/start-all.ps1` 增加启停 Python 进程，`stop-all.ps1` 一并清理；日志进 `deploy/logs/ai-service.log`
+- 云端：`docker/docker-compose.yml` 增加 `ai` 服务（不 publish 端口，仅 `app` 可访问）
+- 备份不受影响（AI 不存数据）；但部署文档必须写清楚 **Python 版本 + 虚拟环境 + 依赖安装**，否则换机器跑不起来
+- 这是本项目唯一的多语言点，面试按「外部能力边车」解释，不按「微服务」解释
+
+不做：自动记账/自动删除、自由 SQL 问答、预算预测、票据 OCR、语音记账、key 进前端；
+也不做多智能体、**工具调用直连数据库**、RAG/向量库、LangGraph checkpointer（无状态是刻意选择）。
+
+最低交付（时间不够时）：⓪ 边车骨架 + ① 一句话记账 + eval + `docs/ai.md`，足够支撑 3 分钟面试讲解。
+
+面试叙事：① AI 只生成草稿，写库走确定性接口；② 规则优先 + 8s 超时 + fail-open，说明考虑了成本与可用性；
+③ 有 30 条固定样例的准确率评测，不靠「感觉效果不错」；
+④ 为什么单独 Python 边车：AI 是唯一需要 Python 生态的能力，做成无状态边车比塞进 JVM 更清晰；
+LangGraph 只用来表达「校验失败 → 重试 → 降级」的条件状态机，不为了用而用。
 
 ### 10.9 票据（收据/小票）上传与导出（拓展，部署后）
 
