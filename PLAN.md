@@ -288,9 +288,9 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| PUT | `/api/users/me` | 改昵称 / 邮箱 `{nickname?, email?}`（**待实现**） |
-| PUT | `/api/users/me/password` | 改密码 `{oldPassword, newPassword}`；成功后 `token_version + 1`，所有旧 token 立即失效（**待实现**） |
-| DELETE | `/api/users/me` | 注销账户 `{password}` 二次确认：软删本人 + 名下账本，JWT 立即失效，用户名释放（**待实现**） |
+| PUT | `/api/users/me` | 改昵称 / 邮箱 `{nickname?, email?}`（✅ 已实现） |
+| PUT | `/api/users/me/password` | 改密码 `{oldPassword, newPassword}`；成功后 `token_version + 1`，所有旧 token 立即失效（✅ 已实现） |
+| DELETE | `/api/users/me` | 注销账户 `{password}` 二次确认：软删本人 + 名下账本，JWT 立即失效，用户名释放（✅ 已实现） |
 
 - 改密码**必须校验旧密码**（否则拿到手机的人可以直接改掉），规则与注册一致（6–32 位）
 - 注销账户的定稿口径：
@@ -616,19 +616,18 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 ## 10. Backlog（已记下、还没做；动工前先把契约和测试补齐）
 
-### 10.1 用户管理（优先，先做这个）
+### 10.1 用户管理 ✅ 已完成（2026-11-06）
 
-缺一整个「用户管理」模块，接口与规则已在 §5.3 定稿，待实现：
+三个接口与 `/settings` 页已落地：`UserService` / `UserController` / `UserManageApiTest`（5 例）+ 前端
+`views/SettingsView.vue`。原计划的四条必测点都在 `UserManageApiTest` 里：旧密码错不改、改完旧 token 401、
+注销后同名可注册且账本进回收站、注销密码错什么都不删。
 
-- 后端：`UserService` + `UserController`（`PUT /api/users/me`、`PUT /api/users/me/password`、`DELETE /api/users/me`）
-  - 改密码：校验旧密码 → BCrypt 更新 → `token_version + 1`（复用 `ResetPasswordRunner` 的规则常量）
-  - 注销：校验密码 → 软删 user → 软删名下全部 book（写 `deleted_at`）→ 结束
-- 前端：`/settings` 页面 + 顶栏用户菜单入口
-- 测试要点（每个都得有）：
-  1. 旧密码错 → `code=400`，密码不变
-  2. 改密码成功 → 旧 token 请求 `/api/auth/me` 返回真实 401（`TokenInvalidationTest` 已提供范式）
-  3. 注销后：同名可重新注册；旧 token 401；原账本不再出现在回收站里（它挂在已注销用户下）
-  4. 注销时密码错 → 400，什么都不删
+实现备注（给以后的自己）：
+
+- 改密码用 `setSql("token_version = token_version + 1")` 原子自增，读出来 +1 再写会丢并发
+- 注销顺序是「先软删账本 → 再软删 user」，同一事务；账本的 `deleted_at` 必须写，否则 15 天清理永远选不到
+- `BookMapper.softDeleteAllByUser` 是手写 `@Update`（一次改多行 + 自己写 `deleted_at`），不要换成 Wrapper
+- 前端改密码/注销成功后必须 `auth.logout()` + 跳登录：服务端已经把 token 作废了，停在原页面只会 401
 
 ### 10.2 邮箱找回密码（后做，等决定是否公网开放）
 
