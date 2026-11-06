@@ -37,8 +37,8 @@ public class AuthController {
      * <p>成功返回用户信息（含 currentBookId），不含 token；前端注册成功后调 {@code /api/auth/login} 拿 token。
      */
     @PostMapping("/register")
-    public Result<UserResp> register(@Valid @RequestBody RegisterReq req) {
-        return Result.success(authService.register(req));
+    public Result<UserResp> register(@Valid @RequestBody RegisterReq req, HttpServletRequest request) {
+        return Result.success(authService.register(req, clientIp(request)));
     }
 
     /**
@@ -47,8 +47,8 @@ public class AuthController {
      * 用户名不存在和密码错误都是 {@code code=400 + "用户名或密码错误"}，不区分两者。
      */
     @PostMapping("/login")
-    public Result<LoginResp> login(@Valid @RequestBody LoginReq req) {
-        return Result.success(authService.login(req));
+    public Result<LoginResp> login(@Valid @RequestBody LoginReq req, HttpServletRequest request) {
+        return Result.success(authService.login(req, clientIp(request)));
     }
 
     /**
@@ -85,7 +85,7 @@ public class AuthController {
     }
 
     /** Nginx 反代后 getRemoteAddr() 永远是 127.0.0.1，真实 IP 在 X-Real-IP（PLAN §8 第 21 条） */
-    private static String clientIp(HttpServletRequest request) {
+    static String clientIp(HttpServletRequest request) {
         String realIp = request.getHeader("X-Real-IP");
         return StringUtils.hasText(realIp) ? realIp.trim() : request.getRemoteAddr();
     }

@@ -1,0 +1,13 @@
+# 只用于 Dockerfile 的构建上下文，避免把无关大文件送进 daemon
+.git
+.idea
+.vscode
+logs
+deploy
+docs
+http
+**/target/*.jar.original
+bookkeep-web/target/classes
+bookkeep-web/target/test-classes
+bookkeep-web/target/generated-sources
+bookkeep-*/target/surefire-reports

@@ -10,7 +10,6 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
 import org.springframework.stereotype.Component;
 
-import java.util.Arrays;
 import java.util.regex.Pattern;
 
 @Aspect
@@ -65,7 +64,8 @@ public class LogAspect {
             String json = objectMapper.writeValueAsString(args);
             return SENSITIVE_PATTERN.matcher(json).replaceAll("\"$1\":\"***\"");
         } catch (Exception e) {
-            return Arrays.toString(args);
+            // 绝不能退回 Arrays.toString(args)：那会把 password 明文打进日志
+            return "[参数序列化失败]";
         }
     }
 }

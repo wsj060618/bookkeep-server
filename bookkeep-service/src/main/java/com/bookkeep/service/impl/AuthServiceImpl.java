@@ -18,6 +18,7 @@ import com.bookkeep.model.entity.User;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.UserMapper;
+import com.bookkeep.service.support.AuthThrottle;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -44,6 +45,7 @@ public class AuthServiceImpl implements AuthService {
     private final CategoryMapper categoryMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final AuthThrottle authThrottle;
 
     /**
      * 注册：建用户 → 建首本账本 → 预置分类 → 回写 current_book_id
@@ -53,7 +55,9 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public UserResp register(RegisterReq req) {
+    public UserResp register(RegisterReq req, String clientIp) {
+        // 公网部署的批量注册防护：按 IP 计每小时成功注册数（失败的重名请求不计数）
+        authThrottle.checkRegister(clientIp);
         String username = req.username().trim();
         String email = req.email().trim();
         // 只有一种账本类型（班级），模板固定取 class；请求里不再有 bookType 字段
@@ -111,6 +115,7 @@ public class AuthServiceImpl implements AuthService {
 
         log.info("注册成功：userId={}, username={}, bookId={}, 预置班级分类 {} 条",
                 user.getId(), username, book.getId(), categories.size());
+        authThrottle.recordRegister(clientIp);
         return UserResp.from(user);
     }
 
@@ -122,15 +127,20 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     @Transactional(readOnly = true)
-    public LoginResp login(LoginReq req) {
+    public LoginResp login(LoginReq req, String clientIp) {
         String email = req.email().trim();
+
+        // 先检查限流：同一 (IP,email) 连续失败 5 次锁 5 分钟；单 IP 每分钟也有硬上限
+        authThrottle.checkLogin(clientIp, email);
 
         // 邮箱未删除行内唯一（uk_user_email_active），所以能直接定位到唯一账号
         User user = userMapper.selectOne(Wrappers.<User>query().eq("email", email));
         if (user == null || !passwordEncoder.matches(req.password(), user.getPassword())) {
+            authThrottle.recordLoginFailure(clientIp, email);
             // 与「密码错」同一句：不让接口变成邮箱是否注册过的探测器
             throw new BusinessException(ResultCode.BAD_REQUEST, "邮箱或密码错误");
         }
+        authThrottle.resetLoginFailures(clientIp, email);
 
         // 账本按 id 升序，第一本（注册时建的）排在最前，前端切换列表的顺序才稳定
         List<BookResp> books = bookMapper.selectList(Wrappers.<Book>query()

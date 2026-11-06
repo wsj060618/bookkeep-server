@@ -22,3 +22,7 @@ application-local.yaml
 
 # ---- deploy (整个目录都不进版本库：脚本 + 机器配置 + 构建产物) ----
 deploy/
+
+# ---- docker 云部署的密钥/证书 ----
+docker/.env
+docker/certs/

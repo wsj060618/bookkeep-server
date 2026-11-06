@@ -1,0 +1,14 @@
+# 公网部署（profile=prod）专用的收紧项，由 deploy 脚本以 --spring.profiles.active=prod 激活。
+# 本文件只放「公网必须更严」的覆盖，其余配置继承 application.yml。
+app:
+  security:
+    # 同一 (IP + email) 连续失败 5 次锁 5 分钟；登录成功清零
+    login-max-failures: 5
+    # 单 IP 每分钟登录请求上限（防用户名喷洒）
+    login-ip-per-minute: 30
+    # 单 IP 每小时成功注册上限（防批量注册）
+    register-per-hour: 5
+
+# 公网建议把 token 有效期从 7 天缩到 1 天（可用 JWT_EXPIRE 覆盖）
+jwt:
+  expire: ${JWT_EXPIRE:86400}
