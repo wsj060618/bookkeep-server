@@ -798,3 +798,52 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 
 - 跨账本复用「自定义模板」（另存为模板 / 模板市场）：先只有内置两套 + 明天的分类管理页
 - 各模板独立的统计分支：统计算法保持现状，分类只是数据
+
+### 10.7 分类模板的导入 / 导出（JSON，明日事项）
+
+不做模板表：**「模板」= 一份 JSON 文件 + 当前账本的那组分类**，导出的就是账本分类，导入就是往账本里建分类。简单、无迁移。
+
+#### 文件格式
+
+```json
+{
+  "version": 1,
+  "name": "我的生活记账",
+  "items": [
+    { "type": "expense", "name": "餐饮", "icon": "dining", "color": "orange", "sortOrder": 1 },
+    { "type": "income",  "name": "工资", "icon": "fee",    "color": "green",  "sortOrder": 9 }
+  ]
+}
+```
+
+- `name`：模板名，**可编辑**（内置的「班级 / 通用」只是生成规则，导出时默认给 `{账本名} 分类`，用户可以改名再导出/分享）
+- `items`：按 `type` 分成 **支出 / 收入** 两组展示与校验
+- `icon` / `color` 是语义 key，未知值回落 `other` / `gray`，不让脏文件把 UI 搞崩
+
+#### 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/categories/template` | 导出当前账本分类 → JSON 下载（`Content-Disposition: attachment`） |
+| POST | `/api/categories/template` | 导入：`{name?, items, mode}`，`mode = append|replace` |
+
+- `append`（默认）：同名分类跳过，返回 `{created, skipped:[names]}`，**不报 500**
+- `replace`：先删当前账本分类再建——**有流水时拒绝**（400「先清理流水或改用追加」），避免把流水挂空
+- 校验：`name` ≤20、`items` 1–100 条、`type ∈ {income,expense}`、分类名 ≤20；整份文件先校验再落库（一个事务）
+
+#### 前端
+
+- 分类管理页（§10.4）加两个按钮：**导出模板**（可编辑模板名后下载）、**导入模板**（选文件 → 预览表格按支出/收入分组 + 冲突标记 → 选「追加 / 覆盖」）
+- 导入完成后刷新 `categories` 缓存（同 §10.4 的 `reloadCategories()`）
+- 新建账本时除了内置「班级 / 通用」，再加一个「从文件导入」：先建账本，再把 JSON 里的分类灌进去
+
+#### 测试
+
+- 导出→导入往返：条数、名称、type、icon/color/sort 完全一致
+- append 到已有分类的账本：同名跳过并在 `skipped` 里返回
+- replace 到有流水的账本：400，分类不变
+- 非法 JSON / 未知 type / 超 100 条：400
+
+#### 不做
+
+- 模板表、模板市场、跨用户共享模板（先只有文件这一种载体）
