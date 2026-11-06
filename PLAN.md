@@ -835,26 +835,34 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/categories/template` | 导出当前账本分类 → JSON 下载（`Content-Disposition: attachment`） |
-| POST | `/api/categories/template` | 导入：`{name?, items, mode}`，`mode = append|replace` |
+| GET | `/api/categories/templates` | 列出服务器上的模板（文件名 + 模板名 + 条数 + 修改时间） |
+| POST | `/api/categories/templates` | 把当前账本分类**保存为服务器模板**：`{name}` → 写 `<模板目录>/<用户id>/<安全文件名>.json` |
+| GET | `/api/categories/templates/{file}` | 下载/查看某个模板 JSON |
+| POST | `/api/categories/templates/{file}/apply` | 应用到当前账本：`{mode}`，`mode = append|replace` |
+| POST | `/api/categories/template` | 兼容「本地上传」：直接传 JSON 内容导入（不落盘） |
 
+- 存储位置默认在**部署目录**：`app.template-dir` 缺省 `${user.dir}/data/templates`，部署时 cwd 是 `deploy/`，所以实际落在 **`deploy/data/templates/{userId}/`**
+  - `env.ps1` 可显式设 `TEMPLATE_DIR`；上云时挂一个卷（Docker `-v bookkeep-templates:/app/data/templates`），容器重建不丢
+  - 目录由应用启动时自动创建；**`deploy/backup.bat` 要把 `data/templates` 一起打包**，恢复时一起还原
+- 文件名安全：只允许 `[a-zA-Z0-9_\-\u4e00-\u9fa5]`，落盘前 URL 编码/白名单化，**禁止 `..` 和路径分隔符**；单用户只能读写自己子目录
 - `append`（默认）：同名分类跳过，返回 `{created, skipped:[names]}`，**不报 500**
 - `replace`：先删当前账本分类再建——**有流水时拒绝**（400「先清理流水或改用追加」），避免把流水挂空
-- 校验：`name` ≤20、`items` 1–100 条、`type ∈ {income,expense}`、分类名 ≤20；整份文件先校验再落库（一个事务）
+- 校验：`name` ≤20、`items` 1–100 条、`type ∈ {income,expense}`、分类名 ≤20、单文件 ≤256KB；整份文件先校验再落库（一个事务）
 
 #### 前端
 
-- 分类管理页（§10.4）加两个按钮：**导出模板**（可编辑模板名后下载）、**导入模板**（选文件 → 预览表格按支出/收入分组 + 冲突标记 → 选「追加 / 覆盖」）
-- 导入完成后刷新 `categories` 缓存（同 §10.4 的 `reloadCategories()`）
-- 新建账本时除了内置「班级 / 通用」，再加一个「从文件导入」：先建账本，再把 JSON 里的分类灌进去
+- 分类管理页（§10.4）加一组按钮：**存为模板**（填名字，存到服务器）、**我的模板**（列表 → 应用/下载/删除）、**导入模板**（本地文件 → 预览按支出/收入分组 + 冲突标记 → 追加/覆盖）
+- 导入/应用完成后刷新 `categories` 缓存（同 §10.4 的 `reloadCategories()`）
+- 新建账本时除了内置「班级 / 通用」，再加「从我的模板」：建完账本直接套用
 
 #### 测试
 
-- 导出→导入往返：条数、名称、type、icon/color/sort 完全一致
+- 存为模板 → 列表能看到 → 应用到新账本：条数、名称、type、icon/color/sort 完全一致
+- 文件名含 `../` 或分隔符：400 / 被清洗，不能写到目录外
 - append 到已有分类的账本：同名跳过并在 `skipped` 里返回
 - replace 到有流水的账本：400，分类不变
-- 非法 JSON / 未知 type / 超 100 条：400
+- 非法 JSON / 未知 type / 超 100 条 / 超 256KB：400
 
 #### 不做
 
-- 模板表、模板市场、跨用户共享模板（先只有文件这一种载体）
+- 模板表、模板市场、跨用户共享模板（文件 + 用户子目录已经够用）
