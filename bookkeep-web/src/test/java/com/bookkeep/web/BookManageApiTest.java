@@ -246,6 +246,77 @@ class BookManageApiTest {
         assertEquals(0, getJson(mockMvc, objectMapper, "/api/books/trash", token).path("data").size());
     }
 
+    @Test
+    @DisplayName("立即彻底删除：只能删回收站里的账本，连同分类与流水一起消失")
+    void purgeTrashedBookImmediately() throws Exception {
+        String username = nextUsername("book");
+        String token = registerAndLogin(mockMvc, objectMapper, username);
+
+        mockMvc.perform(post("/api/books")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"立刻删掉\"}"))
+                .andExpect(jsonPath("$.code").value(200));
+        long doomedBookId = bookId(token, 1);
+
+        long categoryId = categoryId(token, "收取班费");
+        mockMvc.perform(post("/api/transactions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"categoryId\":" + categoryId + ",\"type\":\"income\","
+                                + "\"amount\":\"9.90\",\"transDate\":\"2026-11-03\"}"))
+                .andExpect(jsonPath("$.code").value(200));
+
+        mockMvc.perform(delete("/api/books/" + doomedBookId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(jsonPath("$.code").value(200));
+        assertEquals(1, getJson(mockMvc, objectMapper, "/api/books/trash", token).path("data").size());
+
+        mockMvc.perform(delete("/api/books/" + doomedBookId + "/permanent")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertEquals(0, getJson(mockMvc, objectMapper, "/api/books/trash", token).path("data").size());
+        assertEquals(0, count("SELECT COUNT(*) FROM book WHERE id = ?", doomedBookId));
+        assertEquals(0, count("SELECT COUNT(*) FROM category WHERE book_id = ?", doomedBookId));
+        assertEquals(0, count("SELECT COUNT(*) FROM `transaction` WHERE book_id = ?", doomedBookId));
+    }
+
+    @Test
+    @DisplayName("立即彻底删除：往用账本 404；别人的回收站账本也 404")
+    void purgeRejectsLiveOrOthersBook() throws Exception {
+        String usernameA = nextUsername("booka");
+        String tokenA = registerAndLogin(mockMvc, objectMapper, usernameA);
+        long liveBookId = bookId(tokenA, 0);
+
+        // 活着的不在回收站 → 不允许彻底删除
+        mockMvc.perform(delete("/api/books/" + liveBookId + "/permanent")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404));
+        assertEquals(1, count("SELECT COUNT(*) FROM book WHERE id = ? AND deleted = 0", liveBookId));
+
+        // B 删一本进回收站，A 不能动手
+        String usernameB = nextUsername("bookb");
+        String tokenB = registerAndLogin(mockMvc, objectMapper, usernameB);
+        mockMvc.perform(post("/api/books")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenB)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"B 的账本\"}"))
+                .andExpect(jsonPath("$.code").value(200));
+        long bookB = bookId(tokenB, 1);
+        mockMvc.perform(delete("/api/books/" + bookB)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenB))
+                .andExpect(jsonPath("$.code").value(200));
+
+        mockMvc.perform(delete("/api/books/" + bookB + "/permanent")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404));
+        assertEquals(1, count("SELECT COUNT(*) FROM book WHERE id = ? AND deleted = 1", bookB));
+    }
+
     private long bookId(String token, int index) throws Exception {
         JsonNode books = getJson(mockMvc, objectMapper, "/api/books", token).path("data");
         return books.get(index).path("id").asLong();

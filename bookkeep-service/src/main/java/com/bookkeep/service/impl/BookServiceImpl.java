@@ -198,6 +198,21 @@ public class BookServiceImpl implements BookService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void purge(Long id) {
+        Long userId = SecurityUtil.getUserId();
+        // 只允许删「自己回收站里」的：用一句手写查询定身份，活着的一律 404（防误删在用账本）
+        if (bookMapper.selectTrashedId(id, userId) == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "账本不存在或不在回收站");
+        }
+        // 顺序与定时清理一致：流水 → 分类 → 账本（从子表往父表删，不会报外键错）
+        bookMapper.hardDeleteTransactions(id);
+        bookMapper.hardDeleteCategories(id);
+        bookMapper.hardDeleteBook(id);
+        log.info("彻底删除账本：userId={}, bookId={}（连同分类与流水）", userId, id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public int purgeExpired() {
         LocalDateTime deadline = LocalDateTime.now().minusDays(RETENTION_DAYS);
         List<Long> expired = bookMapper.selectExpiredIds(deadline);

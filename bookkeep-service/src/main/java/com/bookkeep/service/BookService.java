@@ -38,6 +38,9 @@ public interface BookService {
     /** 从回收站恢复（不自动切成当前账本） */
     BookResp restore(Long id);
 
+    /** 立即彻底删除回收站里的某一本（连同分类、流水）；只能删已在回收站的，不可恢复 */
+    void purge(Long id);
+
     /** 彻底删除回收站里满 15 天的账本（连同分类、流水），返回清理本数 */
     int purgeExpired();
 }

@@ -79,4 +79,11 @@ public class BookController {
     public Result<BookResp> restore(@PathVariable Long id) {
         return Result.success(bookService.restore(id));
     }
+
+    /** 立即彻底删除：只能删回收站里的账本，连同分类与流水，不可恢复 */
+    @DeleteMapping("/{id}/permanent")
+    public Result<Void> purge(@PathVariable Long id) {
+        bookService.purge(id);
+        return Result.success();
+    }
 }

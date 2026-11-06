@@ -35,6 +35,10 @@ public interface BookMapper extends BaseMapper<Book> {
     @Update("UPDATE book SET deleted = 1, deleted_at = NOW() WHERE user_id = #{userId} AND deleted = 0")
     int softDeleteAllByUser(@Param("userId") Long userId);
 
+    /** 「立即彻底删除」前先确认这本确实在**自己**的回收站里：活着的一律当作不存在 */
+    @Select("SELECT id FROM book WHERE id = #{bookId} AND user_id = #{userId} AND deleted = 1")
+    Long selectTrashedId(@Param("bookId") Long bookId, @Param("userId") Long userId);
+
     @Delete("DELETE FROM category WHERE book_id = #{bookId}")
     int hardDeleteCategories(@Param("bookId") Long bookId);
 

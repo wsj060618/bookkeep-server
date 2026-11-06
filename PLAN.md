@@ -270,6 +270,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | PUT | `/api/books/{id}/current` | 切换当前账本，返回切换后的完整列表 |
 | DELETE | `/api/books/{id}` | 删除 → 进回收站；**至少保留一本** |
 | GET | `/api/books/trash` | 回收站，带 `deletedAt` / `expireAt` |
+| DELETE | `/api/books/{id}/permanent` | 立即彻底删除回收站里的一本（连同分类/流水，不可恢复） |
 | PUT | `/api/books/{id}/restore` | 从回收站恢复（不自动切为当前） |
 
 规则：
