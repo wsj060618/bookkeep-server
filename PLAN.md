@@ -917,27 +917,54 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 
 #### 数据与存储
 
-- 新表 `transaction_receipt`：`id / transaction_id / file_name(原始名，仅展示) / stored_name(随机 UUID) /
-  content_type / size_bytes / created_at`，**逻辑删除字段不要**（票据随流水生命周期走）
-- 文件放本地磁盘：`app.receipt-dir`，缺省 `${user.dir}/data/receipts`，实际为 `deploy/data/receipts/{userId}/{transactionId}/{uuid}.jpg`
-  - `env.ps1` 可设 `RECEIPT_DIR`；云端挂卷（同 §10.7 的模板目录）
-  - `backup.bat` 必须把 `data/` 一起打包，否则备份只有数据库没有图片
-- 文件名一律用服务端生成的 UUID，**原始文件名只存库、不参与路径**（防路径穿越）
+- 新表 `transaction_receipt`：`id / transaction_id / title(用户命名，≤30 字) / original_name(上传时文件名，仅展示) /
+  stored_path(相对 receipt-dir 的路径) / content_type / size_bytes / created_at`
+  - **不设逻辑删除字段**：票据随流水生命周期走
+  - `title` 可改，默认取上传文件名的去扩展名部分（如「超市小票」）
+- 存储按**账本名 / 月份**分层，便于人工浏览与拷走：
+  ```
+  deploy/data/receipts/
+    └── 计科2301班费_12/          ← 安全化后的账本名 + bookId（保证改名/重名也不串）
+        ├── 2026-11/
+        │   ├── 3f2a9c8e….jpg
+        │   └── 9b1c44d0….png
+        └── 2026-12/
+  ```
+  - 「月份」取流水的 **`trans_date`**（业务日期），不是上传时间——补录上月票据时应该归到上月
+  - 目录名 = 账本名去掉 `\/:*?"<>|` 与控制字符、去首尾点/空格、截断 30 字，再拼 `_{bookId}`；
+    纯非法字符时回落 `book_{bookId}`
+  - **账本改名不搬目录**：`stored_path` 才是唯一事实来源，目录名只是便于人看；搬目录会让大文件重命名失败时数据不一致
+  - 流水改日期/切换账本也不搬文件：老图留在原目录，新图进当前目录（同样以 DB 路径为准）
+- 文件落盘名一律服务端 UUID，**用户命名只进 `title`，不参与路径**（防路径穿越）
+- `env.ps1` 可设 `RECEIPT_DIR`；云端挂卷（同 §10.7 的模板目录）；`backup.bat` 必须把 `data/` 一起打包
 
 #### 接口
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/transactions/{id}/receipts` | multipart，多文件；返回 `[{id, fileName, size}]` |
-| GET | `/api/transactions/{id}/receipts` | 该笔的票据列表（不含文件内容） |
+| POST | `/api/transactions/{id}/receipts` | multipart（单文件 + `title?`）；返回 `{id, title, size}`。多选时前端逐张调用 |
+| GET | `/api/transactions/{id}/receipts` | 该笔的票据列表（id/title/原始名/大小/时间，不含内容） |
 | GET | `/api/transactions/{id}/receipts/{receiptId}` | 下载/预览单张（inline，需登录 + 账本归属校验） |
+| PUT | `/api/transactions/{id}/receipts/{receiptId}` | 只改 `title`（≤30 字，空则回落原始名） |
 | DELETE | `/api/transactions/{id}/receipts/{receiptId}` | 删除单张（同时删文件，失败只记日志不阻断） |
 | GET | `/api/transactions/receipts/export?start&end` | 按区间导出 zip（含 `manifest.csv`） |
 
-导出规则：
+导出规则（与存储保持同一套命名/分层，导出的 zip 解开就能对上目录）：
 
-- 单笔导出：该笔所有图片打成一个 zip，文件名 `{日期}_{分类}_{金额}.zip`
-- 区间导出：图片按 `{日期}_{分类}_{金额}_{序号}.jpg` 命名，附 `manifest.csv`（日期/类型/分类/金额/备注/文件名）
+- **zip 内目录 = 账本名 / 月份**，与磁盘一致：
+  ```
+  {账本名}_{bookId}.zip
+    ├── 计科2301班费_12/
+    │   ├── 2026-11/
+    │   │   ├── 2026-11-05_超市小票.jpg
+    │   │   └── 2026-11-06_班服收据.png
+    │   └── 2026-12/…
+    └── manifest.csv
+  ```
+- 文件名 = `{日期}_{票据标题}.{ext}`（标题同样去非法字符、截断；同目录重名自动 `_2`、`_3`）
+- 单笔导出：zip 名 `{账本名}_{日期}_{分类}_{金额}.zip`，内部同结构（单月一个目录），附 `manifest.csv`
+- `manifest.csv` 列：日期 / 类型 / 分类 / 金额 / 备注 / 票据标题 / 相对路径
+- 区间导出只导**当前账本**（和 CSV 导出一致）；要跨账本分别导两次
 - 上限：一次 ≤200 张、≤100MB；超了返回 400 并提示缩小范围（避免把试用机内存打满）
 - zip 用 `java.util.zip` 流式写，不把全部图片读进内存
 
@@ -959,16 +986,18 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 #### 前端
 
 - 「记一笔」弹窗：新增「票据」区域，`<input type="file" accept="image/*" multiple>`（手机端可直接拍照），
-  选完先本地预览，可删除；保存流水成功后再上传（先有 `transaction_id` 才能挂图）
-- 流水列表行：显示票据数量徽标；点开详情弹窗看缩略图、单张下载
-- 导出：列表页「导出票据」按当前筛选区间打包（与 CSV 导出并列）
+  选完先本地预览，每张可改标题（默认文件名去扩展名），可删除；保存流水成功后再上传（先有 `transaction_id` 才能挂图）
+- 流水列表行：显示票据数量徽标；点开详情弹窗看缩略图、改标题、单张下载
+- 导出：列表页「导出票据」按当前筛选区间打包（与 CSV 导出并列），zip 内按 `账本名/月份` 分层，与磁盘一致
 - 图片回显用后端鉴权接口 + `fetch` 转 blob，**不要**用 `<img src>` 直链（否则要开匿名访问）
 
 #### 测试
 
-- 上传多图 → 列表条数正确；非图片/超 5MB/超 9 张 → 400
+- 上传多图 + 自定义标题 → 列表 `title` 正确；空标题回落原始文件名
+- 非图片/超 5MB/超 9 张 → 400；改标题超 30 字 → 400
+- 目录规则：上传落在 `{安全化账本名}_{bookId}/{yyyy-MM}/`，月份取 `trans_date`；账本改名后新图进新目录、老图仍可读
 - 越权：A 访问 B 的票据 → 404
-- 导出 zip：条目数、`manifest.csv` 内容、文件名规则
+- 导出 zip：内部目录为 `账本名/月份/`、文件名 `{日期}_{标题}`、`manifest.csv` 行数与相对路径正确、重名自动加后缀
 - 注销账户/账本物理删除后：库里记录与磁盘目录都消失
 - 归档账本：上传 400、导出 200
 
