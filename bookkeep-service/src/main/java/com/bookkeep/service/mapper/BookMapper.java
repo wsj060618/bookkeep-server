@@ -29,14 +29,6 @@ public interface BookMapper extends BaseMapper<Book> {
     List<Long> selectExpiredIds(@Param("deadline") LocalDateTime deadline);
 
     /**
-     * 注销账户时把名下账本一次性送进回收站。
-     * <p>⚠️ 现在不用了：账号注销改为「立即物理删除」，见下方 hardDelete*ByUser。
-     * <p>保留注释是因为单本删除仍走 {@code deleted=1 + deleted_at} 那条路，别把两者混用。
-     */
-    @Update("UPDATE book SET deleted = 1, deleted_at = NOW() WHERE user_id = #{userId} AND deleted = 0")
-    int softDeleteAllByUser(@Param("userId") Long userId);
-
-    /**
      * 注销账户 = 立即清空：不受 15 天回收站限制。
      * <p>顺序必须是流水 → 分类 → 账本（子表到父表）；子查询会连着回收站里的账本一起选中。
      */
