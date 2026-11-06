@@ -405,7 +405,9 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 |---|---|---|
 | GET | `/api/public/report/{shareToken}?month=2026-08` | 免登录只读：本月收入/支出/结余 + 分类占比 + 明细（含逐行结余） |
 
-响应体（W2 定稿）：`{bookName, month, income, expense, balance, totalBalance, categories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter}]}`
+响应体（W2 定稿）：`{bookName, month, income, expense, balance, totalBalance, categories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}`
+
+> `receiptCount` / `receipts` 是 §10.9 公示票据的预留字段，票据功能落地前不返回（或恒为空）；图片本身不在 JSON 里，见 §10.9「公示页票据」。
 
 - `book.share_token` + `book.share_token_expires_at`：32 位随机串（`UUID` 去横线）+ 到期时间，
   由 `POST /api/books/{id}/share` 生成，**有效期 3 天**；再分享一次即换新 token，旧链接立即失效
@@ -413,6 +415,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
   一律 `code=404「公示页不存在或已失效」`，**绝不能回落到「当前登录用户的账本」**
 - 明细按日期**升序**返回：逐行结余只有从上往下读才成立，翻页/倒序展示由前端处理
 - 明细不带 `id`、整页不含 `username`/`email`/`userId`：这个接口匿名可访问，能少暴露一个字段就少一个
+  （票据只带 `receipts[].id`，那个 id 只在本链接内可用，见 §10.9「公示页票据」）
 - 只读、**不含任何个人信息**（只出账本名与金额），前端页面路径 `/report/{token}`
 - 设计意图：同学看账不需要账号，因此**公网只需暴露这一个只读接口**，登录入口的风险面最小
 - `SecurityConfig` 只放行 `/api/public/report/**`，其余路径（含统计）仍要 token——`PublicReportApiTest` / `ShareLinkApiTest` 钉住了这一点
@@ -645,7 +648,9 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 >    - 10.7 的按钮就挂在 10.4 新建的页面上，且都要用同一个 `reloadCategories()`；先做 10.4 等于把地基打好
 > 3. **流水簇**：§10.3 流水导入导出（xlsx / CSV）
 >    - 唯一不依赖前两项的独立模块，工作量也最大，放最后整块做；时间够也可以提前单独做
-> 4. **拓展（部署稳定之后）**：§10.8 AI 功能（一句话记账 → 月度综述 → 智能分类建议）
+> 4. **票据簇**：§10.9 票据上传/命名/按账本月份存储/导出 + 公示页只读票据
+>    - 一次做完，别只做上传不做公示页：公示页票据复用了同一张表、同一套魔数校验，拆开做要回归两遍
+> 5. **拓展（部署稳定之后）**：§10.8 AI 功能（一句话记账 → 月度综述 → 智能分类建议）
 >
 > 理由：按「数据表 + 页面」归堆，避免同一张表/同一个弹窗被来回改三次、测试写三遍；
 > AI 属于加分项，必须等部署与分类体系稳定后再做，否则评测和输出校验都要返工。
@@ -913,7 +918,7 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 
 ### 10.9 票据（收据/小票）上传与导出（拓展，部署后）
 
-记一笔时可以给这笔账挂多张票据照片，并支持把票据打包导出。**不做 OCR**（§10.8 已明确排除），只做「存图 + 看 + 导出」。
+记一笔时可以给这笔账挂多张票据照片，支持打包导出，**也支持在公示页免登录查看**。**不做 OCR**（§10.8 已明确排除），只做「存图 + 看 + 导出」。
 
 #### 数据与存储
 
@@ -973,7 +978,8 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 - 类型只收 `jpg/jpeg/png/webp`，**按魔数判断**而不是看扩展名；**不收 SVG**（SVG 可带脚本，等于存储型 XSS）
 - 单张 ≤5MB、单笔 ≤9 张、单用户总量配额（默认 500MB，超了 400 并提示清理）
 - 下载响应带 `Content-Type`（服务端识别）+ `Content-Disposition: inline`（文件名 URL 编码）+ `nosniff`
-- **不做匿名访问**：公示页（`/api/public/report/*`）不展示票据，票据只有登录且账本归属匹配才能看
+- **登录态接口不放匿名**：`/api/transactions/**` 一律要 token + 账本归属校验；公示页的票据走**独立只读路径**
+  （下面「公示页票据」），不复用登录态接口，也不把票据混进需要 token 的导出
 - 归档账本（§10.5）禁止上传/删除票据，但允许导出（只读）
 
 #### 生命周期
@@ -989,7 +995,7 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
   选完先本地预览，每张可改标题（默认文件名去扩展名），可删除；保存流水成功后再上传（先有 `transaction_id` 才能挂图）
 - 流水列表行：显示票据数量徽标；点开详情弹窗看缩略图、改标题、单张下载
 - 导出：列表页「导出票据」按当前筛选区间打包（与 CSV 导出并列），zip 内按 `账本名/月份` 分层，与磁盘一致
-- 图片回显用后端鉴权接口 + `fetch` 转 blob，**不要**用 `<img src>` 直链（否则要开匿名访问）
+- 图片回显用后端**登录态**接口 + `fetch` 转 blob，**不要**用 `<img src>` 直链——登录态接口不能进匿名白名单；公示页才用直链（见下）
 
 #### 测试
 
@@ -1001,14 +1007,60 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 - 注销账户/账本物理删除后：库里记录与磁盘目录都消失
 - 归档账本：上传 400、导出 200
 
+#### 公示页票据（只读、免登录）
+
+公示页（§5.9）除了金额明细，也能看这笔账的票据照片。**只读、免登录、不能下载原图以外的操作**。
+
+接口（都挂在已有的 `/api/public/report/**` 白名单下，`SecurityConfig` 不用再加放行规则）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/public/report/{shareToken}` | 响应里每笔流水增加 `receiptCount` + `receipts:[{id, title}]`（无文件内容） |
+| GET | `/api/public/report/{shareToken}/receipts/{receiptId}` | 返回图片字节（inline），供公示页缩略图/大图 |
+
+访问校验（四条缺一不可，任一不满足都返回 404，不能回 403/400 暴露「存在但无权」）：
+
+1. `share_token = ?` 且 `share_token_expires_at > now()`（与 §5.9 同一套判断，同一个时钟）
+2. 账本未删除（`book.deleted = 0`）
+3. `receiptId` 所属流水的 `book_id` = 该 token 的账本（**不能只按 receiptId 查**）
+4. 该流水 `deleted = 0` 且票据记录存在（流水进回收站后，公示页也看不到它的票据）
+
+安全约束：
+
+- **图片仍按魔数识别**，只回 `image/jpeg`、`image/png`、`image/webp`；`Content-Disposition: inline` + `X-Content-Type-Options: nosniff`
+- 响应不返回原始文件名、磁盘路径、`transaction_id`、`userId`，只有字节和 `Content-Type`
+- 只读：**没有**匿名上传/删除/改名/zip 导出的入口；区间导出 `receipts/export` 仍要登录
+- 不做目录列举：`receiptId` 递增可被猜，但 1–4 校验不过一律 404，猜中也没用
+- 加 `Cache-Control: private, max-age=300`（图片不大、链接 3 天过期，短缓存够用；不设 `public`，避免中间缓存留存）
+- 匿名入口只针对图片，**不要**给公示页加 `/api/public/**` 的更宽匹配
+- 单 IP 粗限流可选：图片接口复用 Nginx `limit_req` 或 `SimpleRateLimiter`，防止有人拿一个有效链接刷满带宽（试用机 1M 带宽很容易被拖死）
+
+前端 `PublicReportView.vue`：
+
+- 明细行右侧显示票据数量徽标，点开抽屉/图集看缩略图；大图点开再看原图
+- 图片地址直接用 `/api/public/report/{token}/receipts/{receiptId}`（匿名，可用 `<img src>`），不需要 `fetch` 转 blob——这与登录侧相反
+- 票据标题（`title`）展示给访客；**不显示**原始文件名
+- 没有票据时整块隐藏，不留「暂无票据」占位，避免公示页显得残缺
+
+测试：
+
+- 正常链接：明细里 `receiptCount`/`receipts` 与上传一致；图片接口 200 且 `Content-Type` 正确
+- 过期链接 / 从未分享 / 账本已删：列表与图片接口都 404
+- 跨账本：A 的 token 请求 B 的 `receiptId` → 404
+- 流水软删除后：公示页不再出现该笔，直接请求其票据 → 404
+- 非图片内容（改扩展名上传的 txt）→ 该票据根本不会入库；若库里被手工塞了脏记录，图片接口 404/415，不能回显任意文件
+- `PublicReportApiTest` 继续**不带** `Authorization`，新增用例钉住上面 4 条
+
 #### 不做
 
-- OCR 识别金额（§10.8 已排除）、图片压缩服务端处理（前端压缩可选）、OSS 对象存储、公开分享票据
+- OCR 识别金额（§10.8 已排除）、图片压缩服务端处理（前端压缩可选）、OSS 对象存储、
+  **匿名 zip 导出 / 匿名改标题 / 匿名删除**（公示页只给逐张看图，见上）
 
 #### 与已有功能的关系
 
 - §10.3 流水导入导出（CSV/xlsx）**不携带图片**：导入只处理金额与分类，票据需要单独补
 - §10.5 归档账本：票据只读
+- §5.9 公示页：明细里带票据数量与标题，图片走独立的匿名只读路径（见「公示页票据」）
 - §10.7 模板目录与 §10.9 票据目录都属于「部署数据」，备份要一起做
 
-建议排期：`10.9 票据` 放在 **10.3–10.7 完成、部署稳定之后、10.8 AI 之前**——它不依赖模型、用户价值直接，且能提前暴露「文件存储 + 备份」这类真正容易翻车的问题。
+建议排期：`10.9 票据` 放在 **10.3–10.7 完成、部署稳定之后、10.8 AI 之前**——它不依赖模型、用户价值直接，且能提前暴露「文件存储 + 备份」这类真正容易翻车的问题。上传/导出与「公示页票据」**同批交付**，别拆成两次（同一张表、同一套校验，拆开要回归两遍）。
