@@ -31,8 +31,10 @@ spring:
 
 app:
   mail:
-    # 发件人，必须是 MAIL_USERNAME 那个邮箱（QQ 会校验发件人一致）
+    # 发件人地址，必须是 MAIL_USERNAME 那个邮箱（QQ 会校验发件人一致）；只放纯地址
     from: ${MAIL_FROM:}
+    # 发件人显示名（收件人看到的「谁发来的」）；留空则用地址前缀
+    from-name: ${MAIL_FROM_NAME:班级记账}
   # 拼重置链接用（邮件里点到哪台机器）；本机部署填局域网地址
   base-url: ${APP_BASE_URL:http://localhost}
   security:
