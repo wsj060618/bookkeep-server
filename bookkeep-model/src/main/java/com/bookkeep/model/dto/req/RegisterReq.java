@@ -13,7 +13,7 @@ import jakarta.validation.constraints.Size;
  * <p>用 record 承载，校验注解直接标在组件上；校验失败由 {@code GlobalExceptionHandler}
  * 统一转成 {@code {code:400, message:"字段: 提示"}}。
  *
- * @param username 显示名，唯一，2–20 位中文/字母/数字/下划线
+ * @param username 显示名，唯一，≤20 位（字符不限）
  * @param password 明文密码，6–32 位，落库前由 BCrypt 加密
  * @param email    登录凭据：必填、未删除行内唯一，不发验证邮件（见 PLAN §9）
  * @param bookName 账本名，可空；为空时默认「班级账本」
@@ -39,10 +39,9 @@ import jakarta.validation.constraints.Size;
 //}
 public record RegisterReq(
 
-        /** 显示名（不再是登录凭据）：2–20 位中文、字母、数字或下划线 */
+        /** 显示名（不再是登录凭据）：只限长度，不超过 20 位 */
         @NotBlank(message = "用户名不能为空")
-        @Size(min = UsernameRules.MIN, max = UsernameRules.MAX, message = UsernameRules.MESSAGE)
-        @Pattern(regexp = UsernameRules.PATTERN, message = UsernameRules.MESSAGE)
+        @Size(max = UsernameRules.MAX, message = UsernameRules.MESSAGE)
         String username,
 
         @NotBlank(message = "密码不能为空")

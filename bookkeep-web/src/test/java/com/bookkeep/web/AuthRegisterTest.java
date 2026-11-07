@@ -1,6 +1,7 @@
 package com.bookkeep.web;
 
 import com.bookkeep.model.dto.req.RegisterReq;
+import com.bookkeep.model.validation.UsernameRules;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,7 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 class AuthRegisterTest {
 
-    /** 用户名靠自增 + 时间戳保证各用例 / 各次运行之间不撞唯一索引（长度 16，符合 4–20 限制） */
+    /** 用户名靠自增 + 时间戳保证各用例 / 各次运行之间不撞唯一索引（长度 16，≤20） */
     private static final AtomicLong SEQ = new AtomicLong(System.currentTimeMillis());
 
     @Autowired
@@ -185,7 +186,7 @@ class AuthRegisterTest {
     }
 
     @Test
-    @DisplayName("参数校验失败：密码过短 / 用户名格式不对 → 400，且不落库")
+    @DisplayName("参数校验失败：密码过短 / 用户名超 20 位 → 400，且不落库")
     void invalidParamsRejected() throws Exception {
         String username = nextUsername();
 
@@ -198,16 +199,30 @@ class AuthRegisterTest {
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message", containsString("密码长度")));
 
-        // 用户名含非法字符
+        // 用户名只限长度：21 位被拦，提示只讲长度
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RegisterReq("bad name!", "abc123456", "u@example.com", "账本"))))
+                                new RegisterReq("a".repeat(UsernameRules.MAX + 1),
+                                        "abc123456", "u@example.com", "账本"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message", containsString("用户名需")));
+                .andExpect(jsonPath("$.message", containsString("用户名长度")));
 
         assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user WHERE username = ?", Integer.class, username));
+    }
+
+    @Test
+    @DisplayName("用户名不再限制字符集：空格和标点都能注册（长度仍 ≤20）")
+    void anyCharsWithinLengthAccepted() throws Exception {
+        String username = "张三 同学!" + SEQ.incrementAndGet();
+
+        registerWithEmail(username, "any" + SEQ.incrementAndGet() + "@example.com")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM user WHERE username = ?", Integer.class, username));
     }
 

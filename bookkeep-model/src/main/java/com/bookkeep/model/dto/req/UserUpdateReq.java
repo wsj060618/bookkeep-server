@@ -14,8 +14,7 @@ import jakarta.validation.constraints.Size;
 public record UserUpdateReq(
 
         @NotBlank(message = "用户名不能为空")
-        @Size(min = UsernameRules.MIN, max = UsernameRules.MAX, message = UsernameRules.MESSAGE)
-        @Pattern(regexp = UsernameRules.PATTERN, message = UsernameRules.MESSAGE)
+        @Size(max = UsernameRules.MAX, message = UsernameRules.MESSAGE)
         String username,
 
         @NotBlank(message = "邮箱不能为空")
