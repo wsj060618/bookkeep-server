@@ -206,7 +206,16 @@ class AuthRegisterTest {
                                 new RegisterReq(username, "abc!123456", "u@example.com", "账本"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message", containsString("字母、数字或下划线")));
+                .andExpect(jsonPath("$.message", containsString("至少含两种")));
+
+        // 纯数字：弱口令，即使长度合法也拒
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new RegisterReq(username, "12345678", "u@example.com", "账本"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message", containsString("至少含两种")));
 
         // 用户名只限长度：21 位被拦，提示只讲长度
         mockMvc.perform(post("/api/auth/register")
