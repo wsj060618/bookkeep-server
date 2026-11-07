@@ -186,18 +186,27 @@ class AuthRegisterTest {
     }
 
     @Test
-    @DisplayName("参数校验失败：密码过短 / 用户名超 20 位 → 400，且不落库")
+    @DisplayName("参数校验失败：密码过短/含符号、用户名超 20 位 → 400，且不落库")
     void invalidParamsRejected() throws Exception {
         String username = nextUsername();
 
-        // 密码过短：由 RegisterReq 上的 @Size 拦下，经 GlobalExceptionHandler 转成 "password: xxx"
+        // 密码过短：RegisterReq 上的 @Pattern 拦下，经 GlobalExceptionHandler 转成 "password: xxx"
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
                                 new RegisterReq(username, "123", "u@example.com", "账本"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message", containsString("密码长度")));
+                .andExpect(jsonPath("$.message", containsString("密码")));
+
+        // 密码含符号：只允许字母/数字/下划线
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new RegisterReq(username, "abc!123456", "u@example.com", "账本"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message", containsString("字母、数字或下划线")));
 
         // 用户名只限长度：21 位被拦，提示只讲长度
         mockMvc.perform(post("/api/auth/register")

@@ -1,6 +1,7 @@
 package com.bookkeep.model.dto.req;
 
 import com.bookkeep.model.validation.EmailRules;
+import com.bookkeep.model.validation.PasswordRules;
 import com.bookkeep.model.validation.UsernameRules;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -14,7 +15,7 @@ import jakarta.validation.constraints.Size;
  * 统一转成 {@code {code:400, message:"字段: 提示"}}。
  *
  * @param username 显示名，唯一，≤20 位（字符不限）
- * @param password 明文密码，6–32 位，落库前由 BCrypt 加密
+ * @param password 明文密码，6–32 位字母/数字/下划线，落库前由 BCrypt 加密
  * @param email    登录凭据：必填、未删除行内唯一，不发验证邮件（见 PLAN §9）
  * @param bookName 账本名，可空；为空时默认「班级账本」
  */
@@ -45,7 +46,7 @@ public record RegisterReq(
         String username,
 
         @NotBlank(message = "密码不能为空")
-        @Size(min = 6, max = 32, message = "密码长度需为 6–32 位")
+        @Pattern(regexp = PasswordRules.PATTERN, message = PasswordRules.MESSAGE)
         String password,
 
         /** 登录凭据：必填且未删除行内唯一 */
