@@ -47,7 +47,7 @@ services:
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-}
-      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-班级记账}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-记账本}
       APP_BASE_URL: ${APP_BASE_URL:?请在 .env 里设置 APP_BASE_URL，例如 https://你的域名}
 
   nginx:
