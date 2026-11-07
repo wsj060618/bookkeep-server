@@ -6,7 +6,8 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 /**
- * 单独一个配置类：--reset-password 以 WebApplicationType.NONE 启动，不加载 Web 安全那套，但仍要 BCrypt。
+ * 项目里唯一的 {@link PasswordEncoder} Bean。
+ * <p>service 模块只依赖接口（不引 spring-security-config），所以放在 web 的配置类里声明。
  */
 @Configuration
 public class PasswordEncoderConfig {

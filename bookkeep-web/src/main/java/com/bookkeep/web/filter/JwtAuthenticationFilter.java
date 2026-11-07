@@ -61,7 +61,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             int tokenVersion = jwtUtil.parseTokenVersion(token);
             User user = userMapper.selectById(userId);
             if (user != null && user.getTokenVersion() != tokenVersion) {
-                // 签发之后密码被改过（含 --reset-password），这个 token 立即作废
+                // 签发之后密码被改过（改密码 / 邮箱重置），这个 token 立即作废
                 log.debug("token 版本已失效（密码被改过）：userId={}, tokenVer={}, dbVer={}",
                         userId, tokenVersion, user.getTokenVersion());
                 return;

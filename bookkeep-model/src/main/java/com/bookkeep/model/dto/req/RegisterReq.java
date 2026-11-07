@@ -12,10 +12,9 @@ import jakarta.validation.constraints.Size;
  * <p>用 record 承载，校验注解直接标在组件上；校验失败由 {@code GlobalExceptionHandler}
  * 统一转成 {@code {code:400, message:"字段: 提示"}}。
  *
- * @param username 登录名，唯一，4–20 位字母/数字/下划线（区分大小写）
+ * @param username 显示名，唯一，4–20 位字母/数字/下划线（区分大小写）
  * @param password 明文密码，6–32 位，落库前由 BCrypt 加密
- * @param nickname 昵称，可空；为空时默认取用户名
- * @param email    邮箱，可空（仅展示用，不发验证邮件，见 PLAN §9）
+ * @param email    登录凭据：必填、未删除行内唯一，不发验证邮件（见 PLAN §9）
  * @param bookName 账本名，可空；为空时默认「班级账本」
  */
 //public record RegisterReq(String username, String password, ...) { }

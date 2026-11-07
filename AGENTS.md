@@ -73,7 +73,7 @@ Multi-module Spring Boot 3.5.16 / JDK 17 / Maven backend for a bookkeeping web a
 
 ## Testing
 
-- Tests live in each module's own `src/test/java`; `@SpringBootTest` + MockMvc integration tests go in `bookkeep-web` (full context, needs MySQL + env vars). Test classes must end in `Test` (Surefire default). `spring-security-test` is already declared in `bookkeep-web`.
+- Tests live in each module's own `src/test/java`; `@SpringBootTest` + MockMvc integration tests go in `bookkeep-web` (full context, needs MySQL + env vars). Test classes must end in `Test` (Surefire default). `spring-security-test` is deliberately **not** a dependency: tests use real tokens (its `@WithMockUser` principal is a `User`, not the `Long` that `SecurityUtil` expects).
 - `DataSourceConnectionTest` is the current smoke test (connection validity, `SELECT 1`, table count); it reads `application.yml`, so `DB_USER`/`DB_PWD` must be set or it fails with an unresolved-placeholder error.
 - `GlobalExceptionHandlerTest` deliberately defines its own throw-away endpoints in a nested `@TestConfiguration` + `@RestController` (never in `src/main`, or they would ship as public endpoints). It asserts HTTP 200 + `body.code`/`message` (only the `accessDenied` case is a real 403), and runs with `@AutoConfigureMockMvc(addFilters = false)`: it only tests exception mapping, and those throw-away endpoints have no token, so the security chain would turn every case into 401.
 - `SecurityJsonHandlerTest` is a plain JUnit test (no Spring context) calling `JwtAuthenticationEntryPoint` / `JwtAccessDeniedHandler` directly: P1 has no roles, so a filter-chain 403 is not reachable from an integration test, and this pins the "real 401/403 + identical envelope" contract the frontend depends on.
