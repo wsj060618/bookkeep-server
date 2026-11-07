@@ -93,6 +93,19 @@ class PasswordResetApiTest {
     }
 
     @Test
+    @DisplayName("邮箱格式不合法：直接 400 且不发信（`123@qq`、中文本地部分都不算邮箱）")
+    void malformedEmailIsRejected() throws Exception {
+        forgot("123@qq")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400));
+        forgot("张三@qq.com")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400));
+
+        verify(mailer, never()).send(anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
     @DisplayName("账号匹配：发一封邮件，链接里带 token，库里只存 hash")
     void knownAccountReceivesLink() throws Exception {
         String username = nextUsername("rst");
