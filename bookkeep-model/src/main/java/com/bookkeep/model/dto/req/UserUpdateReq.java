@@ -1,6 +1,7 @@
 package com.bookkeep.model.dto.req;
 
 import com.bookkeep.model.validation.EmailRules;
+import com.bookkeep.model.validation.UsernameRules;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -13,8 +14,8 @@ import jakarta.validation.constraints.Size;
 public record UserUpdateReq(
 
         @NotBlank(message = "用户名不能为空")
-        @Size(min = 4, max = 20, message = "用户名长度需为 4–20 位")
-        @Pattern(regexp = "^[a-zA-Z0-9_]+$", message = "用户名只能包含字母、数字和下划线")
+        @Size(min = UsernameRules.MIN, max = UsernameRules.MAX, message = UsernameRules.MESSAGE)
+        @Pattern(regexp = UsernameRules.PATTERN, message = UsernameRules.MESSAGE)
         String username,
 
         @NotBlank(message = "邮箱不能为空")

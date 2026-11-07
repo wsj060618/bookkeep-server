@@ -1,6 +1,7 @@
 package com.bookkeep.model.dto.req;
 
 import com.bookkeep.model.validation.EmailRules;
+import com.bookkeep.model.validation.UsernameRules;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -12,7 +13,7 @@ import jakarta.validation.constraints.Size;
  * <p>用 record 承载，校验注解直接标在组件上；校验失败由 {@code GlobalExceptionHandler}
  * 统一转成 {@code {code:400, message:"字段: 提示"}}。
  *
- * @param username 显示名，唯一，4–20 位字母/数字/下划线（区分大小写）
+ * @param username 显示名，唯一，2–20 位中文/字母/数字/下划线
  * @param password 明文密码，6–32 位，落库前由 BCrypt 加密
  * @param email    登录凭据：必填、未删除行内唯一，不发验证邮件（见 PLAN §9）
  * @param bookName 账本名，可空；为空时默认「班级账本」
@@ -38,10 +39,10 @@ import jakarta.validation.constraints.Size;
 //}
 public record RegisterReq(
 
-        /** 显示名（不再是登录凭据）：4–20 位，区分大小写的字符串都行 */
+        /** 显示名（不再是登录凭据）：2–20 位中文、字母、数字或下划线 */
         @NotBlank(message = "用户名不能为空")
-        @Size(min = 4, max = 20, message = "用户名长度需为 4–20 位")
-        @Pattern(regexp = "^[a-zA-Z0-9_]+$", message = "用户名只能包含字母、数字和下划线")
+        @Size(min = UsernameRules.MIN, max = UsernameRules.MAX, message = UsernameRules.MESSAGE)
+        @Pattern(regexp = UsernameRules.PATTERN, message = UsernameRules.MESSAGE)
         String username,
 
         @NotBlank(message = "密码不能为空")

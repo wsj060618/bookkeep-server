@@ -205,9 +205,22 @@ class AuthRegisterTest {
                                 new RegisterReq("bad name!", "abc123456", "u@example.com", "账本"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message", containsString("用户名只能包含")));
+                .andExpect(jsonPath("$.message", containsString("用户名需")));
 
         assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user WHERE username = ?", Integer.class, username));
+    }
+
+    @Test
+    @DisplayName("用户名可以用中文（2 个汉字起），登录仍走邮箱")
+    void chineseUsernameAccepted() throws Exception {
+        String username = "班委" + SEQ.incrementAndGet();
+
+        registerWithEmail(username, "cn" + SEQ.incrementAndGet() + "@example.com")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM user WHERE username = ?", Integer.class, username));
     }
 
