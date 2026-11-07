@@ -13,7 +13,8 @@
   - Lombok + spring-boot-starter-validation
   - Spring Security + JWT（jjwt 0.12.x）
   - **AI 边车（可选，§10.8）**：Python 3.12 + FastAPI + LangChain + **LangGraph**；
-    只监听 `127.0.0.1:8000`，不对外、不连数据库，Java 侧 `RestClient` 调它并自带降级
+    只监听 `127.0.0.1:8000`，不对外、不连数据库，Java 侧 `RestClient` 调它并自带降级；
+    模型走**用户自定义的 OpenAI 兼容 API**，`AI_BASE_URL`/`AI_MODEL`/`AI_API_KEY` **默认全部为空**（为空即关闭）
 - 工程结构：**Maven 父子工程（多模块）**，父工程 `bookkeep-server` 下拆四个子模块（`common` / `model` / `service` / `web`，见 §4）
 - 部署形态（第 7 天定稿，一套代码两种部署目标，差异只在配置）：
   - **本地单机（日常使用，主目标）**：Windows + 本机 MySQL 8 + Nginx for Windows 托管前端静态文件，
@@ -917,10 +918,34 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 |---|---|
 | 运行时 | Python 3.12 + FastAPI + uvicorn |
 | 编排 | **LangGraph**（`StateGraph` + 条件边 + 重试环） |
-| 模型 SDK | LangChain：`langchain-core` + `langchain-openai` + `langchain-ollama` |
+| 模型 SDK | LangChain：`langchain-core` + `langchain-openai`（任何 OpenAI 兼容端点；Ollama 走它的 `/v1`） |
 | 校验 | Pydantic v2（请求/响应 + 模型输出二次校验） |
 | 依赖锁定 | `requirements.txt` 全量固定版本（或 `uv.lock`），禁止部署时 `pip install -U` |
 | 测试/评测 | pytest + 30 条 JSON 样例 |
+
+自定义 API（**默认留空，不绑定任何厂商**）：
+
+- 仓库内**不写默认 `base_url`、模型名或 key**：三项都空 = AI 关闭，开箱即用不产生任何外部请求
+- 唯一接入方式是「OpenAI 兼容」：用户自己填地址、模型、key，可指向
+  智谱（`https://open.bigmodel.cn/api/paas/v4` + `glm-4-flash`）、百炼、硅基流动、DeepSeek、
+  OpenRouter、自建 vLLM，或本机 Ollama（`http://127.0.0.1:11434/v1`）
+- 模型名是**自由字符串**，不做白名单：换模型只改环境变量，不改代码、不发版
+
+配置项（全部可空）：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `AI_BASE_URL` | **空** | OpenAI 兼容地址（含 `/v1` 或厂商等价前缀） |
+| `AI_MODEL` | **空** | 模型 ID，例如 `glm-4-flash` |
+| `AI_API_KEY` | **空** | 只存在 Python 侧，Java 不持有 |
+| `AI_TIMEOUT` | `8` | 秒；Java 与 Python 都按它兜底 |
+
+- 判定规则：**`AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 任一为空 → 视为未配置**，
+  使用 `DisabledAiClient`，不发起任何外部调用；`/health` 返回 `{"configured": false}`；
+  前端整体隐藏 AI 入口，不弹错误
+- 配置错误（URL 不合法、401/403）只记 WARN 并按不可用处理，**绝不回落到某个“默认厂商”**
+- `.env.example` / `deploy/env.ps1.example` 这几项一律留空，只放注释示例；真实值不进仓库
+- 日志与 `/health` 不回显 `AI_API_KEY`、`AI_BASE_URL`（最多显示“已配置/未配置”）
 
 服务形态：
 
@@ -953,7 +978,7 @@ LangGraph 具体怎么用（避免“为了用而用”）：
 
 Java 侧（`bookkeep-service/ai`，只做网关与降级）：
 
-- `AiClient` 接口 + 两个实现：`HttpAiClient`（Spring 6 `RestClient` 调边车）/ `DisabledAiClient`（未配置或 `app.ai.enabled=false`）
+- `AiClient` 接口 + 两个实现：`HttpAiClient`（Spring 6 `RestClient` 调边车）/ `DisabledAiClient`（**base-url/model/key 任一为空**，或 `app.ai.enabled=false`）
 - 超时 8s、失败只记日志、返回空结果；前端功能整体隐藏，不弹错误
 - 单用户 20 次/天（`SimpleRateLimiter`）、同文本 24h 缓存仍留在 Java 侧（边车不承担业务限流）
 - Controller 路径不变：`/api/ai/*`；前端只认 Java，**绝不直连 Python**
@@ -972,6 +997,7 @@ Java 侧（`bookkeep-service/ai`，只做网关与降级）：
 - 本机：`deploy/start-all.ps1` 增加启停 Python 进程，`stop-all.ps1` 一并清理；日志进 `deploy/logs/ai-service.log`
 - 云端：`docker/docker-compose.yml` 增加 `ai` 服务（不 publish 端口，仅 `app` 可访问）
 - 备份不受影响（AI 不存数据）；但部署文档必须写清楚 **Python 版本 + 虚拟环境 + 依赖安装**，否则换机器跑不起来
+- AI 配置全部可选：`AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 留空时边车只提供 `/health`，Java 隐藏入口，不影响记账/统计/公示
 - 这是本项目唯一的多语言点，面试按「外部能力边车」解释，不按「微服务」解释
 
 不做：自动记账/自动删除、自由 SQL 问答、预算预测、票据 OCR、语音记账、key 进前端；
