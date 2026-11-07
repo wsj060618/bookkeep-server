@@ -29,7 +29,7 @@ vim docker/.env          # 填 MYSQL_ROOT_PASSWORD / DB_PWD / JWT_SECRET / APP_B
 
 - `JWT_SECRET` 必须 ≥32 字符；prod profile 下若仍是仓库默认值，应用**拒绝启动**
 - `APP_BASE_URL` 必须是公网 HTTPS 地址，否则找回密码邮件里的链接点不开
-- `MAIL_FROM` 只填纯地址（必须与 `MAIL_USERNAME` 一致）；`MAIL_FROM_NAME` 控制收件人看到的发件人名字，默认项目名「记账本」
+- `MAIL_FROM` 只填纯地址（必须与 `MAIL_USERNAME` 一致）；`MAIL_FROM_NAME` 控制收件人看到的发件人名字，默认项目名「bookkeep」
 
 ## 3. 证书
 
