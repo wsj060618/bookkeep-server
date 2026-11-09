@@ -21,10 +21,11 @@ import java.util.List;
 
 /**
  * 分类业务实现。
- * <p>三条规则：
+ * <p>四条规则：
  * <ol>
  *   <li>所有读写都限定在当前账本内（{@link CurrentBookService}），拿别人的分类 id 一律「不存在」</li>
  *   <li>分类的收支类型建好后**不能改**：改了会让该分类下历史流水的方向失真</li>
+ *   <li>同一账本、同一方向下分类名不重复，否则「记一笔」下拉里会出现两条一样的选项</li>
  *   <li>删除前检查流水引用，不级联删流水 —— 账目不能因为删一个分类就凭空少掉</li>
  * </ol>
  */
@@ -57,10 +58,12 @@ public class CategoryServiceImpl implements CategoryService {
     @Transactional(rollbackFor = Exception.class)
     public CategoryResp create(CategoryReq req) {
         Long bookId = currentBookService.currentBookId();
+        String name = req.name().trim();
+        requireNameAvailable(bookId, req.type(), name, null);
 
         Category category = new Category();
         category.setBookId(bookId);
-        category.setName(req.name().trim());
+        category.setName(name);
         category.setType(req.type());
         category.setIcon(StringUtils.hasText(req.icon()) ? req.icon().trim() : "other");
         category.setColor(StringUtils.hasText(req.color()) ? req.color().trim() : "gray");
@@ -83,7 +86,11 @@ public class CategoryServiceImpl implements CategoryService {
             throw new BusinessException(ResultCode.BAD_REQUEST, "分类的收支类型不能修改");
         }
 
-        category.setName(req.name().trim());
+        String name = req.name().trim();
+        // 改名也要查重：否则「记一笔」下拉里会出现两条一模一样的选项
+        requireNameAvailable(bookId, category.getType(), name, id);
+
+        category.setName(name);
         if (StringUtils.hasText(req.icon())) {
             category.setIcon(req.icon().trim());
         }
@@ -126,6 +133,19 @@ public class CategoryServiceImpl implements CategoryService {
             throw new BusinessException(ResultCode.NOT_FOUND, "分类不存在");
         }
         return category;
+    }
+
+    /** 同一账本、同一收支方向下不允许重名：否则「记一笔」下拉里两条一样的选项分不清。 */
+    private void requireNameAvailable(Long bookId, String type, String name, Long excludeId) {
+        Category dup = categoryMapper.selectOne(Wrappers.<Category>query()
+                .eq("book_id", bookId)
+                .eq("type", type)
+                .eq("name", name)
+                .ne(excludeId != null, "id", excludeId)
+                .last("LIMIT 1"));
+        if (dup != null) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "同类下已有同名分类「" + name + "」");
+        }
     }
 
     private int nextSortOrder(Long bookId) {

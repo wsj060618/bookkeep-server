@@ -42,6 +42,17 @@ Content-Type: application/json
   "color": "blue"
 }
 
+### 5.1 重名（同一账本、同一方向）：预期 HTTP 200 + code=400 + 「同类下已有同名分类「xxx」」
+### 跨方向（改成 income）同名是允许的，模板本身就是支出/收入各有一条「其他」
+POST {{host}}/api/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "班服定制",
+  "type": "expense"
+}
+
 ### 6. 删除分类（若该分类下有流水 → 400 并提示条数，这是预期行为）
 DELETE {{host}}/api/categories/{id}
 Authorization: Bearer {{token}}

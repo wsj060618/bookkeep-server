@@ -95,6 +95,52 @@ class CategoryApiTest {
     }
 
     @Test
+    @DisplayName("同一账本同一方向不允许重名（跨方向可以）：新增/改名都拦，改回自己名字放行")
+    void duplicateNameRejected() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("cat"));
+
+        MvcResult created = mockMvc.perform(post("/api/categories")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"打印费\",\"type\":\"expense\"}"))
+                .andExpect(jsonPath("$.code").value(200))
+                .andReturn();
+        long id = json(created, objectMapper).path("data").path("id").asLong();
+
+        // 同方向重名：400，提示带名字
+        mockMvc.perform(post("/api/categories")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"打印费\",\"type\":\"expense\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("同类下已有同名分类「打印费」"));
+
+        // 换个方向同名：允许（模板本身就是支出/收入各有一条「其他」）
+        mockMvc.perform(post("/api/categories")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"打印费\",\"type\":\"income\"}"))
+                .andExpect(jsonPath("$.code").value(200));
+
+        // 改名撞到已有名字：400
+        mockMvc.perform(put("/api/categories/" + id)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"其他\",\"type\":\"expense\"}"))
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("同类下已有同名分类「其他」"));
+
+        // 只改图标、名字保持原样：不能因为「和自己重名」被拦
+        mockMvc.perform(put("/api/categories/" + id)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"打印费\",\"type\":\"expense\",\"icon\":\"print\",\"color\":\"cyan\"}"))
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.icon").value("print"));
+    }
+
+    @Test
     @DisplayName("分类的收支类型不能改：改了会让历史流水方向失真 → 400")
     void categoryTypeCannotChange() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("cat"));
