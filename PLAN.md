@@ -385,7 +385,8 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
   先按月过滤再累计，每月第一行都会从 0 开始，数字全错（W2 的 `selectMonthWithRunningBalance` 就是这么写的）
 - **取舍**：普通明细列表**不返回**结余列（只返回金额）；**导出与公示页才带** `balanceAfter`（它们是全量查询，语义清晰）
 - 余额校验：`当前余额 = Σ收入 − Σ支出`，新增/修改**支出**时超过余额 → `400「班费余额不足，当前余额 X」`
-- 统计口径：本月收入/支出/结余；累计结余 = 全账本 `sumBalance`（不等于本月结余）；分类占比按支出 `GROUP BY category_id`
+- 统计口径：本月收入/支出/结余；累计结余 = 全账本 `sumBalance`（不等于本月结余）；分类占比按 `GROUP BY category_id`，
+  **`type` 可选 `expense` / `income`**（默认 expense）——支出、收入各看各的占比
 
 **导出格式（W2 落地：单个 CSV，两个区块）**：
 
@@ -404,12 +405,14 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/statistics/summary?month=2026-08` | `{month, income, expense, balance, totalBalance}`（balance = 该月收支差，totalBalance = 全账本累计） |
-| GET | `/api/statistics/category?month=&type=expense` | 分类占比 `[{categoryId, categoryName, categoryIcon, categoryColor, amount, percent}]` |
+| GET | `/api/statistics/category?month=&type=expense` | 分类占比 `[{categoryId, categoryName, categoryIcon, categoryColor, amount, percent}]`；`type` 传 `income` 就是收入占比 |
 
 - `month` 不传取当月（北京时间），格式必须是 `yyyy-MM`，格式错返回 400 而不是空数据（空数据会被误读成「这个月没记账」）
 - `percent` 保留两位小数、四舍五入，**各项相加可能不等于 100.00**（例：三项各 33.33），前端别用它反算金额
 - 分类项带上 `categoryId/icon/color` 是为了饼图图例直接出图标（§5.0 第 5 条），不是允许前端再查分类
 - 统计口径只在 `StatisticCalculator` 实现一次：登录态统计与免登录公示页共用，避免两处数字不一致
+- 前端展示形式可切换：**条形图 / 饼图 / 环形图**（后两者用 ECharts，按需引入、只落在统计页的懒加载 chunk 里），
+  方向可切换 **支出 / 收入**（打开页面时一次把两个方向都拉回来，切方向不再等请求）
 
 月度趋势 / 每日趋势 / 利润 / 成本结构**不做**（图表的边际价值低于部署与导出；需要时再加）。
 
