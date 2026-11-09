@@ -723,9 +723,16 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 - 文件限制：≤5MB、UTF-8（含 BOM）并兼容 GBK；空行跳过
 - 前端：导出加「Excel」选项；导入给模板下载 + 失败明细表
 
-### 10.4 自定义分类模板（明日事项）
+### 10.4 自定义分类模板 ✅ 已完成（2026-11-10）
 
 两件事一起做：**①「记一笔」里就地新建分类并应用；② 单独开一页管理分类模板。**
+
+> 落地记录（2026-11-10）：纯前端为主，**无数据库迁移**。
+> - 前端：`views/CategoriesView.vue` + 路由 `/categories` + 侧栏/抽屉「🏷 分类」；`ShellApi.reloadCategories()` 作为唯一刷新入口（分类页、就地新建、切账本共用）；`utils/category.ts` 导出 `ICON_CHOICES`/`COLOR_CHOICES`（固定候选，不引图标库）。
+> - 「记一笔」：分类下拉下面是**内联输入行**（不是 `el-select` 的 `#footer`），因为 footer 只在展开时存在，收起后输入框会跟着消失；新建成功后 `emit('category-created')` → layout 先插缓存再重拉，弹窗保持打开并选中新分类。输入框用 `@keydown.enter.prevent`，否则回车会连带触发整个表单的保存。
+> - **拖拽排序：不做**（用户确认「顺序无所谓」）。`sort_order` 仍由后端新增时自增，没有 `PUT /api/categories/sort`。
+> - **重名**：PLAN 原文假设「后端已有 400」，实际没有——本次补上 `CategoryServiceImpl.requireNameAvailable`，按 `(book_id, type)` 判重（模板本身就是支出/收入各一条「其他」，所以 type 必须在 key 里），新增与改名都拦。没有 DB 唯一索引，属于**应用层友好提示**，并发下仍可能插进两条同名。
+> - 流水页筛选：分类在别的页面被删后，`filterCategoryId` 指向不存在的 id 会让列表永远空白，已加 `watch(shell.categories)` 兜底清空并重查。
 
 #### ① 记一笔里的就地新建
 
@@ -733,7 +740,7 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 
 - 分类下拉里「其他」之后加一行「＋ 新建分类」，点开显示输入框 + 「新增并使用」
 - 提交后调 `POST /api/categories`（type 取当前记账的收支方向），成功后把新分类插进下拉并选中，不关闭「记一笔」弹窗
-- 同账本内分类名重复 → 后端已有 400，前端提示并保留输入
+- 同账本同方向分类名重复 → 400，前端提示并保留输入
 - 删除分类有流水时 400（§8 第 9 条），不要级联删流水
 
 #### ② 独立的分类管理页（路由 `/categories`）
@@ -743,7 +750,7 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 - **导航**：AppLayout 侧栏加「🏷 分类」，顺序放在「账本」之后、「设置」之前（手机抽屉同步）
 - **页面结构**：按 `支出 / 收入` 分两组，每行显示 图标 + 名称 + 颜色条 + 操作（改名 / 换图标颜色 / 删除）
 - **接口**：直接复用 §5.4 的 4 个（`GET/POST/PUT/DELETE /api/categories`）；
-  排序（`sort_order`）若要支持拖拽，需要补一个 `PUT /api/categories/sort`（收 id 数组，按顺序重写 sort_order）——做之前先确认是否真需要拖拽
+  排序（`sort_order`）若要支持拖拽，需要补一个 `PUT /api/categories/sort`（收 id 数组，按顺序重写 sort_order）——已确认不需要拖拽，未实现
 - **图标与颜色**：库里存的是语义 key（`icon` / `color`），页面给固定候选集让用户点选，不引图标库
 - **一致性**：页面增删改后，「记一笔」的下拉来自 layout 的 `categories` 缓存，必须同步刷新——
   给 `ShellApi` 加一个 `reloadCategories()`（或在 `useShell` 里暴露 `categoryVersion`），照 `txVersion` 的现成模式做
