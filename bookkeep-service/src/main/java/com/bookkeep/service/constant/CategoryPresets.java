@@ -41,9 +41,11 @@ public final class CategoryPresets {
     }
 
     /**
-     * 班级模板：8 条支出 + 5 条收入，共 13 条。
+     * 班级模板：7 条支出 + 4 条收入，共 11 条。
      * <p>支出按「班费实际会花在哪」排，收入里的「结余转入」是给换届用的：
      * 新生活委员建账后第一笔记「上学期结余 X 元」，历史就能接上。
+     * <p><strong>故意没有「其他」</strong>：「其他」是「记一笔」下拉末尾的虚拟入口，
+     * 选中就弹窗现建分类（要图标有图标），所以模板/预置分类里不需要这条。
      */
     private static final List<Seed> CLASS = List.of(
             new Seed("班会物资", TYPE_EXPENSE, "supplies", "orange", 1),
@@ -53,12 +55,10 @@ public final class CategoryPresets {
             new Seed("场地", TYPE_EXPENSE, "venue", "green", 5),
             new Seed("交通", TYPE_EXPENSE, "transport", "blue", 6),
             new Seed("奖品", TYPE_EXPENSE, "prize", "yellow", 7),
-            new Seed("其他", TYPE_EXPENSE, "other", "gray", 8),
-            new Seed("收取班费", TYPE_INCOME, "fee", "green", 9),
-            new Seed("学院拨款", TYPE_INCOME, "subsidy", "blue", 10),
-            new Seed("活动赞助", TYPE_INCOME, "sponsor", "purple", 11),
-            new Seed("结余转入", TYPE_INCOME, "carryover", "cyan", 12),
-            new Seed("其他", TYPE_INCOME, "other", "gray", 13)
+            new Seed("收取班费", TYPE_INCOME, "fee", "green", 8),
+            new Seed("学院拨款", TYPE_INCOME, "subsidy", "blue", 9),
+            new Seed("活动赞助", TYPE_INCOME, "sponsor", "purple", 10),
+            new Seed("结余转入", TYPE_INCOME, "carryover", "cyan", 11)
     );
 
     private CategoryPresets() {

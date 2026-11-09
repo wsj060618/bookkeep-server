@@ -30,8 +30,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 分类模板接口集成测试（/api/category-templates）。
- * <p>重点验证四件事：内置模板 id=0 不入库、快照/应用能整套替换分类、有流水时禁止换模板、
- * 模板跟账号走（别人碰不到）。用真实 token，不用 {@code @WithMockUser}（原因见 AGENTS.md）。
+ * <p>重点验证五件事：内置模板 id=0 不入库（11 条，无「其他」）、从零新建模板/快照模板、
+ * 修改模板时整体替换条目、有流水时禁止换模板、模板跟账号走（别人碰不到）。
+ * 用真实 token，不用 {@code @WithMockUser}（原因见 AGENTS.md）。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -46,8 +47,15 @@ class CategoryTemplateApiTest {
 
     private static final String BUILTIN_ITEMS = "$.data[0].items";
 
+    /** 两支出 + 一收入的小模板，省得每个用例都拼长 JSON */
+    private static final String TWO_ITEMS =
+            "{\"name\":\"%s\",\"items\":["
+                    + "{\"name\":\"打印费\",\"type\":\"expense\",\"icon\":\"print\",\"color\":\"cyan\"},"
+                    + "{\"name\":\"聚餐\",\"type\":\"expense\",\"icon\":\"dining\",\"color\":\"red\"},"
+                    + "{\"name\":\"班费\",\"type\":\"income\",\"icon\":\"fee\",\"color\":\"green\"}]}";
+
     @Test
-    @DisplayName("模板库默认只有内置「班级班费」：id=0、13 条、排第一")
+    @DisplayName("模板库默认只有内置「班级班费」：id=0、11 条、排第一、没有「其他」")
     void builtinTemplateIsListed() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
 
@@ -59,9 +67,109 @@ class CategoryTemplateApiTest {
                 .andExpect(jsonPath("$.data[0].id").value(0))
                 .andExpect(jsonPath("$.data[0].name").value("班级班费"))
                 .andExpect(jsonPath("$.data[0].builtin").value(true))
-                .andExpect(jsonPath(BUILTIN_ITEMS + ".length()").value(13))
+                .andExpect(jsonPath(BUILTIN_ITEMS + ".length()").value(11))
                 .andExpect(jsonPath(BUILTIN_ITEMS + "[0].name").value("班会物资"))
                 .andExpect(jsonPath(BUILTIN_ITEMS + "[0].sortOrder").value(1));
+
+        // 「其他」是记一笔里的虚拟入口，不是预置分类
+        assertFalse(getJson(mockMvc, objectMapper, "/api/category-templates", token)
+                .path("data").get(0).path("items").toString().contains("其他"));
+    }
+
+    @Test
+    @DisplayName("从零新建模板：条目按传入顺序编号，支出/收入名字相同互不冲突")
+    void createTemplateWithItems() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
+
+        mockMvc.perform(post("/api/category-templates")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(TWO_ITEMS.formatted("自建模板")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.builtin").value(false))
+                .andExpect(jsonPath("$.data.items.length()").value(3))
+                .andExpect(jsonPath("$.data.items[0].name").value("打印费"))
+                .andExpect(jsonPath("$.data.items[0].sortOrder").value(1))
+                .andExpect(jsonPath("$.data.items[1].sortOrder").value(2))
+                .andExpect(jsonPath("$.data.items[2].type").value("income"))
+                .andExpect(jsonPath("$.data.items[2].sortOrder").value(3));
+
+        // 支出、收入各一条同名：允许
+        mockMvc.perform(post("/api/category-templates")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"同名模板\",\"items\":["
+                                + "{\"name\":\"其他\",\"type\":\"expense\"},"
+                                + "{\"name\":\"其他\",\"type\":\"income\"}]}"))
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.items.length()").value(2));
+    }
+
+    @Test
+    @DisplayName("新建模板的校验：条目为空 / 同方向重名 / 方向非法，一律 400")
+    void createTemplateValidatesItems() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
+
+        mockMvc.perform(post("/api/category-templates")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"空模板\",\"items\":[]}"))
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("模板至少要有 1 个分类"));
+
+        mockMvc.perform(post("/api/category-templates")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"重名模板\",\"items\":["
+                                + "{\"name\":\"打印费\",\"type\":\"expense\"},"
+                                + "{\"name\":\"打印费\",\"type\":\"expense\"}]}"))
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("同一方向下分类名不能重复：「打印费」"));
+
+        mockMvc.perform(post("/api/category-templates")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"怪模板\",\"items\":[{\"name\":\"打印费\",\"type\":\"transfer\"}]}"))
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("分类方向只能是收入或支出"));
+    }
+
+    @Test
+    @DisplayName("修改模板：只传 name = 改名不动条目；带 items = 条目整体替换")
+    void updateTemplateReplacesItems() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
+
+        MvcResult created = mockMvc.perform(post("/api/category-templates")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(TWO_ITEMS.formatted("旧名字")))
+                .andReturn();
+        long templateId = json(created, objectMapper).path("data").path("id").asLong();
+
+        // 只改名：条目还是 3 条
+        mockMvc.perform(put("/api/category-templates/" + templateId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"新名字\"}"))
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.name").value("新名字"))
+                .andExpect(jsonPath("$.data.items.length()").value(3));
+
+        // 带 items：整体替换成 1 条
+        mockMvc.perform(put("/api/category-templates/" + templateId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"新名字\",\"items\":["
+                                + "{\"name\":\"唯一分类\",\"type\":\"income\",\"icon\":\"fee\",\"color\":\"green\"}]}"))
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].name").value("唯一分类"))
+                .andExpect(jsonPath("$.data.items[0].sortOrder").value(1));
+
+        JsonNode listed = getJson(mockMvc, objectMapper, "/api/category-templates", token).path("data").get(1);
+        assertEquals(1, listed.path("items").size());
+        assertEquals("唯一分类", listed.path("items").get(0).path("name").asText());
     }
 
     @Test
@@ -69,14 +177,14 @@ class CategoryTemplateApiTest {
     void snapshotThenApplyRestoresCategories() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
 
-        MvcResult created = mockMvc.perform(post("/api/category-templates")
+        MvcResult created = mockMvc.perform(post("/api/category-templates/from-book")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"我的模板\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.builtin").value(false))
-                .andExpect(jsonPath("$.data.items.length()").value(13))
+                .andExpect(jsonPath("$.data.items.length()").value(11))
                 .andReturn();
         long templateId = json(created, objectMapper).path("data").path("id").asLong();
 
@@ -89,7 +197,7 @@ class CategoryTemplateApiTest {
         mockMvc.perform(delete("/api/categories/" + venueId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(jsonPath("$.code").value(200));
-        assertEquals(11, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
+        assertEquals(9, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
 
         mockMvc.perform(post("/api/category-templates/" + templateId + "/apply")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
@@ -97,7 +205,7 @@ class CategoryTemplateApiTest {
                 .andExpect(jsonPath("$.code").value(200));
 
         JsonNode categories = getJson(mockMvc, objectMapper, "/api/categories", token).path("data");
-        assertEquals(13, categories.size());                 // 不是 11 + 13
+        assertEquals(11, categories.size());                 // 不是 9 + 11
         assertEquals("聚餐", categories.get(2).path("name").asText());
         assertEquals("场地", categories.get(4).path("name").asText());
 
@@ -127,7 +235,7 @@ class CategoryTemplateApiTest {
                         "当前账本已有 1 笔流水，不能再换模板；请新建一个账本或先清空流水"));
 
         // 分类一条没少：拒绝时不能先删后报错
-        assertEquals(13, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
+        assertEquals(11, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
     }
 
     @Test
@@ -156,7 +264,7 @@ class CategoryTemplateApiTest {
         MvcResult created = mockMvc.perform(post("/api/category-templates")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenA)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"A的模板\"}"))
+                        .content(TWO_ITEMS.formatted("A的模板")))
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn();
         long aTemplateId = json(created, objectMapper).path("data").path("id").asLong();
@@ -191,7 +299,7 @@ class CategoryTemplateApiTest {
         MvcResult created = mockMvc.perform(post("/api/category-templates")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"学期模板\"}"))
+                        .content(TWO_ITEMS.formatted("学期模板")))
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn();
         long templateId = json(created, objectMapper).path("data").path("id").asLong();
@@ -199,7 +307,7 @@ class CategoryTemplateApiTest {
         mockMvc.perform(post("/api/category-templates")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"学期模板\"}"))
+                        .content(TWO_ITEMS.formatted("学期模板")))
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("已有同名模板「学期模板」"));
 
@@ -214,12 +322,12 @@ class CategoryTemplateApiTest {
         JsonNode books = getJson(mockMvc, objectMapper, "/api/books", token).path("data");
         assertTrue(books.get(0).path("categoryTemplateId").isNull());
 
-        // 模板没了，但账本里的分类还在（应用只是一次性复制，不是引用）
-        assertEquals(13, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
+        // 模板没了，但账本里的分类还在（应用只是一次性复制，不是引用）：就是刚才那 3 条
+        assertEquals(3, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
     }
 
     @Test
-    @DisplayName("建模板要求当前账本有分类：把分类全删光时 400")
+    @DisplayName("存为模板要求当前账本有分类：把分类全删光时 400")
     void snapshotRequiresAtLeastOneCategory() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
 
@@ -230,7 +338,7 @@ class CategoryTemplateApiTest {
                     .andExpect(jsonPath("$.code").value(200));
         }
 
-        mockMvc.perform(post("/api/category-templates")
+        mockMvc.perform(post("/api/category-templates/from-book")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"空模板\"}"))
@@ -243,19 +351,11 @@ class CategoryTemplateApiTest {
     void createBookWithTemplateSeedsItsCategories() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
 
-        // 先做出一个「只有 2 条分类」的模板：删掉其余 11 条再存为模板
-        JsonNode categories = getJson(mockMvc, objectMapper, "/api/categories", token).path("data");
-        for (int i = 2; i < categories.size(); i++) {
-            mockMvc.perform(delete("/api/categories/" + categories.get(i).path("id").asLong())
-                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
-                    .andExpect(jsonPath("$.code").value(200));
-        }
-        assertEquals(2, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
         long templateId = json(
                 mockMvc.perform(post("/api/category-templates")
                                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                                 .contentType(MediaType.APPLICATION_JSON)
-                                .content("{\"name\":\"精简模板\"}"))
+                                .content(TWO_ITEMS.formatted("精简模板")))
                         .andReturn(), objectMapper)
                 .path("data").path("id").asLong();
 
@@ -267,11 +367,12 @@ class CategoryTemplateApiTest {
                         .andReturn(), objectMapper)
                 .path("data").path("id").asLong();
 
-        // 新建即切为当前，所以这里查到的就是新账本的分类：直接就是模板那 2 条，不是内置 13 条
+        // 新建即切为当前，所以这里查到的就是新账本的分类：直接就是模板那 3 条，不是内置 11 条
         JsonNode seeded = getJson(mockMvc, objectMapper, "/api/categories", token).path("data");
-        assertEquals(2, seeded.size());
-        assertEquals(categories.get(0).path("name").asText(), seeded.get(0).path("name").asText());
-        assertEquals(categories.get(1).path("name").asText(), seeded.get(1).path("name").asText());
+        assertEquals(3, seeded.size());
+        assertEquals("打印费", seeded.get(0).path("name").asText());
+        assertEquals("聚餐", seeded.get(1).path("name").asText());
+        assertEquals("班费", seeded.get(2).path("name").asText());
 
         JsonNode books = getJson(mockMvc, objectMapper, "/api/books", token).path("data");
         JsonNode created = null;
@@ -286,7 +387,7 @@ class CategoryTemplateApiTest {
     }
 
     @Test
-    @DisplayName("新建账本不传模板 = 内置「班级班费」13 条，categoryTemplateId 为 null")
+    @DisplayName("新建账本不传模板 = 内置「班级班费」11 条，categoryTemplateId 为 null")
     void createBookWithoutTemplateUsesBuiltin() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
 
@@ -299,7 +400,7 @@ class CategoryTemplateApiTest {
                 .path("data");
 
         assertTrue(created.path("categoryTemplateId").isNull());
-        assertEquals(13, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
+        assertEquals(11, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
     }
 
     @Test
@@ -312,7 +413,7 @@ class CategoryTemplateApiTest {
                 mockMvc.perform(post("/api/category-templates")
                                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenA)
                                 .contentType(MediaType.APPLICATION_JSON)
-                                .content("{\"name\":\"A的模板\"}"))
+                                .content(TWO_ITEMS.formatted("A的模板")))
                         .andReturn(), objectMapper)
                 .path("data").path("id").asLong();
 

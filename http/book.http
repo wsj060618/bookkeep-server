@@ -11,7 +11,7 @@
 GET {{host}}/api/books
 Authorization: Bearer {{token}}
 
-### 2. 新建账本（自动切为当前；不传 templateId = 内置「班级班费」13 条）
+### 2. 新建账本（自动切为当前；不传 templateId = 内置「班级班费」11 条）
 POST {{host}}/api/books
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -31,7 +31,7 @@ Content-Type: application/json
   "templateId": {{templateId}}
 }
 
-### 3. 分类跟着当前账本走（新账本应是 13 条，id 与旧账本不同）
+### 3. 分类跟着当前账本走（新账本应是 11 条，id 与旧账本不同）
 GET {{host}}/api/categories
 Authorization: Bearer {{token}}
 

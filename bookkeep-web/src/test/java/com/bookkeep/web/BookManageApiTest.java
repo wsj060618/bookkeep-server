@@ -29,7 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 账本增删改查 + 回收站（PLAN §5.2）。
- * <p>重点验证四件事：新建账本自带 13 条分类、切换后数据真的隔离、删除后 15 天内可恢复、
+ * <p>重点验证四件事：新建账本自带 11 条分类、切换后数据真的隔离、删除后 15 天内可恢复、
  * 到期后账本连同分类与流水被物理删除。
  * <p>用真实 token；{@code @Transactional} 保证测试数据回滚，包括回收站里的物理删除。
  */
@@ -48,7 +48,7 @@ class BookManageApiTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("新建账本：自动切为当前、自带 13 条分类、数据与旧账本隔离")
+    @DisplayName("新建账本：自动切为当前、自带 11 条分类、数据与旧账本隔离")
     void createSwitchesCurrentAndSeedsCategories() throws Exception {
         String username = nextUsername("book");
         String token = registerAndLogin(mockMvc, objectMapper, username);
@@ -82,9 +82,9 @@ class BookManageApiTest {
         assertEquals(false, books.get(0).path("current").asBoolean());
         assertEquals(true, books.get(1).path("current").asBoolean());
 
-        // 新账本的分类是独立的一套（13 条），流水是空的
+        // 新账本的分类是独立的一套（11 条），流水是空的
         JsonNode categories = getJson(mockMvc, objectMapper, "/api/categories", token).path("data");
-        assertEquals(13, categories.size());
+        assertEquals(11, categories.size());
         JsonNode transactions = getJson(mockMvc, objectMapper, "/api/transactions", token).path("data");
         assertEquals(0, transactions.path("total").asInt());
 

@@ -5,7 +5,7 @@
 @host = http://localhost:8080
 @token = {{token}}
 
-### 1. 全部分类（注册后应为 13 条：8 支出 + 5 收入，按 sort_order 升序）
+### 1. 全部分类（注册后应为 11 条：7 支出 + 4 收入，按 sort_order 升序；没有「其他」）
 GET {{host}}/api/categories
 Authorization: Bearer {{token}}
 
@@ -43,7 +43,7 @@ Content-Type: application/json
 }
 
 ### 5.1 重名（同一账本、同一方向）：预期 HTTP 200 + code=400 + 「同类下已有同名分类「xxx」」
-### 跨方向（改成 income）同名是允许的，模板本身就是支出/收入各有一条「其他」
+### 跨方向（改成 income）同名是允许的：分类名只在同一方向内唯一
 POST {{host}}/api/categories
 Authorization: Bearer {{token}}
 Content-Type: application/json

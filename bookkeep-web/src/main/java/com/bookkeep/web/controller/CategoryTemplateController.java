@@ -34,16 +34,23 @@ public class CategoryTemplateController {
         return Result.success(categoryTemplateService.list());
     }
 
-    /** 从**当前账本**的分类快照出一个新模板（不传条目，避免模板与账本对不上） */
+    /** 从零新建：`{name, items:[{name,type,icon,color}]}`，items 必须非空 */
     @PostMapping
     public Result<CategoryTemplateResp> create(@Valid @RequestBody CategoryTemplateReq req) {
         return Result.success(categoryTemplateService.create(req));
     }
 
+    /** 把**当前账本**的分类快照成一个新模板（只带 name） */
+    @PostMapping("/from-book")
+    public Result<CategoryTemplateResp> createFromBook(@Valid @RequestBody CategoryTemplateReq req) {
+        return Result.success(categoryTemplateService.createFromBook(req));
+    }
+
+    /** 改名；带 items 时**整体替换**条目 */
     @PutMapping("/{id}")
-    public Result<CategoryTemplateResp> rename(@PathVariable Long id,
+    public Result<CategoryTemplateResp> update(@PathVariable Long id,
                                                @Valid @RequestBody CategoryTemplateReq req) {
-        return Result.success(categoryTemplateService.rename(id, req));
+        return Result.success(categoryTemplateService.update(id, req));
     }
 
     @DeleteMapping("/{id}")
@@ -52,7 +59,10 @@ public class CategoryTemplateController {
         return Result.success();
     }
 
-    /** 应用到当前账本：账本有流水时 400（换模板会断掉已有流水的分类归属） */
+    /**
+     * 应用到当前账本：账本有流水时 400（换模板会断掉已有流水的分类归属）。
+     * <p>界面已改成「新建账本时选模板」，此接口保留备用。
+     */
     @PostMapping("/{id}/apply")
     public Result<Void> apply(@PathVariable Long id) {
         categoryTemplateService.apply(id);

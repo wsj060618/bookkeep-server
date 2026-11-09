@@ -1,35 +1,63 @@
 ### 分类模板接口 —— 手工验收脚本（模板跟账号走，PLAN §5.4.1 / §10.4）
-### 用法：先跑 auth.http 的 1、2 拿到 token；模板与账本无关，但「存为模板」和「应用」都用当前账本
-### 注意：应用模板会整套替换当前账本的分类，所以只允许没有流水的账本操作（有流水一律 400）
-###      新建账本时就能选模板（book.http 第 2b 步，POST /api/books 带 templateId），这才是主力入口
+### 用法：先跑 auth.http 的 1、2 拿到 token
+### 注意：模板在「新建账本」时选用（book.http 第 2b 步），账本一旦有流水就不能再换
+###      内置模板 id=0、11 条、没有「其他」——「其他」是记一笔下拉里的虚拟新建入口
 
 @host = http://localhost:8080
 @token = {{token}}
 @templateId = {{templateId}}
 
-### 1. 模板库：内置「班级班费」排第一（id=0、builtin=true、13 条），注册后只有这一条
+### 1. 模板库：内置「班级班费」排第一（id=0、builtin=true、11 条）
 GET {{host}}/api/category-templates
 Authorization: Bearer {{token}}
 
-### 2. 把当前账本的分类快照成一个新模板（模板名同一账号内唯一）
+### 2. 从零新建模板：条目自己排，sortOrder 由后端按顺序编（1 起）
 POST {{host}}/api/category-templates
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "name": "秋季学期"
+  "name": "秋季学期",
+  "items": [
+    { "name": "打印费", "type": "expense", "icon": "print", "color": "cyan" },
+    { "name": "聚餐", "type": "expense", "icon": "dining", "color": "red" },
+    { "name": "班费", "type": "income", "icon": "fee", "color": "green" }
+  ]
 }
 
-### 3. 重名再存一次 → 400 已有同名模板「秋季学期」
+### 3. 校验：条目为空 → 400 模板至少要有 1 个分类
 POST {{host}}/api/category-templates
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "name": "秋季学期"
+  "name": "空模板",
+  "items": []
 }
 
-### 4. 模板改名（把 {templateId} 换成第 2 步返回的 id）
+### 4. 校验：同方向重名 → 400 同一方向下分类名不能重复（跨方向同名允许）
+POST {{host}}/api/category-templates
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "重名模板",
+  "items": [
+    { "name": "打印费", "type": "expense" },
+    { "name": "打印费", "type": "expense" }
+  ]
+}
+
+### 5. 把当前账本的分类快照成模板（只带 name）
+POST {{host}}/api/category-templates/from-book
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "本账本快照"
+}
+
+### 6. 改名：只带 name，条目不动
 PUT {{host}}/api/category-templates/{{templateId}}
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -38,21 +66,19 @@ Content-Type: application/json
   "name": "秋季学期（改）"
 }
 
-### 5. 应用到当前账本：账本没有流水时 200，分类被整套替换成模板里的
-###    内置模板用 /api/category-templates/0/apply
-POST {{host}}/api/category-templates/{{templateId}}/apply
+### 7. 替换条目：带 items = 整体替换（旧的条目全删掉）
+PUT {{host}}/api/category-templates/{{templateId}}
 Authorization: Bearer {{token}}
+Content-Type: application/json
 
-### 6. 应用后看结果：分类与模板一致，账本回写 categoryTemplateId
-GET {{host}}/api/categories
-Authorization: Bearer {{token}}
+{
+  "name": "秋季学期（改）",
+  "items": [
+    { "name": "唯一分类", "type": "income", "icon": "fee", "color": "green" }
+  ]
+}
 
-### 7. 先记一笔流水，再应用模板 → 400 当前账本已有 N 笔流水，不能再换模板
-###    （拒绝时分类一条都不会少：不能先删后报错）
-POST {{host}}/api/category-templates/0/apply
-Authorization: Bearer {{token}}
-
-### 8. 内置模板只能应用：改名 / 删除一律 400
+### 8. 内置模板只能看：改名 / 删除一律 400
 PUT {{host}}/api/category-templates/0
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -63,4 +89,8 @@ Content-Type: application/json
 
 ### 9. 删除模板：已套用过它的账本不受影响（分类是复制过去的），只把 categoryTemplateId 清空
 DELETE {{host}}/api/category-templates/{{templateId}}
+Authorization: Bearer {{token}}
+
+### 10. 应用模板到当前账本（界面已不露出，保留备用；账本有流水时 400）
+POST {{host}}/api/category-templates/0/apply
 Authorization: Bearer {{token}}

@@ -26,10 +26,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 分类模板实现。
@@ -44,6 +46,9 @@ import java.util.Objects;
 @Service
 @RequiredArgsConstructor
 public class CategoryTemplateServiceImpl implements CategoryTemplateService {
+
+    /** 一套模板最多几条：够用，同时挡住脚本灌垃圾 */
+    private static final int MAX_ITEMS = 100;
 
     private final CategoryTemplateMapper templateMapper;
     private final CategoryTemplateItemMapper itemMapper;
@@ -91,6 +96,26 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
     @Transactional(rollbackFor = Exception.class)
     public CategoryTemplateResp create(CategoryTemplateReq req) {
         Long userId = SecurityUtil.getUserId();
+        String name = req.name().trim();
+        requireNameAvailable(userId, name, null);
+        List<CategoryTemplateReq.Item> items = requireItems(req.items());
+
+        CategoryTemplate template = new CategoryTemplate();
+        template.setUserId(userId);
+        template.setName(name);
+        templateMapper.insert(template);
+
+        List<CategoryTemplateItem> saved = insertItems(template.getId(), items);
+        log.info("新建模板：userId={}, templateId={}, name={}, items={}",
+                userId, template.getId(), name, saved.size());
+        return new CategoryTemplateResp(template.getId(), name, false,
+                saved.stream().map(CategoryTemplateServiceImpl::toItem).toList());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CategoryTemplateResp createFromBook(CategoryTemplateReq req) {
+        Long userId = SecurityUtil.getUserId();
         Long bookId = currentBookService.currentBookId();
         String name = req.name().trim();
         requireNameAvailable(userId, name, null);
@@ -127,7 +152,7 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public CategoryTemplateResp rename(Long id, CategoryTemplateReq req) {
+    public CategoryTemplateResp update(Long id, CategoryTemplateReq req) {
         Long userId = SecurityUtil.getUserId();
         requireOwned(id, userId);
         String name = req.name().trim();
@@ -137,10 +162,20 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
                 .eq("id", id)
                 .set("name", name));
 
-        List<CategoryTemplateItem> items = itemMapper.selectList(Wrappers.<CategoryTemplateItem>query()
-                .eq("template_id", id)
-                .orderByAsc("sort_order", "id"));
-        log.info("模板改名：userId={}, templateId={}, name={}", userId, id, name);
+        List<CategoryTemplateItem> items;
+        if (req.items() == null) {
+            // 只改名：条目原样保留
+            items = itemMapper.selectList(Wrappers.<CategoryTemplateItem>query()
+                    .eq("template_id", id)
+                    .orderByAsc("sort_order", "id"));
+        } else {
+            // 传了 items = 整体替换（模板条目不多，省一套增删改接口，也不会出现「改了一半」的状态）
+            List<CategoryTemplateReq.Item> wanted = requireItems(req.items());
+            itemMapper.delete(Wrappers.<CategoryTemplateItem>query().eq("template_id", id));
+            items = insertItems(id, wanted);
+        }
+
+        log.info("修改模板：userId={}, templateId={}, name={}, items={}", userId, id, name, items.size());
         return new CategoryTemplateResp(id, name, false,
                 items.stream().map(CategoryTemplateServiceImpl::toItem).toList());
     }
@@ -191,13 +226,13 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
         log.info("应用分类模板：userId={}, bookId={}, templateId={}, items={}", userId, bookId, id, items.size());
     }
 
-    /* ---------- 内部 ---------- */
-
     @Override
     public List<CategoryTemplateResp.Item> itemsOf(Long templateId) {
         Long resolved = templateId == null ? CategoryPresets.BUILTIN_ID : templateId;
         return resolveItems(resolved, SecurityUtil.getUserId());
     }
+
+    /* ---------- 内部 ---------- */
 
     private CategoryTemplateResp builtinResp() {
         List<CategoryTemplateResp.Item> items = CategoryPresets.classCategories().stream()
@@ -244,6 +279,50 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
         if (dup != null && dup > 0) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "已有同名模板「" + name + "」");
         }
+    }
+
+    /** 条目至少要有一条，且方向只能是 income / expense；重名按方向分别判（支出、收入各一条同名不算冲突）。 */
+    private List<CategoryTemplateReq.Item> requireItems(List<CategoryTemplateReq.Item> items) {
+        if (items == null || items.isEmpty()) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "模板至少要有 1 个分类");
+        }
+        if (items.size() > MAX_ITEMS) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "一套模板最多 " + MAX_ITEMS + " 个分类");
+        }
+        Set<String> seen = new HashSet<>();
+        for (CategoryTemplateReq.Item item : items) {
+            String type = item.type();
+            if (!CategoryPresets.TYPE_INCOME.equals(type) && !CategoryPresets.TYPE_EXPENSE.equals(type)) {
+                throw new BusinessException(ResultCode.BAD_REQUEST, "分类方向只能是收入或支出");
+            }
+            String name = item.name() == null ? "" : item.name().trim();
+            if (name.isEmpty()) {
+                throw new BusinessException(ResultCode.BAD_REQUEST, "分类名不能为空");
+            }
+            if (!seen.add(type + "|" + name)) {
+                throw new BusinessException(ResultCode.BAD_REQUEST,
+                        "同一方向下分类名不能重复：「" + name + "」");
+            }
+        }
+        return items;
+    }
+
+    /** sort_order 按传入顺序自增（前端先排支出再排收入），保证展示顺序稳定。 */
+    private List<CategoryTemplateItem> insertItems(Long templateId, List<CategoryTemplateReq.Item> items) {
+        List<CategoryTemplateItem> saved = new ArrayList<>(items.size());
+        int order = 1;
+        for (CategoryTemplateReq.Item item : items) {
+            CategoryTemplateItem entity = new CategoryTemplateItem();
+            entity.setTemplateId(templateId);
+            entity.setName(item.name().trim());
+            entity.setType(item.type());
+            entity.setIcon(StringUtils.hasText(item.icon()) ? item.icon() : "other");
+            entity.setColor(StringUtils.hasText(item.color()) ? item.color() : "gray");
+            entity.setSortOrder(order++);
+            itemMapper.insert(entity);
+            saved.add(entity);
+        }
+        return saved;
     }
 
     private static CategoryTemplateResp.Item toItem(CategoryTemplateItem item) {

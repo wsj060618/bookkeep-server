@@ -35,7 +35,7 @@ class CategoryMapperTest {
     @DisplayName("班级模板分类能整体落库，字段映射（sort_order/type）正确")
     void insertFromTemplate() {
         List<CategoryPresets.Seed> seeds = CategoryPresets.classCategories();
-        assertEquals(13, seeds.size());
+        assertEquals(11, seeds.size());
 
         // 图标/颜色存的是语义 key（前端映射），不是 emoji 或 hex
         for (CategoryPresets.Seed seed : seeds) {
@@ -71,7 +71,7 @@ class CategoryMapperTest {
     }
 
     @Test
-    @DisplayName("按 type 筛选，income / expense 各自条数正确（8 支出 + 5 收入）")
+    @DisplayName("按 type 筛选，income / expense 各自条数正确（7 支出 + 4 收入）")
     void filterByType() {
         for (CategoryPresets.Seed seed : CategoryPresets.classCategories()) {
             Category category = new Category();
@@ -89,8 +89,8 @@ class CategoryMapperTest {
         long incomes = categoryMapper.selectCount(
                 Wrappers.<Category>query().eq("book_id", TEST_BOOK_ID).eq("type", CategoryPresets.TYPE_INCOME));
 
-        assertEquals(8, expenses);
-        assertEquals(5, incomes);
+        assertEquals(7, expenses);
+        assertEquals(4, incomes);
     }
 
     @Test

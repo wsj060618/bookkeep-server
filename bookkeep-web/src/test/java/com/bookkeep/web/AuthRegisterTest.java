@@ -29,7 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>走完整上下文 + 真实 MySQL：MockMvc 调接口，JdbcTemplate 直查原始列做断言，
  * 这样能验证「密码确实被加密」「账本类型确实落库」「班级分类模板确实写进去了」这类表述层的假象。
  * <p>项目已收敛为单一「班级账本」：请求里没有 bookType，服务端固定写 {@code class}、
- * 固定预置 13 条班级分类（8 支出 + 5 收入）。
+ * 固定预置 11 条班级分类（7 支出 + 4 收入，没有「其他」——「其他」是记一笔里的虚拟新建入口）。
  * <p>类上的 {@code @Transactional} 让每个用例结束后回滚，不污染开发库。
  */
 @SpringBootTest
@@ -50,7 +50,7 @@ class AuthRegisterTest {
     private ObjectMapper objectMapper;
 
     @Test
-    @DisplayName("注册成功：用户落库（BCrypt）、班级账本建好、13 条模板分类、current_book_id 回写")
+    @DisplayName("注册成功：用户落库（BCrypt）、班级账本建好、11 条模板分类、current_book_id 回写")
     void registerSuccess() throws Exception {
         String username = nextUsername();
         RegisterReq req = new RegisterReq(username, "abc123456", "ming@example.com", "我的账本");
@@ -81,10 +81,12 @@ class AuthRegisterTest {
         assertEquals(username, jdbcTemplate.queryForObject(
                 "SELECT u.username FROM user u JOIN book b ON b.user_id = u.id WHERE b.id = ?", String.class, bookId));
 
-        // 预置分类：班级模板 13 条（8 支出 + 5 收入），且是班级场景的分类名
-        assertEquals(13, countCategories(bookId));
-        assertEquals(8, countCategories(bookId, "expense"));
-        assertEquals(5, countCategories(bookId, "income"));
+        // 预置分类：班级模板 11 条（7 支出 + 4 收入，没有「其他」），且是班级场景的分类名
+        assertEquals(11, countCategories(bookId));
+        assertEquals(7, countCategories(bookId, "expense"));
+        assertEquals(4, countCategories(bookId, "income"));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM category WHERE book_id = ? AND name = ?", Integer.class, bookId, "其他"));
         assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM category WHERE book_id = ? AND name = ?", Integer.class, bookId, "收取班费"));
     }
@@ -162,10 +164,10 @@ class AuthRegisterTest {
         assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM user WHERE username = ? AND deleted = 0", Integer.class, username));
 
-        // 新账号是另一个人：有自己的 current_book_id 和 13 条模板分类，不复用墓碑的数据
+        // 新账号是另一个人：有自己的 current_book_id 和 11 条模板分类，不复用墓碑的数据
         Long newBookId = jdbcTemplate.queryForObject(
                 "SELECT current_book_id FROM user WHERE username = ? AND deleted = 0", Long.class, username);
-        assertEquals(13, countCategories(newBookId));
+        assertEquals(11, countCategories(newBookId));
     }
 
     @Test

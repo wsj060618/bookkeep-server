@@ -32,10 +32,10 @@
 
 ### 2.1 多账本（类型仍只有 class）
 - `book.type` 固定 `class`；一个用户可有多本账本（上限 10 本），同一时刻只有一本是**当前账本**
-- 账本增删改查齐全：列表 / 新建（预置 13 条分类）/ 改名 / 切换当前 / 删除（进回收站）
+- 账本增删改查齐全：列表 / 新建（选一套分类模板来预置分类）/ 改名 / 切换当前 / 删除（进回收站）
 - 删除 = 进回收站，**15 天内可恢复**；到期连同该账本的分类与流水彻底删除（§5.2）
 - **至少保留一本**：删到最后一本返回 400，否则分类/流水/统计接口会全部「没有当前账本」
-- 注册即建第一本账本并预置 **13 条班级分类**（8 支出 + 5 收入，见 §3）
+- 注册即建第一本账本并预置 **11 条班级分类**（7 支出 + 4 收入，见 §3）
 - 换届交接仍可用 **Excel 导出**（§5.5.1）；旧账本留着看或删进回收站都行
 
 ### 2.2 注册建账本
@@ -256,7 +256,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 
 | 方法 | 路径 | 说明 | 请求体 / 参数 |
 |---|---|---|---|
-| POST | `/api/auth/register` | 注册并创建班级账本（预置 13 条分类） | `{username, password, email, bookName?}` → 用户信息。**邮箱是登录凭据**：必填且未删除行内唯一；`username` 只是显示名；**没有 bookType / nickname**；`bookName` 为空默认「班级账本」 |
+| POST | `/api/auth/register` | 注册并创建班级账本（预置 11 条分类） | `{username, password, email, bookName?}` → 用户信息。**邮箱是登录凭据**：必填且未删除行内唯一；`username` 只是显示名；**没有 bookType / nickname**；`bookName` 为空默认「班级账本」 |
 | POST | `/api/auth/login` | 登录 | `{email, password}` → `{token, user:{id, username, email, avatar, currentBookId}, books:[{id, name, type, shareToken, shareTokenExpiresAt, current}]}` |
 | GET | `/api/auth/me` | 当前用户信息（含 currentBookId） | - |
 | POST | `/api/auth/forgot-password` | 申请重置密码（匿名） | `{email}`；该邮箱已注册才发信，**永远**返回同一句「如果该邮箱已注册，我们已经发送重置邮件」 |
@@ -279,7 +279,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/books` | 我的账本（不含回收站），带 `current` 标记 |
-| POST | `/api/books` | 新建 `{name, templateId?}`：按模板预置分类（`templateId` 省略 / 0 = 内置 13 条），并自动切为当前 |
+| POST | `/api/books` | 新建 `{name, templateId?}`：按模板预置分类（`templateId` 省略 / 0 = 内置 11 条），并自动切为当前 |
 | PUT | `/api/books/{id}` | **修改账本** `{name}`（只有改名；已有 `shareToken` 不变） |
 | POST | `/api/books/{id}/share` | 生成 / 重生公示链接 → `{token, expiresAt}`；**每次调用都换新 token** |
 | PUT | `/api/books/{id}/current` | 切换当前账本，返回切换后的完整列表 |
@@ -328,20 +328,22 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 
 ### 5.4.1 分类模板（跟账号走，2026-11-10 增补）
 
-模板是**一整套分类清单**，属于账号而非账本：一个账号可以有多套模板，任选一套「应用」到任意账本（整套替换该账本的分类）。
+模板是**一整套分类清单**，属于账号而非账本：一个账号可以有多套模板，新建账本时选一套，用它预置那本账本的分类。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/category-templates` | 模板库：内置「班级班费」排第一（`id=0`、`builtin=true`），之后是自建模板，条目一并返回 |
-| POST | `/api/category-templates` | 把**当前账本**的分类快照成新模板 `{name}`；不接收条目 |
-| PUT | `/api/category-templates/{id}` | 重命名（内置模板 400） |
+| POST | `/api/category-templates` | **从零新建** `{name, items:[{name,type,icon,color}]}`；`sortOrder` 由后端按顺序编号 |
+| POST | `/api/category-templates/from-book` | 把**当前账本**的分类快照成新模板 `{name}`；不接收条目 |
+| PUT | `/api/category-templates/{id}` | 改名；带 `items` 时**整体替换**条目（内置模板 400） |
 | DELETE | `/api/category-templates/{id}` | 物理删除；引用它的账本 `categoryTemplateId` 清空（回落到内置） |
-| POST | `/api/category-templates/{id}/apply` | 应用到当前账本（`id=0` = 内置）；**账本有流水时 400** |
+| POST | `/api/category-templates/{id}/apply` | 应用到当前账本（`id=0` = 内置）；**账本有流水时 400**。界面已不露出，保留备用 |
 
-- 内置模板**不入库**：内容取自 `CategoryPresets.classCategories()`，与注册时预置的 13 条同源，`book.category_template_id` 为 `NULL` 即表示内置
-- **新建账本就选模板**：`POST /api/books` 的 `templateId`（省略 / 0 = 内置）决定这本账本预置哪套分类，`book.category_template_id` 一并写入。这是「主力入口」——建好之后再换模板要满足「没有流水」，所以模板应该在新建时一次选对
+- 内置模板**不入库**：内容取自 `CategoryPresets.classCategories()`，与注册时预置的 11 条同源，`book.category_template_id` 为 `NULL` 即表示内置
+- **新建账本就选模板**：`POST /api/books` 的 `templateId`（省略 / 0 = 内置）决定这本账本预置哪套分类，`book.category_template_id` 一并写入。这是唯一的主力入口——建好之后再换模板要满足「没有流水」，所以模板应该在新建时一次选对
+- 模板条目在「新建模板 / 编辑模板」弹窗里维护（支出、收入两张卡片，右上角新增，可改名/换图标颜色/删除），一次提交整批替换
 - 应用 = 逻辑删除旧分类 + 按模板条目逐条新建；分类是**复制**不是引用，删模板不影响已套用的账本
-- 不做「模板条目在线编辑」：要改模板就在账本里把分类调好再「存为模板」（模型简单，不会出现模板与账本两套编辑逻辑）
+- **「其他」不是分类也不是模板条目**：它只是「记一笔」下拉末尾的虚拟入口，选中就弹同一个分类表单（可挑图标/颜色），所以内置模板从 13 条减到 11 条
 
 ### 5.5 流水（按当前账本）
 
@@ -750,26 +752,34 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 > - **只允许没有流水的账本换模板**：换模板 = 分类整套换掉，已有流水的分类归属会断，宁可 400 也不悄悄迁移流水
 > - **只内置「班级班费」一套**（即注册预置的 13 条），其余全部用户自建
 >
+> **口径变更（2026-11-10，第三版，最终）**：用户看完第二版后要求改交互——
+> - **新建账本改成弹窗**（起名 + 选分类模板），不再在账本页内联一行
+> - **模板自己新建**：分类页加「新建模板」按钮，弹窗里支出/收入两张卡片、右上角新增条目，条目可改名/换图标颜色/删除；「存为模板」（快照当前账本）保留
+> - **「应用到当前账本」按钮撤掉**（后端 `apply` 接口保留备用），那个位置换成「新建模板」
+> - **「记一笔」选「其他」改为弹窗新建分类**（和分类页同一个表单，能挑图标/颜色），不再在下列表下面挂输入行
+> - **因此内置模板去掉两条「其他」**（13 → 11 条）：既然「其他」是现建入口，就不该再是一条真实分类
+>
 > 落地记录：
 > - 数据库：`category_template` + `category_template_item`（都物理删除，无 `deleted` 列）+ `book.category_template_id`（`NULL` = 内置）。迁移脚本 `sql/migration_category_template.sql`
 > - 内置模板**不入库**、id 为 `0`，内容取 `CategoryPresets.classCategories()`（原 `constant/CategoryTemplate` 改名而来，避免与实体 `CategoryTemplate` 撞名）——注册预置的分类与内置模板永远同源
+> - 模板条目接口：`POST /api/category-templates`（从零建，带 items）、`POST /api/category-templates/from-book`（快照当前账本）、`PUT /{id}`（改名，带 items 则整体替换）；`sortOrder` 由后端按数组顺序编号，前端固定先排支出再排收入
 > - 应用模板 = 逻辑删除旧分类 + 按条目逐条新建 + 回写 `book.category_template_id`；分类是**复制**不是引用，所以删模板不影响已套用的账本（删模板时把引用它的账本 id 清空，含回收站里的账本，走手写 SQL `BookMapper.clearTemplateRef`）
 > - 注销账户同步物理删除该用户的模板与条目（`BookMapper.hardDeleteTemplate*ByUser`），否则留下孤儿数据
-> - **不做模板条目在线编辑**：要改模板就在账本里把分类调好再「存为模板」，避免模板/账本两套编辑 UI
-> - 前端：分类页顶部模板条（下拉 + 应用到当前账本 / 存为模板 / 重命名 / 删除）；应用后要同时刷新分类缓存与 `auth.books`（`categoryTemplateId` 变了）
-> - **新建账本时选模板**：`POST /api/books` 增加 `templateId`（`BookCreateReq`，省略 / 0 = 内置），账本页新建行多一个模板下拉，默认沿用当前账本的模板——建好之后再换模板要求「没有流水」，所以模板应该在新建时一次选对
-> - 「记一笔」：分类下拉下面是**内联输入行**（不是 `el-select` 的 `#footer`），因为 footer 只在展开时存在，收起后输入框会跟着消失；新建成功后 `emit('category-created')` → layout 先插缓存再重拉，弹窗保持打开并选中新分类。输入框用 `@keydown.enter.prevent`，否则回车会连带触发整个表单的保存
+> - **新建账本时选模板**：`POST /api/books` 增加 `templateId`（`BookCreateReq`，省略 / 0 = 内置），账本页「＋ 新增账本」弹窗里选，默认沿用当前账本的模板——建好之后再换模板要求「没有流水」，所以模板应该在新建时一次选对
+> - 前端共用组件：`components/CategoryFormDialog.vue`（名称 + 图标 + 颜色，**不带收支方向选择**，方向由场景固定：支出卡片里新增就是支出、记账按当前方向），被分类页、模板弹窗、「记一笔」三处复用；`components/TemplateFormDialog.vue` 是模板新建/编辑弹窗
+> - 「记一笔」：分类下拉末尾固定一个虚拟「其他」（值是哨兵 `-1`），选中即打开同一个分类表单，建完自动选中并继续记账；`emit('category-created')` → layout 先插缓存再重拉
 > - **拖拽排序：不做**（用户确认「顺序无所谓」）。`sort_order` 仍由后端新增时自增，没有 `PUT /api/categories/sort`
-> - **分类重名**：原 PLAN 假设「后端已有 400」，实际没有——补上 `CategoryServiceImpl.requireNameAvailable`，按 `(book_id, type)` 判重（模板本身就是支出/收入各一条「其他」，所以 type 必须在 key 里），新增与改名都拦。没有 DB 唯一索引，属于**应用层友好提示**，并发下仍可能插进两条同名
+> - **分类重名**：原 PLAN 假设「后端已有 400」，实际没有——补上 `CategoryServiceImpl.requireNameAvailable`，按 `(book_id, type)` 判重（支出、收入各一条同名是允许的，所以 type 必须在 key 里），新增与改名都拦。没有 DB 唯一索引，属于**应用层友好提示**，并发下仍可能插进两条同名。模板条目同样按方向判重
+> - **老数据**：「其他」只是从预置里去掉，**已经存在的账本不动**（它们的「其他」分类照常显示、统计、可改名），新账本/新注册才是 11 条
 > - 流水页筛选：分类在别的页面被删后，`filterCategoryId` 指向不存在的 id 会让列表永远空白，已加 `watch(shell.categories)` 兜底清空并重查
 
-#### ① 记一笔里的就地新建
+#### ① 记一笔里现建分类
 
-需求原话：**在「记一笔」里选择「其他」时，应当就在当前弹窗出现输入框，输入新分类名并直接应用**，不用跳去分类管理页。
+需求原话：**在「记一笔」里选择「其他」时弹出弹窗新建分类，要能选图标，和分类的新建一样**。
 
-- 分类下拉里「其他」之后加一行「＋ 新建分类」，点开显示输入框 + 「新增并使用」
+- 分类下拉末尾固定一条「📌 其他（新建分类…）」，选中它不会真的被选上（v-model 回退到上一个分类），而是打开分类表单弹窗
 - 提交后调 `POST /api/categories`（type 取当前记账的收支方向），成功后把新分类插进下拉并选中，不关闭「记一笔」弹窗
-- 同账本同方向分类名重复 → 400，前端提示并保留输入
+- 同账本同方向分类名重复 → 400，前端提示、弹窗保持打开
 - 删除分类有流水时 400（§8 第 9 条），不要级联删流水
 
 #### ② 独立的分类管理页（路由 `/categories`）
@@ -777,7 +787,7 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 分类是「按账本」的数据，散在「记一笔」下拉里管不了，单独开一页：
 
 - **导航**：AppLayout 侧栏加「🏷 分类」，顺序放在「账本」之后、「设置」之前（手机抽屉同步）
-- **页面结构**：顶部模板条（下拉切换 + 应用 / 存为模板 / 重命名 / 删除）；下面按 `支出 / 收入` 分两组，每行显示 图标 + 名称 + 颜色条 + 操作（改名 / 换图标颜色 / 删除）
+- **页面结构**：顶部模板条（下拉 + 新建模板 / 存为模板 / 编辑 / 删除）；下面按 `支出 / 收入` 分两组，每行显示 图标 + 名称 + 颜色条 + 操作（改名 / 换图标颜色 / 删除）
 - **接口**：直接复用 §5.4 的 4 个（`GET/POST/PUT/DELETE /api/categories`）；
   排序（`sort_order`）若要支持拖拽，需要补一个 `PUT /api/categories/sort`（收 id 数组，按顺序重写 sort_order）——已确认不需要拖拽，未实现
 - **图标与颜色**：库里存的是语义 key（`icon` / `color`），页面给固定候选集让用户点选，不引图标库
@@ -794,7 +804,7 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 复用现有多账本，只补学期元数据：
 
 - `book` 加两列：`semester_end DATE`（**只存截止日期**，可空；起始日不影响任何逻辑）、`archived TINYINT DEFAULT 0`
-- 「新建账本」时可选填学期截止日期，名字仍由用户起（如「2026-2027 秋季」）；分类模板照旧自动预置 13 条
+- 「新建账本」时可选填学期截止日期，名字仍由用户起（如「2026-2027 秋季」）；分类模板照旧按所选模板预置（默认内置 11 条）
 - 学期结束点「归档」：`archived=1` → 该账本**只读**（记流水、增删改分类返回 400）
 - **归档可恢复**：账本页提供「取消归档」（`archived=0`），恢复后立即可以继续记账
 - **归档不影响分享链接**：公示页照旧只读可看（与 `deleted`、`archived` 都无关，无需改）

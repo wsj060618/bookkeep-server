@@ -45,19 +45,19 @@ class CategoryApiTest {
     private ObjectMapper objectMapper;
 
     @Test
-    @DisplayName("注册后预置 13 条班级分类；按 type 过滤能拿到 8 支出 / 5 收入")
+    @DisplayName("注册后预置 11 条班级分类（没有「其他」）；按 type 过滤能拿到 7 支出 / 4 收入")
     void templateCategoriesAreListed() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("cat"));
 
         JsonNode all = getJson(mockMvc, objectMapper, "/api/categories", token).path("data");
-        assertEquals(13, all.size());
+        assertEquals(11, all.size());
 
         JsonNode expenses = getJson(mockMvc, objectMapper, "/api/categories?type=expense", token).path("data");
-        assertEquals(8, expenses.size());
+        assertEquals(7, expenses.size());
         expenses.forEach(c -> assertEquals("expense", c.path("type").asText()));
 
         JsonNode incomes = getJson(mockMvc, objectMapper, "/api/categories?type=income", token).path("data");
-        assertEquals(5, incomes.size());
+        assertEquals(4, incomes.size());
 
         // 排序：sort_order 升序，模板里「班会物资」排第一
         assertEquals("班会物资", all.get(0).path("name").asText());
@@ -82,7 +82,7 @@ class CategoryApiTest {
         long id = json(created, objectMapper).path("data").path("id").asLong();
 
         JsonNode expenses = getJson(mockMvc, objectMapper, "/api/categories?type=expense", token).path("data");
-        assertEquals(9, expenses.size());
+        assertEquals(8, expenses.size());
         assertEquals("班服", expenses.get(expenses.size() - 1).path("name").asText()); // 排最后
 
         mockMvc.perform(put("/api/categories/" + id)
@@ -116,7 +116,7 @@ class CategoryApiTest {
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("同类下已有同名分类「打印费」"));
 
-        // 换个方向同名：允许（模板本身就是支出/收入各有一条「其他」）
+        // 换个方向同名：允许（分类名只在同一方向内唯一）
         mockMvc.perform(post("/api/categories")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -127,9 +127,9 @@ class CategoryApiTest {
         mockMvc.perform(put("/api/categories/" + id)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"其他\",\"type\":\"expense\"}"))
+                        .content("{\"name\":\"聚餐\",\"type\":\"expense\"}"))
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("同类下已有同名分类「其他」"));
+                .andExpect(jsonPath("$.message").value("同类下已有同名分类「聚餐」"));
 
         // 只改图标、名字保持原样：不能因为「和自己重名」被拦
         mockMvc.perform(put("/api/categories/" + id)
@@ -207,7 +207,7 @@ class CategoryApiTest {
         long aCategoryId = json(created, objectMapper).path("data").path("id").asLong();
 
         JsonNode bCategories = getJson(mockMvc, objectMapper, "/api/categories", tokenB).path("data");
-        assertEquals(13, bCategories.size()); // B 只有自己的模板分类
+        assertEquals(11, bCategories.size()); // B 只有自己的预置分类
         assertFalse(bCategories.toString().contains("A的私有分类"));
 
         mockMvc.perform(put("/api/categories/" + aCategoryId)

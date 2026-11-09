@@ -15,11 +15,14 @@ public interface CategoryTemplateService {
     /** 模板库列表：内置模板排第一，之后是用户自建的（按创建顺序）。条目一并返回。 */
     List<CategoryTemplateResp> list();
 
-    /** 把**当前账本**的分类快照成一个新模板（当前账本没有分类时 400）。 */
+    /** 从零新建一套模板（条目由前端在「支出 / 收入」两张卡片里填）。 */
     CategoryTemplateResp create(CategoryTemplateReq req);
 
-    /** 改名。内置模板不能改（403 语义），模板名在同一用户内唯一。 */
-    CategoryTemplateResp rename(Long id, CategoryTemplateReq req);
+    /** 把**当前账本**的分类快照成一个新模板（当前账本没有分类时 400）。 */
+    CategoryTemplateResp createFromBook(CategoryTemplateReq req);
+
+    /** 改名；items 非空时**整体替换**条目。内置模板不能改。 */
+    CategoryTemplateResp update(Long id, CategoryTemplateReq req);
 
     /** 物理删除。引用它的账本（含回收站）自动指回内置模板。 */
     void delete(Long id);
@@ -27,6 +30,7 @@ public interface CategoryTemplateService {
     /**
      * 把模板应用到**当前账本**：先逻辑删除现有分类，再按模板条目逐条新建。
      * <p>账本里已有流水时一律 400——换模板会把分类整套换掉，历史流水的分类归属就断了。
+     * <p>界面上已不露出（换模板走「新建账本时选模板」），接口保留给以后用。
      */
     void apply(Long id);
 
