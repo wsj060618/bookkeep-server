@@ -21,4 +21,7 @@ public interface CategoryService {
 
     /** 删除前会检查有没有流水引用它；有则抛业务异常（不级联删流水）。 */
     void delete(Long id);
+
+    /** 批量删除（逻辑删除）；归档账本只读，返回实际删除条数 */
+    int deleteBatch(List<Long> ids);
 }

@@ -2,6 +2,7 @@ package com.bookkeep.web.controller;
 
 import com.bookkeep.common.result.PageResult;
 import com.bookkeep.common.result.Result;
+import com.bookkeep.model.dto.req.BatchIdsReq;
 import com.bookkeep.model.dto.req.TransactionQuery;
 import com.bookkeep.model.dto.req.TransactionReq;
 import com.bookkeep.model.dto.resp.TransactionResp;
@@ -76,6 +77,12 @@ public class TransactionController {
     public Result<Void> delete(@PathVariable Long id) {
         transactionService.delete(id);
         return Result.success();
+    }
+
+    /** 批量删除（流水页勾选后一次删）：返回实际删除条数 */
+    @PostMapping("/batch-delete")
+    public Result<Integer> deleteBatch(@Valid @RequestBody BatchIdsReq req) {
+        return Result.success(transactionService.deleteBatch(req.ids()));
     }
 
     /**

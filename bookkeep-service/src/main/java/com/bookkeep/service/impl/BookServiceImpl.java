@@ -7,6 +7,7 @@ import com.bookkeep.common.util.SecurityUtil;
 import com.bookkeep.model.dto.req.BookCreateReq;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
+import com.bookkeep.model.dto.resp.BookShareResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
 import com.bookkeep.model.dto.resp.CategoryTemplateResp;
 import com.bookkeep.model.dto.resp.ShareLinkResp;
@@ -25,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -133,6 +135,40 @@ public class BookServiceImpl implements BookService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public List<BookShareResp> shareBatch(List<Long> bookIds) {
+        User user = requireUser();
+        LocalDateTime now = LocalDateTime.now();
+        List<BookShareResp> result = new ArrayList<>(bookIds.size());
+
+        for (Long bookId : bookIds) {
+            Book book = requireOwned(bookId, user.getId());
+            boolean valid = book.getShareToken() != null
+                    && book.getShareTokenExpiresAt() != null
+                    && book.getShareTokenExpiresAt().isAfter(now);
+            if (valid) {
+                // 已经发出去的链接还在有效期：原样复用，别把它顶掉
+                result.add(new BookShareResp(book.getId(), book.getName(),
+                        book.getShareToken(), book.getShareTokenExpiresAt(), true));
+                continue;
+            }
+
+            String token = UUID.randomUUID().toString().replace("-", "");
+            LocalDateTime expiresAt = now.plusDays(SHARE_LINK_DAYS);
+            bookMapper.update(null, Wrappers.<Book>update()
+                    .eq("id", bookId)
+                    .eq("user_id", user.getId())
+                    .set("share_token", token)
+                    .set("share_token_expires_at", expiresAt));
+            result.add(new BookShareResp(book.getId(), book.getName(), token, expiresAt, false));
+        }
+
+        log.info("批量生成公示链接：userId={}, 账本={}, 新生成 {} 条",
+                user.getId(), bookIds, result.stream().filter(r -> !r.reused()).count());
+        return result;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public BookResp update(Long id, BookUpdateReq req) {
         User user = requireUser();
         Book book = requireOwned(id, user.getId());
@@ -216,6 +252,42 @@ public class BookServiceImpl implements BookService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public List<BookResp> deleteBatch(List<Long> ids) {
+        User user = requireUser();
+        List<Long> unique = ids.stream().distinct().toList();
+
+        // 先全部校验归属：一条不是自己的就整批拒绝，避免「删了一半才发现」
+        for (Long id : unique) {
+            requireOwned(id, user.getId());
+        }
+
+        long active = bookMapper.selectCount(Wrappers.<Book>query().eq("user_id", user.getId()));
+        if (active - unique.size() < 1) {
+            throw new BusinessException(ResultCode.BAD_REQUEST,
+                    "至少保留一本账本，先新建一本再删这些（本次选了 " + unique.size() + " 本）");
+        }
+
+        // 不能用 deleteById：它只写 deleted=1，不写 deleted_at，回收站就算不出到期时间
+        bookMapper.update(null, Wrappers.<Book>update()
+                .eq("user_id", user.getId())
+                .in("id", unique)
+                .set("deleted", 1)
+                .set("deleted_at", LocalDateTime.now()));
+
+        if (user.getCurrentBookId() != null && unique.contains(user.getCurrentBookId())) {
+            // 删掉的是当前账本：重指到剩下最早的一本，否则所有接口都会「没有当前账本」
+            Book next = bookMapper.selectOne(Wrappers.<Book>query()
+                    .eq("user_id", user.getId())
+                    .orderByAsc("id")
+                    .last("LIMIT 1"));
+            updateCurrentBookId(user.getId(), next.getId());
+        }
+        log.info("批量移入回收站：userId={}, bookIds={}", user.getId(), unique);
+        return doList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public List<BookTrashResp> trash() {
         purgeExpired();
         Long userId = SecurityUtil.getUserId();
@@ -251,6 +323,27 @@ public class BookServiceImpl implements BookService {
         bookMapper.hardDeleteCategories(id);
         bookMapper.hardDeleteBook(id);
         log.info("彻底删除账本：userId={}, bookId={}（连同分类与流水）", userId, id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int purgeBatch(List<Long> ids) {
+        Long userId = SecurityUtil.getUserId();
+        List<Long> unique = ids.stream().distinct().toList();
+
+        // 先整批校验：有一条不在「自己的回收站里」就整批拒绝，绝不出现「删一半」
+        for (Long id : unique) {
+            if (bookMapper.selectTrashedId(id, userId) == null) {
+                throw new BusinessException(ResultCode.NOT_FOUND, "账本不存在或不在回收站");
+            }
+        }
+        for (Long id : unique) {
+            bookMapper.hardDeleteTransactions(id);
+            bookMapper.hardDeleteCategories(id);
+            bookMapper.hardDeleteBook(id);
+        }
+        log.info("批量彻底删除账本：userId={}, bookIds={}（连同分类与流水）", userId, unique);
+        return unique.size();
     }
 
     @Override

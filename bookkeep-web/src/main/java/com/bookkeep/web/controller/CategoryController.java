@@ -1,6 +1,7 @@
 package com.bookkeep.web.controller;
 
 import com.bookkeep.common.result.Result;
+import com.bookkeep.model.dto.req.BatchIdsReq;
 import com.bookkeep.model.dto.req.CategoryReq;
 import com.bookkeep.model.dto.resp.CategoryResp;
 import com.bookkeep.service.CategoryService;
@@ -49,5 +50,11 @@ public class CategoryController {
     public Result<Void> delete(@PathVariable Long id) {
         categoryService.delete(id);
         return Result.success();
+    }
+
+    /** 批量删除分类；有一条被流水引用就整批拒绝（不做「删一半」） */
+    @PostMapping("/batch-delete")
+    public Result<Integer> deleteBatch(@Valid @RequestBody BatchIdsReq req) {
+        return Result.success(categoryService.deleteBatch(req.ids()));
     }
 }

@@ -5,6 +5,8 @@ import com.bookkeep.model.dto.req.TransactionQuery;
 import com.bookkeep.model.dto.req.TransactionReq;
 import com.bookkeep.model.dto.resp.TransactionResp;
 
+import java.util.List;
+
 /**
  * 流水业务（按当前账本隔离）。
  * <p>业务规则（PLAN §5.5.1）：
@@ -23,6 +25,9 @@ public interface TransactionService {
     TransactionResp update(Long id, TransactionReq req);
 
     void delete(Long id);
+
+    /** 批量删除（逻辑删除）；归档账本只读，返回实际删除条数 */
+    int deleteBatch(List<Long> ids);
 
     /** 当前账本余额 = Σ收入 − Σ支出（不含已删除）。前端顶部「结余」用它。 */
     java.math.BigDecimal balance();

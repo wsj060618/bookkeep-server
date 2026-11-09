@@ -1,9 +1,11 @@
 package com.bookkeep.web.controller;
 
 import com.bookkeep.common.result.Result;
+import com.bookkeep.model.dto.req.BatchIdsReq;
 import com.bookkeep.model.dto.req.BookCreateReq;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
+import com.bookkeep.model.dto.resp.BookShareResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
 import com.bookkeep.model.dto.resp.ShareLinkResp;
 import com.bookkeep.service.BookService;
@@ -44,6 +46,15 @@ public class BookController {
         return Result.success(bookService.create(req));
     }
 
+    /**
+     * 批量出公示链接（分享弹窗用）：已有未过期链接的账本原样复用，只给没有/过期的生成新的。
+     * <p>注意与 {@code POST /{id}/share} 的区别：那个接口是「重新分享 = 换新 token」。
+     */
+    @PostMapping("/share")
+    public Result<List<BookShareResp>> shareBatch(@Valid @RequestBody BatchIdsReq req) {
+        return Result.success(bookService.shareBatch(req.ids()));
+    }
+
     /** 分享：每次点都换新 token（3 天有效），旧链接立即失效 */
     @PostMapping("/{id}/share")
     public Result<ShareLinkResp> share(@PathVariable Long id) {
@@ -81,6 +92,12 @@ public class BookController {
         return Result.success();
     }
 
+    /** 批量删除 → 回收站；结果返回剩余账本列表（可能换了当前账本） */
+    @PostMapping("/batch-delete")
+    public Result<List<BookResp>> deleteBatch(@Valid @RequestBody BatchIdsReq req) {
+        return Result.success(bookService.deleteBatch(req.ids()));
+    }
+
     /** 回收站：带「彻底删除时刻」 */
     @GetMapping("/trash")
     public Result<List<BookTrashResp>> trash() {
@@ -98,5 +115,11 @@ public class BookController {
     public Result<Void> purge(@PathVariable Long id) {
         bookService.purge(id);
         return Result.success();
+    }
+
+    /** 批量彻底删除（只能删回收站里的）；任何一条不合法就整批拒绝 */
+    @PostMapping("/batch-purge")
+    public Result<Integer> purgeBatch(@Valid @RequestBody BatchIdsReq req) {
+        return Result.success(bookService.purgeBatch(req.ids()));
     }
 }

@@ -3,6 +3,7 @@ package com.bookkeep.service;
 import com.bookkeep.model.dto.req.BookCreateReq;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
+import com.bookkeep.model.dto.resp.BookShareResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
 import com.bookkeep.model.dto.resp.ShareLinkResp;
 
@@ -25,6 +26,12 @@ public interface BookService {
     /** 生成 / 重置公示链接：每次调用都换新 token，有效期 3 天，旧链接立即失效 */
     ShareLinkResp share(Long bookId);
 
+    /**
+     * 批量出链接（分享弹窗用）：**已有未过期链接的账本原样复用**，只给没有/已过期的生成新的。
+     * <p>这样「只是想把链接都列出来」不会把已经发到班群的旧链接顶掉。
+     */
+    List<BookShareResp> shareBatch(List<Long> bookIds);
+
     /** 修改账本：改名 +（可选）改学期截止日期；归档账本也允许改这两项 */
     BookResp update(Long id, BookUpdateReq req);
 
@@ -41,6 +48,9 @@ public interface BookService {
     /** 删除 → 进回收站；至少保留一本 */
     void delete(Long id);
 
+    /** 批量删除（进回收站）：至少保留一本；删到当前账本时自动切到剩下最早的一本 */
+    List<BookResp> deleteBatch(List<Long> ids);
+
     /** 回收站列表，带「彻底删除时刻」 */
     List<BookTrashResp> trash();
 
@@ -49,6 +59,9 @@ public interface BookService {
 
     /** 立即彻底删除回收站里的某一本（连同分类、流水）；只能删已在回收站的，不可恢复 */
     void purge(Long id);
+
+    /** 批量彻底删除（回收站里的）；任何一条不在回收站就整批拒绝，返回删除本数 */
+    int purgeBatch(List<Long> ids);
 
     /** 彻底删除回收站里满 15 天的账本（连同分类、流水），返回清理本数 */
     int purgeExpired();

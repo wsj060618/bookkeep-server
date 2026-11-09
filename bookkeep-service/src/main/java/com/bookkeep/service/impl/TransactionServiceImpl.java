@@ -142,6 +142,29 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int deleteBatch(List<Long> ids) {
+        Long bookId = currentBookService.writableBookId();
+        List<Long> unique = ids.stream().distinct().toList();
+
+        // 先数一遍「这些 id 里有多少属于本账本」：数量对不上就整批拒绝，绝不先删后报错
+        long owned = transactionMapper.selectCount(Wrappers.<Transaction>query()
+                .eq("book_id", bookId)
+                .in("id", unique));
+        if (owned < unique.size()) {
+            throw new BusinessException(ResultCode.BAD_REQUEST,
+                    "有 " + (unique.size() - owned) + " 笔流水不存在或已被删除，请刷新后重试");
+        }
+
+        // book_id 写进 WHERE：别人的流水即使 id 猜对了也删不到
+        int deleted = transactionMapper.delete(Wrappers.<Transaction>query()
+                .eq("book_id", bookId)
+                .in("id", unique));
+        log.info("批量删除流水：bookId={}, 请求 {} 条，实际删除 {} 条", bookId, unique.size(), deleted);
+        return deleted;
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public BigDecimal balance() {
         return nonNull(transactionMapper.sumBalance(currentBookService.currentBookId()));

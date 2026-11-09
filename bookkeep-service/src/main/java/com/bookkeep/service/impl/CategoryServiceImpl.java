@@ -125,6 +125,28 @@ public class CategoryServiceImpl implements CategoryService {
         log.info("删除分类：bookId={}, categoryId={}", bookId, id);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int deleteBatch(List<Long> ids) {
+        Long bookId = currentBookService.writableBookId();
+        List<Long> unique = ids.stream().distinct().toList();
+
+        // 先整批检查「有没有流水引用」：一条被引用就整批拒绝，避免删了一半才发现
+        for (Long id : unique) {
+            Category category = requireOwnedCategory(id, bookId);
+            long used = transactionMapper.countByCategoryId(id);
+            if (used > 0) {
+                throw new BusinessException(ResultCode.BAD_REQUEST,
+                        "分类「" + category.getName() + "」下还有 " + used + " 笔流水，先把流水改到别的分类再删");
+            }
+        }
+        int deleted = categoryMapper.delete(Wrappers.<Category>query()
+                .eq("book_id", bookId)
+                .in("id", unique));
+        log.info("批量删除分类：bookId={}, 请求 {} 个，实际删除 {} 个", bookId, unique.size(), deleted);
+        return deleted;
+    }
+
     /** 取「当前账本里的这个分类」，不存在或属于别人一律 404 语义。 */
     private Category requireOwnedCategory(Long id, Long bookId) {
         Category category = categoryMapper.selectOne(Wrappers.<Category>query()
