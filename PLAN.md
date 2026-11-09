@@ -322,9 +322,25 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/categories?type=` | 分类列表，可按 income/expense 过滤 |
-| POST | `/api/categories` | 新增 `{name, type, icon?, color?}` |
-| PUT | `/api/categories/{id}` | 修改（仅自己账本） |
+| POST | `/api/categories` | 新增 `{name, type, icon?, color?}`；同方向不能重名 |
+| PUT | `/api/categories/{id}` | 修改（仅自己账本；`type` 不可变） |
 | DELETE | `/api/categories/{id}` | 删除（仅自己账本；若已有流水则业务异常提示） |
+
+### 5.4.1 分类模板（跟账号走，2026-11-10 增补）
+
+模板是**一整套分类清单**，属于账号而非账本：一个账号可以有多套模板，任选一套「应用」到任意账本（整套替换该账本的分类）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/category-templates` | 模板库：内置「班级班费」排第一（`id=0`、`builtin=true`），之后是自建模板，条目一并返回 |
+| POST | `/api/category-templates` | 把**当前账本**的分类快照成新模板 `{name}`；不接收条目 |
+| PUT | `/api/category-templates/{id}` | 重命名（内置模板 400） |
+| DELETE | `/api/category-templates/{id}` | 物理删除；引用它的账本 `categoryTemplateId` 清空（回落到内置） |
+| POST | `/api/category-templates/{id}/apply` | 应用到当前账本（`id=0` = 内置）；**账本有流水时 400** |
+
+- 内置模板**不入库**：内容取自 `CategoryPresets.classCategories()`，与注册时预置的 13 条同源，`book.category_template_id` 为 `NULL` 即表示内置
+- 应用 = 逻辑删除旧分类 + 按模板条目逐条新建；分类是**复制**不是引用，删模板不影响已套用的账本
+- 不做「模板条目在线编辑」：要改模板就在账本里把分类调好再「存为模板」（模型简单，不会出现模板与账本两套编辑逻辑）
 
 ### 5.5 流水（按当前账本）
 
@@ -725,14 +741,25 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 
 ### 10.4 自定义分类模板 ✅ 已完成（2026-11-10）
 
-两件事一起做：**①「记一笔」里就地新建分类并应用；② 单独开一页管理分类模板。**
+三件事一起做：**①「记一笔」里就地新建分类并应用；② 单独开一页管当前账本的分类；③ 多套分类模板 + 下拉切换。**
 
-> 落地记录（2026-11-10）：纯前端为主，**无数据库迁移**。
-> - 前端：`views/CategoriesView.vue` + 路由 `/categories` + 侧栏/抽屉「🏷 分类」；`ShellApi.reloadCategories()` 作为唯一刷新入口（分类页、就地新建、切账本共用）；`utils/category.ts` 导出 `ICON_CHOICES`/`COLOR_CHOICES`（固定候选，不引图标库）。
-> - 「记一笔」：分类下拉下面是**内联输入行**（不是 `el-select` 的 `#footer`），因为 footer 只在展开时存在，收起后输入框会跟着消失；新建成功后 `emit('category-created')` → layout 先插缓存再重拉，弹窗保持打开并选中新分类。输入框用 `@keydown.enter.prevent`，否则回车会连带触发整个表单的保存。
-> - **拖拽排序：不做**（用户确认「顺序无所谓」）。`sort_order` 仍由后端新增时自增，没有 `PUT /api/categories/sort`。
-> - **重名**：PLAN 原文假设「后端已有 400」，实际没有——本次补上 `CategoryServiceImpl.requireNameAvailable`，按 `(book_id, type)` 判重（模板本身就是支出/收入各一条「其他」，所以 type 必须在 key 里），新增与改名都拦。没有 DB 唯一索引，属于**应用层友好提示**，并发下仍可能插进两条同名。
-> - 流水页筛选：分类在别的页面被删后，`filterCategoryId` 指向不存在的 id 会让列表永远空白，已加 `watch(shell.categories)` 兜底清空并重查。
+> **口径变更（2026-11-10，第二版）**：第一版只做了「在默认 13 条分类上增删改」，用户指出要的是**多套模板 + 下拉切换**。
+> 于是追加了「模板」这一层，并确认了三个边界：
+> - **模板跟账号走**（`category_template.user_id`），一套模板可应用到该用户的任意账本；不是每本账本各有一套
+> - **只允许没有流水的账本换模板**：换模板 = 分类整套换掉，已有流水的分类归属会断，宁可 400 也不悄悄迁移流水
+> - **只内置「班级班费」一套**（即注册预置的 13 条），其余全部用户自建
+>
+> 落地记录：
+> - 数据库：`category_template` + `category_template_item`（都物理删除，无 `deleted` 列）+ `book.category_template_id`（`NULL` = 内置）。迁移脚本 `sql/migration_category_template.sql`
+> - 内置模板**不入库**、id 为 `0`，内容取 `CategoryPresets.classCategories()`（原 `constant/CategoryTemplate` 改名而来，避免与实体 `CategoryTemplate` 撞名）——注册预置的分类与内置模板永远同源
+> - 应用模板 = 逻辑删除旧分类 + 按条目逐条新建 + 回写 `book.category_template_id`；分类是**复制**不是引用，所以删模板不影响已套用的账本（删模板时把引用它的账本 id 清空，含回收站里的账本，走手写 SQL `BookMapper.clearTemplateRef`）
+> - 注销账户同步物理删除该用户的模板与条目（`BookMapper.hardDeleteTemplate*ByUser`），否则留下孤儿数据
+> - **不做模板条目在线编辑**：要改模板就在账本里把分类调好再「存为模板」，避免模板/账本两套编辑 UI
+> - 前端：分类页顶部模板条（下拉 + 应用到当前账本 / 存为模板 / 重命名 / 删除）；应用后要同时刷新分类缓存与 `auth.books`（`categoryTemplateId` 变了）
+> - 「记一笔」：分类下拉下面是**内联输入行**（不是 `el-select` 的 `#footer`），因为 footer 只在展开时存在，收起后输入框会跟着消失；新建成功后 `emit('category-created')` → layout 先插缓存再重拉，弹窗保持打开并选中新分类。输入框用 `@keydown.enter.prevent`，否则回车会连带触发整个表单的保存
+> - **拖拽排序：不做**（用户确认「顺序无所谓」）。`sort_order` 仍由后端新增时自增，没有 `PUT /api/categories/sort`
+> - **分类重名**：原 PLAN 假设「后端已有 400」，实际没有——补上 `CategoryServiceImpl.requireNameAvailable`，按 `(book_id, type)` 判重（模板本身就是支出/收入各一条「其他」，所以 type 必须在 key 里），新增与改名都拦。没有 DB 唯一索引，属于**应用层友好提示**，并发下仍可能插进两条同名
+> - 流水页筛选：分类在别的页面被删后，`filterCategoryId` 指向不存在的 id 会让列表永远空白，已加 `watch(shell.categories)` 兜底清空并重查
 
 #### ① 记一笔里的就地新建
 
@@ -745,10 +772,10 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 
 #### ② 独立的分类管理页（路由 `/categories`）
 
-分类模板是「按账本」的数据，散在「记一笔」下拉里管不了，单独开一页：
+分类是「按账本」的数据，散在「记一笔」下拉里管不了，单独开一页：
 
 - **导航**：AppLayout 侧栏加「🏷 分类」，顺序放在「账本」之后、「设置」之前（手机抽屉同步）
-- **页面结构**：按 `支出 / 收入` 分两组，每行显示 图标 + 名称 + 颜色条 + 操作（改名 / 换图标颜色 / 删除）
+- **页面结构**：顶部模板条（下拉切换 + 应用 / 存为模板 / 重命名 / 删除）；下面按 `支出 / 收入` 分两组，每行显示 图标 + 名称 + 颜色条 + 操作（改名 / 换图标颜色 / 删除）
 - **接口**：直接复用 §5.4 的 4 个（`GET/POST/PUT/DELETE /api/categories`）；
   排序（`sort_order`）若要支持拖拽，需要补一个 `PUT /api/categories/sort`（收 id 数组，按顺序重写 sort_order）——已确认不需要拖拽，未实现
 - **图标与颜色**：库里存的是语义 key（`icon` / `color`），页面给固定候选集让用户点选，不引图标库

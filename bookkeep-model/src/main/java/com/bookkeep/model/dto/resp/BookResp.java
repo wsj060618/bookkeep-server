@@ -18,7 +18,8 @@ public record BookResp(
         String type,
         String shareToken,
         LocalDateTime shareTokenExpiresAt,
-        Boolean current
+        Boolean current,
+        Long categoryTemplateId
 ) {
 
     /**
@@ -34,7 +35,8 @@ public record BookResp(
                 book.getType(),
                 book.getShareToken(),
                 book.getShareTokenExpiresAt(),
-                Objects.equals(book.getId(), currentBookId)
+                Objects.equals(book.getId(), currentBookId),
+                book.getCategoryTemplateId()
         );
     }
 }

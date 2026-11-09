@@ -38,12 +38,18 @@ class DataSourceConnectionTest {
         assertEquals(1, one);
     }
 
+    /** 断言必需的表都在，而不是数具体几张：加表（如分类模板）不该让这个测试变红。 */
     @Test
     void bookkeepTablesShouldExist() {
-        Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'bookkeep'",
-                Integer.class);
-        assertNotNull(count);
-        assertEquals(6, count, "bookkeep 库应有 6 张表（多了 password_reset_token）");
+        var required = java.util.List.of(
+                "user", "book", "category", "transaction", "budget",
+                "password_reset_token", "category_template", "category_template_item");
+        for (String table : required) {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                            + "WHERE table_schema = 'bookkeep' AND table_name = ?",
+                    Integer.class, table);
+            assertEquals(1, count, "bookkeep 库缺少表：" + table);
+        }
     }
 }

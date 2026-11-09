@@ -2,7 +2,7 @@ package com.bookkeep.web;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bookkeep.model.entity.Category;
-import com.bookkeep.service.constant.CategoryTemplate;
+import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -34,16 +34,16 @@ class CategoryMapperTest {
     @Test
     @DisplayName("班级模板分类能整体落库，字段映射（sort_order/type）正确")
     void insertFromTemplate() {
-        List<CategoryTemplate.Seed> seeds = CategoryTemplate.classCategories();
+        List<CategoryPresets.Seed> seeds = CategoryPresets.classCategories();
         assertEquals(13, seeds.size());
 
         // 图标/颜色存的是语义 key（前端映射），不是 emoji 或 hex
-        for (CategoryTemplate.Seed seed : seeds) {
+        for (CategoryPresets.Seed seed : seeds) {
             assertTrue(seed.icon().matches("[a-z][a-z0-9_]*"), "icon 应为语义 key：" + seed.icon());
             assertTrue(seed.color().matches("[a-z][a-z0-9_]*"), "color 应为语义 key：" + seed.color());
         }
 
-        for (CategoryTemplate.Seed seed : seeds) {
+        for (CategoryPresets.Seed seed : seeds) {
             Category category = new Category();
             category.setBookId(TEST_BOOK_ID);
             category.setName(seed.name());
@@ -55,7 +55,7 @@ class CategoryMapperTest {
             assertNotNull(category.getId());
         }
 
-        CategoryTemplate.Seed first = seeds.get(0);
+        CategoryPresets.Seed first = seeds.get(0);
         Category found = categoryMapper.selectOne(
                 Wrappers.<Category>query().eq("book_id", TEST_BOOK_ID).eq("name", first.name())
                         .eq("type", first.type()));
@@ -63,7 +63,7 @@ class CategoryMapperTest {
         assertEquals(first.sortOrder(), found.getSortOrder());
         assertEquals(first.icon(), found.getIcon());
         assertEquals(first.color(), found.getColor());
-        assertEquals(CategoryTemplate.TYPE_EXPENSE, found.getType());
+        assertEquals(CategoryPresets.TYPE_EXPENSE, found.getType());
 
         String raw = jdbcTemplate.queryForObject(
                 "SELECT type FROM category WHERE id = ?", String.class, found.getId());
@@ -73,7 +73,7 @@ class CategoryMapperTest {
     @Test
     @DisplayName("按 type 筛选，income / expense 各自条数正确（8 支出 + 5 收入）")
     void filterByType() {
-        for (CategoryTemplate.Seed seed : CategoryTemplate.classCategories()) {
+        for (CategoryPresets.Seed seed : CategoryPresets.classCategories()) {
             Category category = new Category();
             category.setBookId(TEST_BOOK_ID);
             category.setName(seed.name());
@@ -85,9 +85,9 @@ class CategoryMapperTest {
         }
 
         long expenses = categoryMapper.selectCount(
-                Wrappers.<Category>query().eq("book_id", TEST_BOOK_ID).eq("type", CategoryTemplate.TYPE_EXPENSE));
+                Wrappers.<Category>query().eq("book_id", TEST_BOOK_ID).eq("type", CategoryPresets.TYPE_EXPENSE));
         long incomes = categoryMapper.selectCount(
-                Wrappers.<Category>query().eq("book_id", TEST_BOOK_ID).eq("type", CategoryTemplate.TYPE_INCOME));
+                Wrappers.<Category>query().eq("book_id", TEST_BOOK_ID).eq("type", CategoryPresets.TYPE_INCOME));
 
         assertEquals(8, expenses);
         assertEquals(5, incomes);
@@ -99,7 +99,7 @@ class CategoryMapperTest {
         Category category = new Category();
         category.setBookId(TEST_BOOK_ID);
         category.setName("临时分类_" + System.currentTimeMillis());
-        category.setType(CategoryTemplate.TYPE_EXPENSE);
+        category.setType(CategoryPresets.TYPE_EXPENSE);
         category.setSortOrder(99);
         categoryMapper.insert(category);
         assertNotNull(category.getId());

@@ -6,7 +6,7 @@ import com.bookkeep.model.dto.resp.CategoryStatResp;
 import com.bookkeep.model.dto.resp.SummaryResp;
 import com.bookkeep.service.CurrentBookService;
 import com.bookkeep.service.StatisticService;
-import com.bookkeep.service.constant.CategoryTemplate;
+import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.support.StatisticCalculator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -41,10 +41,10 @@ public class StatisticServiceImpl implements StatisticService {
 
     private String resolveType(String type) {
         if (!StringUtils.hasText(type)) {
-            return CategoryTemplate.TYPE_EXPENSE;
+            return CategoryPresets.TYPE_EXPENSE;
         }
         String trimmed = type.trim();
-        if (!CategoryTemplate.TYPE_INCOME.equals(trimmed) && !CategoryTemplate.TYPE_EXPENSE.equals(trimmed)) {
+        if (!CategoryPresets.TYPE_INCOME.equals(trimmed) && !CategoryPresets.TYPE_EXPENSE.equals(trimmed)) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "收支类型只能是 income 或 expense");
         }
         return trimmed;

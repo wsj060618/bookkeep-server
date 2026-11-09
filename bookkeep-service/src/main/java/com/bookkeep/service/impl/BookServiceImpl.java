@@ -12,7 +12,7 @@ import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.Category;
 import com.bookkeep.model.entity.User;
 import com.bookkeep.service.BookService;
-import com.bookkeep.service.constant.CategoryTemplate;
+import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.UserMapper;
@@ -73,12 +73,12 @@ public class BookServiceImpl implements BookService {
         Book book = new Book();
         book.setUserId(user.getId());
         book.setName(normalizeName(req));
-        book.setType(CategoryTemplate.BOOK_CLASS);
+        book.setType(CategoryPresets.BOOK_CLASS);
         // 公示 token 不在这里发：必须由用户点「分享」显式生成，链接才有 3 天有效期可言
         bookMapper.insert(book);
 
         // 与注册同一套模板：逐条 insert（同一事务、同一 SqlSession），不要用静态 Db.saveBatch
-        for (CategoryTemplate.Seed seed : CategoryTemplate.classCategories()) {
+        for (CategoryPresets.Seed seed : CategoryPresets.classCategories()) {
             Category category = new Category();
             category.setBookId(book.getId());
             category.setName(seed.name());

@@ -6,7 +6,7 @@ import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.common.util.JwtUtil;
 import com.bookkeep.common.util.SecurityUtil;
 import com.bookkeep.service.AuthService;
-import com.bookkeep.service.constant.CategoryTemplate;
+import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.model.dto.req.LoginReq;
 import com.bookkeep.model.dto.req.RegisterReq;
 import com.bookkeep.model.dto.resp.BookResp;
@@ -61,7 +61,7 @@ public class AuthServiceImpl implements AuthService {
         String username = req.username().trim();
         String email = req.email().trim();
         // 只有一种账本类型（班级），模板固定取 class；请求里不再有 bookType 字段
-        List<CategoryTemplate.Seed> seeds = CategoryTemplate.classCategories();
+        List<CategoryPresets.Seed> seeds = CategoryPresets.classCategories();
 
         // 预检只是为了给出友好提示，真正的唯一性由生成列唯一索引保证：
         // 用户名 → uk_user_username_active，邮箱 → uk_user_email_active（都是「仅未删除行」）
@@ -90,8 +90,8 @@ public class AuthServiceImpl implements AuthService {
         book.setUserId(user.getId());
         book.setName(StringUtils.hasText(req.bookName())
                 ? req.bookName().trim()
-                : CategoryTemplate.DEFAULT_BOOK_NAME);
-        book.setType(CategoryTemplate.BOOK_CLASS);
+                : CategoryPresets.DEFAULT_BOOK_NAME);
+        book.setType(CategoryPresets.BOOK_CLASS);
         // 公示链接不在这里建：用户点「分享」才生成，链接只活 3 天（PLAN §5.9）
         bookMapper.insert(book);
 
@@ -174,7 +174,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /** 模板条目 → 分类实体（只做字段映射，图标/颜色存的是语义 key） */
-    private Category toCategory(Long bookId, CategoryTemplate.Seed seed) {
+    private Category toCategory(Long bookId, CategoryPresets.Seed seed) {
         Category category = new Category();
         category.setBookId(bookId);
         category.setName(seed.name());

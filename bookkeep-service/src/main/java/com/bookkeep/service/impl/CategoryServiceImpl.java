@@ -8,7 +8,7 @@ import com.bookkeep.model.dto.resp.CategoryResp;
 import com.bookkeep.model.entity.Category;
 import com.bookkeep.service.CategoryService;
 import com.bookkeep.service.CurrentBookService;
-import com.bookkeep.service.constant.CategoryTemplate;
+import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
 import lombok.RequiredArgsConstructor;
@@ -157,6 +157,6 @@ public class CategoryServiceImpl implements CategoryService {
     }
 
     private boolean isValidType(String type) {
-        return CategoryTemplate.TYPE_INCOME.equals(type) || CategoryTemplate.TYPE_EXPENSE.equals(type);
+        return CategoryPresets.TYPE_INCOME.equals(type) || CategoryPresets.TYPE_EXPENSE.equals(type);
     }
 }

@@ -2,7 +2,7 @@ package com.bookkeep.web;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bookkeep.model.entity.Book;
-import com.bookkeep.service.constant.CategoryTemplate;
+import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.BookMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,7 +40,7 @@ class BookMapperTest {
         Book book = new Book();
         book.setUserId(TEST_USER_ID);
         book.setName("测试账本_" + System.currentTimeMillis());
-        book.setType(CategoryTemplate.BOOK_CLASS);
+        book.setType(CategoryPresets.BOOK_CLASS);
         bookMapper.insert(book);
         assertNotNull(book.getId());
 
@@ -63,7 +63,7 @@ class BookMapperTest {
         newBook(TEST_USER_ID + 1, "别人的账本");
 
         List<Long> ids = bookMapper.selectList(Wrappers.<Book>query()
-                        .eq("type", CategoryTemplate.BOOK_CLASS)
+                        .eq("type", CategoryPresets.BOOK_CLASS)
                         .eq("user_id", TEST_USER_ID)
                         .orderByAsc("id"))
                 .stream().map(Book::getId).toList();
@@ -84,7 +84,7 @@ class BookMapperTest {
         Book book = new Book();
         book.setUserId(userId);
         book.setName(name + "_" + System.nanoTime());
-        book.setType(CategoryTemplate.BOOK_CLASS);
+        book.setType(CategoryPresets.BOOK_CLASS);
         bookMapper.insert(book);
         return book;
     }

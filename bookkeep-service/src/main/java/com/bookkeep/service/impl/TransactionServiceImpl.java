@@ -13,7 +13,7 @@ import com.bookkeep.model.entity.Category;
 import com.bookkeep.model.entity.Transaction;
 import com.bookkeep.service.CurrentBookService;
 import com.bookkeep.service.TransactionService;
-import com.bookkeep.service.constant.CategoryTemplate;
+import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
 import lombok.RequiredArgsConstructor;
@@ -179,14 +179,14 @@ public class TransactionServiceImpl implements TransactionService {
 
     private void validateType(String type) {
         if (StringUtils.hasText(type)
-                && !CategoryTemplate.TYPE_INCOME.equals(type)
-                && !CategoryTemplate.TYPE_EXPENSE.equals(type)) {
+                && !CategoryPresets.TYPE_INCOME.equals(type)
+                && !CategoryPresets.TYPE_EXPENSE.equals(type)) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "收支类型只能是 income 或 expense");
         }
     }
 
     private boolean isExpense(Category category) {
-        return CategoryTemplate.TYPE_EXPENSE.equals(category.getType());
+        return CategoryPresets.TYPE_EXPENSE.equals(category.getType());
     }
 
     /** 取当前账本里的分类；不存在或属于别人，一律 404（不暴露存在性）。 */

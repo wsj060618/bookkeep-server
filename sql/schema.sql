@@ -75,6 +75,7 @@ CREATE TABLE book (
   type        VARCHAR(10) NOT NULL DEFAULT 'class' COMMENT '账本类型，当前固定 class 班级',
   share_token VARCHAR(32) COMMENT '公示页随机 token（免登录只读，见 PLAN §5.9）',
   share_token_expires_at DATETIME NULL COMMENT '公示链接到期时间；NULL 或已过期 = 链接失效（分享时重新生成，有效期 3 天）',
+  category_template_id BIGINT NULL COMMENT '当前分类来自哪套自定义模板；NULL = 内置「班级班费」模板（id=0 不入库）',
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删',
@@ -134,3 +135,33 @@ CREATE TABLE budget (
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   UNIQUE KEY uk_book_cat_month (book_id, category_id, month)
 ) COMMENT='预算表（物理删除，无 deleted 列）';
+
+-- ------------------------------------------------------------
+-- 8) category_template 自定义分类模板：**跟账号走**，一套模板可用于该用户的任意账本
+--    内置的「班级班费」模板**不入库**（id=0，直接取 CategoryTemplate.classCategories()），
+--    这样模板内容与注册时预置的分类永远同源，不会各改一处。
+--    本表物理删除（无 deleted 列）：模板条目是整体替换的，逻辑删除只会越攒越多。
+-- ------------------------------------------------------------
+CREATE TABLE category_template (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  user_id     BIGINT NOT NULL COMMENT '归属用户 user.id',
+  name        VARCHAR(50) NOT NULL COMMENT '模板名',
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  KEY idx_ct_user (user_id)
+) COMMENT='自定义分类模板（跟账号走，物理删除）';
+
+-- ------------------------------------------------------------
+-- 9) category_template_item 模板条目：字段与 category 一一对应，应用模板时按此逐条复制
+--    没有 deleted 列：改模板 = 整体删掉重插（PLAN §10.4）
+-- ------------------------------------------------------------
+CREATE TABLE category_template_item (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  template_id BIGINT NOT NULL COMMENT '归属模板 category_template.id',
+  name        VARCHAR(50) NOT NULL COMMENT '分类名',
+  type        VARCHAR(10) NOT NULL COMMENT '收支类型 income收入 expense支出',
+  icon        VARCHAR(100) NULL COMMENT '图标语义 key',
+  color       VARCHAR(20)  NULL COMMENT '颜色语义 key',
+  sort_order  INT DEFAULT 0 COMMENT '排序，越小越靠前',
+  KEY idx_cti_template (template_id)
+) COMMENT='模板条目（物理删除）';

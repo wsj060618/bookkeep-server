@@ -107,6 +107,9 @@ public class UserServiceImpl implements UserService {
         bookMapper.hardDeleteTransactionsByUser(user.getId());
         bookMapper.hardDeleteCategoriesByUser(user.getId());
         int books = bookMapper.hardDeleteBooksByUser(user.getId());
+        // 模板跟账号走，也必须清掉：否则注销后留下没人能访问的孤儿数据
+        bookMapper.hardDeleteTemplateItemsByUser(user.getId());
+        bookMapper.hardDeleteTemplatesByUser(user.getId());
         tokenMapper.deleteByUser(user.getId());
         userMapper.hardDeleteById(user.getId());
 

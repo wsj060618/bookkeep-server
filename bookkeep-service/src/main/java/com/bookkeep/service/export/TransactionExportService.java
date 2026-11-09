@@ -4,7 +4,7 @@ import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.model.entity.Book;
 import com.bookkeep.service.CurrentBookService;
-import com.bookkeep.service.constant.CategoryTemplate;
+import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
 import com.bookkeep.service.mapper.row.TransactionBalanceRow;
@@ -73,7 +73,7 @@ public class TransactionExportService {
 
         Long bookId = currentBookService.currentBookId();
         Book book = bookMapper.selectById(bookId);
-        String bookName = book == null ? CategoryTemplate.DEFAULT_BOOK_NAME : book.getName();
+        String bookName = book == null ? CategoryPresets.DEFAULT_BOOK_NAME : book.getName();
 
         List<TransactionBalanceRow> rows = transactionMapper.selectRangeWithRunningBalance(bookId, startDate, endDate);
         BigDecimal opening = startDate == null
@@ -89,7 +89,7 @@ public class TransactionExportService {
         Map<CategoryKey, BigDecimal> categoryTotals = new LinkedHashMap<>();
         for (TransactionBalanceRow row : rows) {
             BigDecimal amount = StatisticCalculator.money(row.getAmount());
-            if (CategoryTemplate.TYPE_INCOME.equals(row.getType())) {
+            if (CategoryPresets.TYPE_INCOME.equals(row.getType())) {
                 totalIncome = totalIncome.add(amount);
             } else {
                 totalExpense = totalExpense.add(amount);
@@ -112,7 +112,7 @@ public class TransactionExportService {
         // ---- 明细（逐行结余） ----
         line(csv, "日期", "分类", "摘要", "收入", "支出", "结余");
         for (TransactionBalanceRow row : rows) {
-            boolean income = CategoryTemplate.TYPE_INCOME.equals(row.getType());
+            boolean income = CategoryPresets.TYPE_INCOME.equals(row.getType());
             line(csv,
                     row.getTransDate().toString(),          // LocalDate.toString() 就是 yyyy-MM-dd
                     row.getCategoryName(),
@@ -157,13 +157,13 @@ public class TransactionExportService {
             Map<CategoryKey, BigDecimal> totals) {
         List<Map.Entry<CategoryKey, BigDecimal>> entries = new ArrayList<>(totals.entrySet());
         entries.sort(Comparator
-                .comparing((Map.Entry<CategoryKey, BigDecimal> e) -> !CategoryTemplate.TYPE_EXPENSE.equals(e.getKey().type()))
+                .comparing((Map.Entry<CategoryKey, BigDecimal> e) -> !CategoryPresets.TYPE_EXPENSE.equals(e.getKey().type()))
                 .thenComparing(Map.Entry::getValue, Comparator.reverseOrder()));
         return entries;
     }
 
     private static String typeLabel(String type) {
-        return CategoryTemplate.TYPE_INCOME.equals(type) ? "收入" : "支出";
+        return CategoryPresets.TYPE_INCOME.equals(type) ? "收入" : "支出";
     }
 
     private static String rangeText(LocalDate startDate, LocalDate endDate) {

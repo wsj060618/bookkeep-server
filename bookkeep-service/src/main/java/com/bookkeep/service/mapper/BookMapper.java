@@ -53,4 +53,19 @@ public interface BookMapper extends BaseMapper<Book> {
 
     @Delete("DELETE FROM book WHERE id = #{bookId} AND deleted = 1")
     int hardDeleteBook(@Param("bookId") Long bookId);
+
+    /**
+     * 模板被物理删除后，把引用它的账本（**含回收站里的**）指回内置模板。
+     * <p>手写的原因同上：Wrapper 会被自动拼上 deleted=0，漏掉回收站里的账本。
+     */
+    @Update("UPDATE book SET category_template_id = NULL WHERE user_id = #{userId} AND category_template_id = #{templateId}")
+    int clearTemplateRef(@Param("userId") Long userId, @Param("templateId") Long templateId);
+
+    /** 注销账户时清模板：先条目后模板（子表到父表） */
+    @Delete("DELETE FROM category_template_item WHERE template_id IN "
+            + "(SELECT id FROM category_template WHERE user_id = #{userId})")
+    int hardDeleteTemplateItemsByUser(@Param("userId") Long userId);
+
+    @Delete("DELETE FROM category_template WHERE user_id = #{userId}")
+    int hardDeleteTemplatesByUser(@Param("userId") Long userId);
 }

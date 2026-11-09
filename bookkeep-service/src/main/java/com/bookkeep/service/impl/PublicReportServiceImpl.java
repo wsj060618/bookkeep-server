@@ -9,7 +9,7 @@ import com.bookkeep.model.dto.resp.ReportTransactionResp;
 import com.bookkeep.model.dto.resp.SummaryResp;
 import com.bookkeep.model.entity.Book;
 import com.bookkeep.service.PublicReportService;
-import com.bookkeep.service.constant.CategoryTemplate;
+import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
 import com.bookkeep.service.mapper.row.TransactionBalanceRow;
@@ -51,7 +51,7 @@ public class PublicReportServiceImpl implements PublicReportService {
         SummaryResp summary = calculator.summaryOf(book.getId(), yearMonth);
         // 公示页只展示「花在哪」，收入分类不画饼图
         List<CategoryStatResp> categories = calculator.categoriesOf(
-                book.getId(), yearMonth, CategoryTemplate.TYPE_EXPENSE);
+                book.getId(), yearMonth, CategoryPresets.TYPE_EXPENSE);
 
         List<ReportTransactionResp> transactions = transactionMapper
                 .selectMonthWithRunningBalance(book.getId(), summary.month())

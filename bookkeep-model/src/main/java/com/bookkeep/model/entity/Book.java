@@ -21,7 +21,7 @@ public class Book {
 
     /**
      * 账本类型。当前项目只有班级账本一种，固定填 {@code class}
-     * （常量见 {@code CategoryTemplate.BOOK_CLASS}）；列保留是为了将来扩展其它账本类型时不用改表。
+     * （常量见 {@code CategoryPresets.BOOK_CLASS}）；列保留是为了将来扩展其它账本类型时不用改表。
      */
     private String type;
 
@@ -33,6 +33,12 @@ public class Book {
 
     /** 公示链接到期时间：null 或已过期即链接失效（分享时生成 now + 3 天） */
     private LocalDateTime shareTokenExpiresAt;
+
+    /**
+     * 当前分类来自哪套自定义模板；**NULL = 内置「班级班费」模板**（id=0，不入库）。
+     * <p>用户手工增删改分类后这里不清空：语义是「基于哪套模板」，不是「与模板完全一致」。
+     */
+    private Long categoryTemplateId;
 
     private LocalDateTime createdAt;
 
