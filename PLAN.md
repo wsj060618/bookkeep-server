@@ -411,11 +411,12 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 - `percent` 保留两位小数、四舍五入，**各项相加可能不等于 100.00**（例：三项各 33.33），前端别用它反算金额
 - 分类项带上 `categoryId/icon/color` 是为了饼图图例直接出图标（§5.0 第 5 条），不是允许前端再查分类
 - 统计口径只在 `StatisticCalculator` 实现一次：登录态统计与免登录公示页共用，避免两处数字不一致
-- 前端展示形式可切换：**条形图 / 饼图 / 环形图**，三者**都用 ECharts 渲染**（同一套组件，切图形只换 series，
+- 前端展示形式可切换：**柱状图 / 饼图 / 环形图**，三者**都用 ECharts 渲染**（同一套组件，切图形只换 series，
   标尺留白与配色才一致）；ECharts 按需引入并懒加载，只落在真正画图时才拉的 chunk 里
+- 占比区**收入在左、支出在右并排一行**（≥900px 两栏，窄屏堆叠），各带本方向合计——不再用「支出/收入」切换按钮
+- 柱状图是**竖条形**（x 轴 category、y 轴 value）：分类超过 5 个时 x 轴名字斜 32°，金额标签只在 ≤6 条时显示
 - 饼图/环形图的文字不硬挤：分类超过 8 个时不挂扇区标签，只留图例 + tooltip；8 个以内也用
   `labelLayout.hideOverlap` 自动隐藏重叠标签（官方示例的常规做法）
-- 方向可切换 **支出 / 收入**（打开页面时一次把两个方向都拉回来，切方向不再等请求）
 
 月度趋势 / 每日趋势 / 利润 / 成本结构**不做**（图表的边际价值低于部署与导出；需要时再加）。
 
@@ -436,7 +437,8 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 响应体（W2 定稿）：`{bookName, month, income, expense, balance, totalBalance, expenseCategories:[…], incomeCategories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}`
 
 > 分类占比给**两个方向**：`expenseCategories`（钱花哪了）与 `incomeCategories`（钱从哪来），
-> 两边的口径都走 `StatisticCalculator`，与登录态统计接口同一份。公示页前端可切条形图 / 饼图 / 环形图。
+> 两边的口径都走 `StatisticCalculator`，与登录态统计接口同一份。公示页**收入在左、支出在右并排**，
+> 图形可切柱状图 / 饼图 / 环形图（与统计页同一个组件）。
 
 > `receiptCount` / `receipts` 是 §10.9 公示票据的预留字段，票据功能落地前不返回（或恒为空）；图片本身不在 JSON 里，见 §10.9「公示页票据」。
 
