@@ -428,9 +428,12 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/public/report/{shareToken}?month=2026-08` | 免登录只读：本月收入/支出/结余 + 分类占比 + 明细（含逐行结余） |
+| GET | `/api/public/report/{shareToken}?month=2026-08` | 免登录只读：本月收入/支出/结余 + 支出与收入两份分类占比 + 明细（含逐行结余） |
 
-响应体（W2 定稿）：`{bookName, month, income, expense, balance, totalBalance, categories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}`
+响应体（W2 定稿）：`{bookName, month, income, expense, balance, totalBalance, expenseCategories:[…], incomeCategories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}`
+
+> 分类占比给**两个方向**：`expenseCategories`（钱花哪了）与 `incomeCategories`（钱从哪来），
+> 两边的口径都走 `StatisticCalculator`，与登录态统计接口同一份。公示页前端可切条形图 / 饼图 / 环形图。
 
 > `receiptCount` / `receipts` 是 §10.9 公示票据的预留字段，票据功能落地前不返回（或恒为空）；图片本身不在 JSON 里，见 §10.9「公示页票据」。
 

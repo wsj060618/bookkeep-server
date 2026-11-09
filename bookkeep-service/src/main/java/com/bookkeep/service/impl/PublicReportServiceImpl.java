@@ -49,9 +49,11 @@ public class PublicReportServiceImpl implements PublicReportService {
 
         YearMonth yearMonth = StatisticCalculator.resolveMonth(month);
         SummaryResp summary = calculator.summaryOf(book.getId(), yearMonth);
-        // 公示页只展示「花在哪」，收入分类不画饼图
-        List<CategoryStatResp> categories = calculator.categoriesOf(
+        // 收支两个方向都给：公示页要把「钱花哪了」和「钱从哪来」一起摆给同学看
+        List<CategoryStatResp> expenseCategories = calculator.categoriesOf(
                 book.getId(), yearMonth, CategoryPresets.TYPE_EXPENSE);
+        List<CategoryStatResp> incomeCategories = calculator.categoriesOf(
+                book.getId(), yearMonth, CategoryPresets.TYPE_INCOME);
 
         List<ReportTransactionResp> transactions = transactionMapper
                 .selectMonthWithRunningBalance(book.getId(), summary.month())
@@ -66,7 +68,8 @@ public class PublicReportServiceImpl implements PublicReportService {
                 summary.expense(),
                 summary.balance(),
                 summary.totalBalance(),
-                categories,
+                expenseCategories,
+                incomeCategories,
                 transactions);
     }
 

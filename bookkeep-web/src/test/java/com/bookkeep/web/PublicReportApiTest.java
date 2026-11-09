@@ -71,11 +71,18 @@ class PublicReportApiTest {
         assertEquals("1813.50", data.path("balance").asText());
         assertEquals("1813.50", data.path("totalBalance").asText());
 
-        JsonNode categories = data.path("categories");
-        assertEquals(1, categories.size());
-        assertEquals("班会物资", categories.get(0).path("categoryName").asText());
-        assertEquals("86.50", categories.get(0).path("amount").asText());
-        assertEquals("100.00", categories.get(0).path("percent").asText());
+        JsonNode expenseCategories = data.path("expenseCategories");
+        assertEquals(1, expenseCategories.size());
+        assertEquals("班会物资", expenseCategories.get(0).path("categoryName").asText());
+        assertEquals("86.50", expenseCategories.get(0).path("amount").asText());
+        assertEquals("100.00", expenseCategories.get(0).path("percent").asText());
+
+        // 收入分类占比也要出现在公示页（钱从哪来），口径与统计接口同一份
+        JsonNode incomeCategories = data.path("incomeCategories");
+        assertEquals(1, incomeCategories.size());
+        assertEquals("收取班费", incomeCategories.get(0).path("categoryName").asText());
+        assertEquals("1900.00", incomeCategories.get(0).path("amount").asText());
+        assertEquals("100.00", incomeCategories.get(0).path("percent").asText());
 
         JsonNode transactions = data.path("transactions");
         assertEquals(2, transactions.size());

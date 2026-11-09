@@ -16,7 +16,10 @@ public record PublicReportResp(
         BigDecimal expense,
         BigDecimal balance,
         BigDecimal totalBalance,
-        List<CategoryStatResp> categories,
+        /** 支出分类占比（金额降序） */
+        List<CategoryStatResp> expenseCategories,
+        /** 收入分类占比（金额降序）——公示页也要能看「钱从哪来」 */
+        List<CategoryStatResp> incomeCategories,
         List<ReportTransactionResp> transactions
 ) {
 }
