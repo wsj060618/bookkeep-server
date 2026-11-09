@@ -57,7 +57,8 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public CategoryResp create(CategoryReq req) {
-        Long bookId = currentBookService.currentBookId();
+        // 写操作：归档账本只读
+        Long bookId = currentBookService.writableBookId();
         String name = req.name().trim();
         requireNameAvailable(bookId, req.type(), name, null);
 
@@ -79,7 +80,7 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public CategoryResp update(Long id, CategoryReq req) {
-        Long bookId = currentBookService.currentBookId();
+        Long bookId = currentBookService.writableBookId();
         Category category = requireOwnedCategory(id, bookId);
 
         if (!category.getType().equals(req.type())) {
@@ -111,7 +112,7 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long id) {
-        Long bookId = currentBookService.currentBookId();
+        Long bookId = currentBookService.writableBookId();
         requireOwnedCategory(id, bookId);
 
         long used = transactionMapper.countByCategoryId(id);

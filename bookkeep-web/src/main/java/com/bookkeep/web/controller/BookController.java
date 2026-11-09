@@ -50,10 +50,22 @@ public class BookController {
         return Result.success(bookService.share(id));
     }
 
-    /** 重命名：只改 name，shareToken 不动（改名不该让已发出去的公示链接失效） */
+    /** 修改账本：改名 +（可选）改学期截止日期；shareToken 不动（改名不该让已发出去的公示链接失效） */
     @PutMapping("/{id}")
-    public Result<BookResp> rename(@PathVariable Long id, @Valid @RequestBody BookUpdateReq req) {
-        return Result.success(bookService.rename(id, req));
+    public Result<BookResp> update(@PathVariable Long id, @Valid @RequestBody BookUpdateReq req) {
+        return Result.success(bookService.update(id, req));
+    }
+
+    /** 学期结束 → 归档成只读：仍可改名 / 改截止日期 / 取消归档 / 导出 / 公示 */
+    @PutMapping("/{id}/archive")
+    public Result<BookResp> archive(@PathVariable Long id) {
+        return Result.success(bookService.setArchived(id, true));
+    }
+
+    /** 取消归档：恢复可记账、可改分类 */
+    @PutMapping("/{id}/unarchive")
+    public Result<BookResp> unarchive(@PathVariable Long id) {
+        return Result.success(bookService.setArchived(id, false));
     }
 
     /** 切换当前账本，返回切换后的完整列表（前端直接替换本地 books） */

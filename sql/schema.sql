@@ -76,6 +76,8 @@ CREATE TABLE book (
   share_token VARCHAR(32) COMMENT '公示页随机 token（免登录只读，见 PLAN §5.9）',
   share_token_expires_at DATETIME NULL COMMENT '公示链接到期时间；NULL 或已过期 = 链接失效（分享时重新生成，有效期 3 天）',
   category_template_id BIGINT NULL COMMENT '当前分类来自哪套自定义模板；NULL = 内置「班级班费」模板（id=0 不入库）',
+  semester_end DATE NULL COMMENT '学期截止日期（可空）；只用于展示与提示，不影响任何统计口径',
+  archived    TINYINT NOT NULL DEFAULT 0 COMMENT '学期归档：1 = 只读（仍可改名/改截止日期/取消归档/导出/公示）',
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删',

@@ -10,8 +10,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.io.StringWriter;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -57,7 +59,7 @@ class TransactionExportServiceTest {
                 row("2026-11-08", "expense", "86.50", "班会物资", "横幅,气球", "1193.50")));
         when(transactionMapper.sumBalance(1L)).thenReturn(new BigDecimal("1193.50"));
 
-        String csv = read(exportService.export(null, null));
+        String csv = toCsv(exportService, null, null);
 
         assertTrue(csv.startsWith("\uFEFF"), "必须带 UTF-8 BOM");
         assertTrue(csv.contains("账本名,班级账本"));
@@ -87,7 +89,7 @@ class TransactionExportServiceTest {
                 .thenReturn(List.of(row("2026-09-06", "expense", "10.00", "聚餐", "他说\"好\"", "10.00")));
         when(transactionMapper.sumBalance(1L)).thenReturn(new BigDecimal("10.00"));
 
-        String csv = read(exportService.export(null, null));
+        String csv = toCsv(exportService, null, null);
 
         assertTrue(csv.contains("\"他说\"\"好\"\"\""), "实际内容：\n" + csv);
     }
@@ -103,10 +105,10 @@ class TransactionExportServiceTest {
         when(transactionMapper.sumBalanceUpTo(1L, LocalDate.of(2026, 9, 30))).thenReturn(new BigDecimal("1900.00"));
         when(transactionMapper.sumBalanceUpTo(1L, end)).thenReturn(new BigDecimal("1280.00"));
 
-        TransactionExportService.CsvFile file = exportService.export(start, end);
-        String csv = read(file);
+        TransactionExportService.ExportPlan plan = exportService.prepare(start, end);
+        String csv = toCsv(exportService, start, end);
 
-        assertEquals("班费流水_20261001-20261031.csv", file.filename());
+        assertEquals("班费流水_20261001-20261031.csv", plan.filename());
         assertTrue(csv.contains("统计区间,2026-10-01 至 2026-10-31"));
         assertTrue(csv.contains("期间收入,0.00"));
         assertTrue(csv.contains("期间支出,620.00"));
@@ -119,7 +121,7 @@ class TransactionExportServiceTest {
     @DisplayName("开始日期晚于结束日期：抛业务异常（不让它生成一份空文件）")
     void reversedRangeRejected() {
         BusinessException e = assertThrows(BusinessException.class,
-                () -> exportService.export(LocalDate.of(2026, 12, 1), LocalDate.of(2026, 11, 1)));
+                () -> exportService.prepare(LocalDate.of(2026, 12, 1), LocalDate.of(2026, 11, 1)));
         assertEquals("开始日期不能晚于结束日期", e.getMessage());
     }
 
@@ -129,7 +131,7 @@ class TransactionExportServiceTest {
         when(transactionMapper.selectRangeWithRunningBalance(anyLong(), any(), any())).thenReturn(List.of());
         when(transactionMapper.sumBalance(1L)).thenReturn(BigDecimal.ZERO);
 
-        String csv = read(exportService.export(null, null));
+        String csv = toCsv(exportService, null, null);
 
         assertTrue(csv.startsWith("\uFEFF"));
         assertTrue(csv.contains("日期,分类,摘要,收入,支出,结余"));
@@ -139,8 +141,16 @@ class TransactionExportServiceTest {
 
     // ---------- 辅助方法 ----------
 
-    private static String read(TransactionExportService.CsvFile file) {
-        return new String(file.content(), StandardCharsets.UTF_8);
+    private static String toCsv(TransactionExportService exportService, LocalDate start, LocalDate end) {
+        TransactionExportService.ExportPlan plan = exportService.prepare(start, end);
+        StringWriter writer = new StringWriter();
+        try {
+            exportService.writeCsv(plan, writer);
+        } catch (IOException e) {
+            // 写内存里的 StringWriter 不会真的失败；包成非受检异常，测试方法就不用声明 throws
+            throw new UncheckedIOException(e);
+        }
+        return writer.toString();
     }
 
     private static TransactionBalanceRow row(String date, String type, String amount, String categoryName,

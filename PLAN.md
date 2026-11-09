@@ -353,7 +353,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | POST | `/api/transactions` | 新增 `{categoryId, type, amount, transDate, note?}`；**支出不能超过当前余额** |
 | PUT | `/api/transactions/{id}` | 修改（仅自己账本，同样校验余额） |
 | DELETE | `/api/transactions/{id}` | 删除（仅自己账本） |
-| GET | `/api/transactions/export?startDate=&endDate=` | 导出 Excel/CSV（**含逐行结余**），换届与公示用 |
+| GET | `/api/transactions/export?startDate=&endDate=` | 导出 CSV（**流式**，含逐行结余），换届与公示用；参数错误仍是 JSON 信封 |
 
 返回 DTO 含 `categoryName`、`categoryIcon`、`categoryColor`。
 
@@ -520,7 +520,9 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 - `GET /api/statistics/summary` + `GET /api/statistics/category`（`StatisticController`）：本月收支/结余 + 累计余额；
   分类占比两位小数，默认 `type=expense`
 - `GET /api/transactions/export`（`TransactionExportService`）：CSV（UTF-8 BOM）+ 抬头汇总 + 明细逐行结余 +
-  分类合计；期初/期末结余按区间的边界日计算；成功返回文件流，参数错误仍走 JSON 信封
+  分类合计；期初/期末结余按区间的边界日计算；成功返回文件流，参数错误仍走 JSON 信封。
+  **流式**：`prepare()` 先校验+取数（此时响应未提交，出错还是正常信封），之后 `StreamingResponseBody`
+  逐行写出去，不再把整份 CSV 拼成 `byte[]`
 - `GET /api/public/report/{shareToken}`（`PublicController` + `PublicReportService`）：免登录只读，
   `SecurityConfig` 只放行这一条路径；账本从 token 反查，**且必须未过期**，查不到 404
 - 契约补充：`POST /api/books/{id}/share` → `{token, expiresAt}`（3 天有效，每次分享重新生成），
@@ -675,7 +677,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 >
 > **阶段 0：先把部署做完（W4）** —— 其余功能都在部署之后。
 >
-> 1. **账本口径簇**：§10.6 通用模板 → §10.5 学期归档
+> 1. **账本口径簇**：§10.6 通用模板 → §10.5 学期归档 ✅（10.5 已完成）
 >    - 两者都改 `book` 表、`BookResp`、以及「新建账本 / 修改账本」同一个弹窗，连着做只需要改一次前端表单与一次回归
 > 2. **分类与模板簇**：§10.4 分类管理页 + 记一笔就地新建 → §10.7 模板 JSON 导入导出
 >    - 10.7 的按钮就挂在 10.4 新建的页面上，且都要用同一个 `reloadCategories()`；先做 10.4 等于把地基打好
@@ -806,43 +808,34 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
   给 `ShellApi` 加一个 `reloadCategories()`（或在 `useShell` 里暴露 `categoryVersion`），照 `txVersion` 的现成模式做
 - **边界**：至少保留一条分类？不强制，但删到 0 条时「记一笔」没法选，页面给空状态提示「先新增一个分类」
 
-### 10.5 按学期分离（明日事项，口径已定）
+### 10.5 按学期分离 ✅ 已完成（2026-11-10，方案 A：一个学期 = 一本账本）
 
-班费天然按学期结算（秋季/春季），现在的数据模型只有一个连续账本，跨学期混在一起。两种做法：
+班费天然按学期结算（秋季/春季），原来的数据模型只有一个连续账本，跨学期混在一起。做法：给账本补学期元数据，学期结束「归档」成只读。
 
-**方案 A（定稿）：一个学期 = 一本账本**
-
-复用现有多账本，只补学期元数据：
-
-- `book` 加两列：`semester_end DATE`（**只存截止日期**，可空；起始日不影响任何逻辑）、`archived TINYINT DEFAULT 0`
-- 「新建账本」时可选填学期截止日期，名字仍由用户起（如「2026-2027 秋季」）；分类模板照旧按所选模板预置（默认内置 11 条）
-- 学期结束点「归档」：`archived=1` → 该账本**只读**（记流水、增删改分类返回 400）
-- **归档可恢复**：账本页提供「取消归档」（`archived=0`），恢复后立即可以继续记账
-- **归档不影响分享链接**：公示页照旧只读可看（与 `deleted`、`archived` 都无关，无需改）
-- 归档期间仍允许：改名、改学期截止日期、归档/取消归档、删除进回收站；**不允许**：新增/修改/删除流水与分类
-- 切换学期 = 切换账本（顶栏切换器已支持，名字后可显示「截止 yyyy-MM-dd」）
-- 上学期结余：**手工记一笔「结余转入」**（分类模板里已有），不做自动搬账——自动转账在余额边界上最容易出错
-- 跨学期汇总：先不做；真要做就按 `user_id` 聚合多账本，属于新需求
-- **历史账本可以没有学期**：`semester_end` 允许 NULL，列表显示「未设学期」，不做补录提示、不做数据回填
-
-**方案 B（不采用）：单账本内按学期分区**
-
-给 `transaction` 加学期维度或按日期推导，统计/导出/列表全部加过滤条件。改动面覆盖「统计唯一实现点」和最核心的分页查询，漏一个接口就会出现「数字对不上」，风险和收益不匹配。
-
-**接口草案（方案 A）**
+**接口（与实际实现一致）**
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/books` | `{name, semesterEnd?}`（`yyyy-MM-dd`，可空） |
-| PUT | `/api/books/{id}` | **修改账本**：`{name, semesterEnd?}`（改名 + 改学期一次提交；`semesterEnd: null` 表示清空） |
-| PUT | `/api/books/{id}/archive` | `{archived: true/false}`；**幂等**，重复调用返回当前状态 |
+| POST | `/api/books` | `{name, templateId?, semesterEnd?}`（`semesterEnd` 为 `yyyy-MM-dd`，可空） |
+| PUT | `/api/books/{id}` | `{name, semesterEnd?}`（改名 + 改截止日期一次提交；**`semesterEnd` 省略 = 不改**，不做「清空」语义） |
+| PUT | `/api/books/{id}/archive` | 归档成只读；**幂等** |
+| PUT | `/api/books/{id}/unarchive` | 取消归档；**幂等** |
 | GET | `/api/books` | `BookResp` 增加 `semesterEnd`、`archived` |
 
-**改动清单**
+**落地记录**
 
-- 后端：迁移（两列 + `archived` 默认 0）+ `BookResp`/`BookUpdateReq` + `BookService` 归档开关 + **写操作统一校验**（`TransactionService` 与 `CategoryService` 落库前查当前账本是否 archived，返回 `400 该学期已归档，先取消归档再记账`）+ `BookManageApiTest` 补「归档后写流水/改分类 400」「取消归档后恢复可写」「历史账本 semester_end 为 NULL 正常」
-- 前端：建账本弹窗加截止日期；账本页把「改名」改成「修改」弹窗（名字 + 截止日期，一次提交）；加「归档/取消归档」开关与徽标；顶栏显示截止日期；归档账本上「记一笔」按钮禁用并给提示
-- 文档：`docs/接口文档.md` 账本字段与三个接口、PLAN §5.2 契约
+- 迁移 `sql/migration_semester_archive.sql`：`book.semester_end DATE NULL` + `book.archived TINYINT NOT NULL DEFAULT 0`
+- **只读统一在一处判**：`CurrentBookService.writableBookId()`（读仍用 `currentBookId()`）。
+  `TransactionService`（新增/修改/删除流水）、`CategoryService`（新增/改名/删除分类）、
+  `CategoryTemplateService.apply` 全部换成它，漏一个就会出现「界面禁了、接口能写」
+- 归档仍允许：改账本名、改学期截止日期、切换当前账本、删除进回收站、取消归档、**导出**、**公示页**
+- 前端：建账本弹窗加「学期截止日期」；账本页「改名」升级成「编辑」弹窗（名字 + 截止日期）、
+  列表显示「已归档」徽标与「截止 yyyy-MM-dd」；当前账本归档时 layout 顶部出只读横幅、
+  「＋ 记一笔」收起、流水行隐藏编辑/删除、分类页三个写按钮禁用
+- 测试 `BookArchiveApiTest`（5 例）：建账本带截止日期、归档后四类写操作全 400 且读与导出照常、
+  归档后仍可改名/改截止日期且不丢归档状态、取消归档即可记账、别人的账本不能归档
+- 上学期结余仍是**手工记一笔「结余转入」**，不做自动搬账；跨学期汇总仍不做
+- 历史账本 `semester_end` 允许 NULL，列表显示为空，不做数据回填
 
 ### 10.6 通用记账（班级模板为默认，明日事项）
 

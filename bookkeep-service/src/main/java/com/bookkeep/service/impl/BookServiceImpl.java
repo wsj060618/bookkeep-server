@@ -85,6 +85,8 @@ public class BookServiceImpl implements BookService {
         book.setName(normalizeName(req.name()));
         book.setType(CategoryPresets.BOOK_CLASS);
         book.setCategoryTemplateId(templateId);
+        book.setSemesterEnd(req.semesterEnd());
+        book.setArchived(0);
         // 公示 token 不在这里发：必须由用户点「分享」显式生成，链接才有 3 天有效期可言
         bookMapper.insert(book);
 
@@ -131,18 +133,46 @@ public class BookServiceImpl implements BookService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public BookResp rename(Long id, BookUpdateReq req) {
+    public BookResp update(Long id, BookUpdateReq req) {
         User user = requireUser();
         Book book = requireOwned(id, user.getId());
 
-        String name = normalizeName(req);
+        String name = normalizeName(req.name());
         // 只 set 会变的列：更新整行容易把 shareToken 覆盖成 null
-        bookMapper.update(null, Wrappers.<Book>update()
+        var update = Wrappers.<Book>update()
                 .eq("id", id)
-                .set("name", name));
+                .set("name", name);
+        // semesterEnd 为 null 表示「不改」，不是清空——学期截止日期只是提示，改错直接改成正确日期
+        if (req.semesterEnd() != null) {
+            update.set("semester_end", req.semesterEnd());
+            book.setSemesterEnd(req.semesterEnd());
+        }
+        bookMapper.update(null, update);
 
         book.setName(name);
-        log.info("修改账本名：userId={}, bookId={}, name={}", user.getId(), id, name);
+        log.info("修改账本：userId={}, bookId={}, name={}, semesterEnd={}",
+                user.getId(), id, name, book.getSemesterEnd());
+        return BookResp.from(book, user.getCurrentBookId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public BookResp setArchived(Long id, boolean archived) {
+        User user = requireUser();
+        Book book = requireOwned(id, user.getId());
+        int flag = archived ? 1 : 0;
+
+        // 幂等：已经是目标状态就直接返回，前端重复点不会报错
+        if (book.getArchived() != null && book.getArchived() == flag) {
+            return BookResp.from(book, user.getCurrentBookId());
+        }
+
+        bookMapper.update(null, Wrappers.<Book>update()
+                .eq("id", id)
+                .eq("user_id", user.getId())
+                .set("archived", flag));
+        book.setArchived(flag);
+        log.info("{}账本：userId={}, bookId={}", archived ? "归档" : "取消归档", user.getId(), id);
         return BookResp.from(book, user.getCurrentBookId());
     }
 
@@ -271,10 +301,6 @@ public class BookServiceImpl implements BookService {
         userMapper.update(null, Wrappers.<User>update()
                 .eq("id", userId)
                 .set("current_book_id", bookId));
-    }
-
-    private String normalizeName(BookUpdateReq req) {
-        return normalizeName(req.name());
     }
 
     private String normalizeName(String rawName) {

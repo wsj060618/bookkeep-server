@@ -79,7 +79,8 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public TransactionResp create(TransactionReq req) {
-        Long bookId = currentBookService.currentBookId();
+        // 写操作：归档账本只读
+        Long bookId = currentBookService.writableBookId();
         Category category = requireOwnedCategory(req.categoryId(), bookId);
         checkTypeMatchesCategory(req.type(), category);
 
@@ -105,7 +106,7 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public TransactionResp update(Long id, TransactionReq req) {
-        Long bookId = currentBookService.currentBookId();
+        Long bookId = currentBookService.writableBookId();
         requireOwnedTransaction(id, bookId);
         Category category = requireOwnedCategory(req.categoryId(), bookId);
         checkTypeMatchesCategory(req.type(), category);
@@ -133,7 +134,7 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long id) {
-        Long bookId = currentBookService.currentBookId();
+        Long bookId = currentBookService.writableBookId();
         requireOwnedTransaction(id, bookId);
         // 逻辑删除：列表、余额、分类引用计数都会自动排除已删行
         transactionMapper.deleteById(id);

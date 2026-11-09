@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -39,6 +40,12 @@ public class Book {
      * <p>用户手工增删改分类后这里不清空：语义是「基于哪套模板」，不是「与模板完全一致」。
      */
     private Long categoryTemplateId;
+
+    /** 学期截止日期（可空）：只用于展示与提示，不参与任何统计；「一个学期 = 一本账本」 */
+    private LocalDate semesterEnd;
+
+    /** 学期归档：1 = 只读（仍可改名 / 改截止日期 / 取消归档 / 导出 / 公示） */
+    private Integer archived;
 
     private LocalDateTime createdAt;
 

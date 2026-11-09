@@ -39,14 +39,35 @@ Authorization: Bearer {{token}}
 PUT {{host}}/api/books/{{bookId}}/current
 Authorization: Bearer {{token}}
 
-### 5. 重命名（shareToken 不变，公示链接继续有效）
+### 5. 修改账本（改名 + 学期截止日期；不传 semesterEnd = 不改，shareToken 不变）
 PUT {{host}}/api/books/{{bookId}}
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "name": "计科2301班费"
+  "name": "2026-2027 秋季",
+  "semesterEnd": "2027-01-15"
 }
+
+### 5b. 学期结束 → 归档成只读（幂等；改名/改截止日期/导出/公示仍可用）
+PUT {{host}}/api/books/{{bookId}}/archive
+Authorization: Bearer {{token}}
+
+### 5c. 归档后写操作应被拦：记一笔 → 400「当前账本已归档（学期结束），只读…」
+POST {{host}}/api/transactions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "categoryId": 1,
+  "type": "income",
+  "amount": "10.00",
+  "transDate": "2026-11-10"
+}
+
+### 5d. 取消归档 → 立刻可以继续记账
+PUT {{host}}/api/books/{{bookId}}/unarchive
+Authorization: Bearer {{token}}
 
 ### 6. 删除 → 进回收站（只剩一本时预期 400「至少保留一本账本」）
 DELETE {{host}}/api/books/{{bookId}}

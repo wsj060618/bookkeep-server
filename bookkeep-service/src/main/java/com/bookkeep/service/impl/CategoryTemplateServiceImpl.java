@@ -197,7 +197,8 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
     @Transactional(rollbackFor = Exception.class)
     public void apply(Long id) {
         Long userId = SecurityUtil.getUserId();
-        Long bookId = currentBookService.currentBookId();
+        // 换模板会重写本账本的分类：归档账本只读
+        Long bookId = currentBookService.writableBookId();
         List<CategoryTemplateResp.Item> items = resolveItems(id, userId);
 
         // 换模板 = 分类整套换掉，已有流水的分类归属会断 → 直接拒绝，绝不悄悄迁移流水

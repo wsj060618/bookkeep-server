@@ -14,8 +14,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
+import java.io.Writer;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -28,22 +29,23 @@ import java.util.Map;
 
 /**
  * 班费收支表导出（换届交接与公示用，PLAN §5.5.1）。
- * <p>先用 CSV 而不是真 Excel：UTF-8 BOM + 两位小数 + yyyy-MM-dd，Excel 双击即可打开且中文不乱码，
- * 零新依赖。真要是以后要「双 sheet」，再引 easyexcel，不必卡住主线。
- * <p>返回 {@code byte[]} 而不是写 {@code HttpServletResponse}：service 模块不依赖 web，
- * 文件流由 controller 决定怎么下发。
- * <p>逐行结余由窗口函数在<strong>全账本</strong>范围算好（见 TransactionMapper.xml），
- * 所以「只导出某几个月」时，第一行的结余仍是真实余额，不是从 0 起算。
+ * <p>导出 CSV 给 Excel 看：UTF-8 BOM + 两位小数 + yyyy-MM-dd；Excel 双击就出中文表格。
+ * 要真 xlsx（双 sheet）再引 easyexcel，先卡住主线。
+ * <p><strong>流式写</strong>：{@link #prepare} 只做校验 + 取数（出错还能返回正常 JSON 信封），
+ * 之后由 controller 把响应体交给 {@link #writeCsv} 逐行写到输出流，不再在内存里拼一个
+ * {@code byte[]}（几千条流水时那是整份文件的 2 份拷贝）。
+ * <p>逐行结余在 <strong>全账本</strong>范围内算（见 TransactionMapper.xml）：
+ * 只导出某个月时，第一行的结余也是真实余额，不是从 0 开始。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class TransactionExportService {
 
-    /** Excel 只有看到 BOM 才按 UTF-8 解析，否则中文乱码——这是硬要求，不是可选项。 */
+    /** Excel 只有看到 BOM 才按 UTF-8 读，否则中文乱码——硬要求，不是可选项 */
     private static final String BOM = "\uFEFF";
 
-    /** CSV 用 CRLF：Windows 上的 Excel 对 \n 也能认，但双平台都规矩一点。 */
+    /** CSV 用 CRLF：Windows 上的 Excel 对 \n 也认，但双平台统一用这个 */
     private static final String EOL = "\r\n";
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
@@ -57,16 +59,37 @@ public class TransactionExportService {
     private final BookMapper bookMapper;
     private final CurrentBookService currentBookService;
 
-    /** 生成好的文件：文件名与内容分开返回，controller 负责 Content-Disposition。 */
-    public record CsvFile(String filename, byte[] content) {
+    /** 分类合计的一行（已排序，支出在前） */
+    public record CategoryTotal(String categoryName, String type, BigDecimal amount) {
     }
 
     /**
-     * @param startDate 起始日期（含），null 表示不限
-     * @param endDate   结束日期（含），null 表示不限
+     * 已算好的导出内容：只含数据，不含任何 IO。
+     * <p>把「取数」和「写文件」分开，是为了让参数错误能在响应提交之前抛出（仍走正常 JSON 信封）。
+     */
+    public record ExportPlan(
+            String filename,
+            String title,
+            String bookName,
+            String generatedAt,
+            String rangeText,
+            BigDecimal totalIncome,
+            BigDecimal totalExpense,
+            BigDecimal opening,
+            BigDecimal closing,
+            List<TransactionBalanceRow> rows,
+            List<CategoryTotal> categoryTotals
+    ) {
+    }
+
+    /**
+     * 校验 + 取数。**任何参数错误都在这里抛出，此时响应还没开始写。**
+     *
+     * @param startDate 开始日期，含；null 表示不限
+     * @param endDate   结束日期，含；null 表示不限
      */
     @Transactional(readOnly = true)
-    public CsvFile export(LocalDate startDate, LocalDate endDate) {
+    public ExportPlan prepare(LocalDate startDate, LocalDate endDate) {
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "开始日期不能晚于结束日期");
         }
@@ -85,7 +108,7 @@ public class TransactionExportService {
 
         BigDecimal totalIncome = ZERO;
         BigDecimal totalExpense = ZERO;
-        // 分类合计直接从本次导出的行里累加：行集已经是「区间内全部流水」，不必再查一次库
+        // 分类合计直接从本次查出的明细累加：中间已经是「全账本」口径的流水，不必再查一次
         Map<CategoryKey, BigDecimal> categoryTotals = new LinkedHashMap<>();
         for (TransactionBalanceRow row : rows) {
             BigDecimal amount = StatisticCalculator.money(row.getAmount());
@@ -97,23 +120,50 @@ public class TransactionExportService {
             categoryTotals.merge(new CategoryKey(row.getType(), row.getCategoryName()), amount, BigDecimal::add);
         }
 
-        StringBuilder csv = new StringBuilder(BOM);
-        // ---- 抬头与汇总 ----
-        line(csv, bookName + " 班费收支明细");
-        line(csv, "账本名", bookName);
-        line(csv, "导出时间", STAMP.format(LocalDateTime.now(ZONE)));
-        line(csv, "统计区间", rangeText(startDate, endDate));
-        line(csv, "期间收入", text(totalIncome));
-        line(csv, "期间支出", text(totalExpense));
-        line(csv, "期初结余", text(opening));
-        line(csv, "期末结余", text(closing));
-        line(csv);
+        String range = startDate == null && endDate == null
+                ? "全部"
+                : (startDate == null ? "起" : COMPACT_DATE.format(startDate))
+                  + "-"
+                  + (endDate == null ? "今" : COMPACT_DATE.format(endDate));
 
-        // ---- 明细（逐行结余） ----
-        line(csv, "日期", "分类", "摘要", "收入", "支出", "结余");
-        for (TransactionBalanceRow row : rows) {
+        log.info("导出流水：bookId={}, 开始={}, 结束={}, 条数={}", bookId, startDate, endDate, rows.size());
+        return new ExportPlan(
+                "班费流水_" + range + ".csv",
+                bookName + " 班费收支明细",
+                bookName,
+                STAMP.format(LocalDateTime.now(ZONE)),
+                rangeText(startDate, endDate),
+                totalIncome,
+                totalExpense,
+                opening,
+                closing,
+                rows,
+                sortedCategoryTotals(categoryTotals));
+    }
+
+    /**
+     * 把计划逐行写进响应流（调用方负责给 UTF-8 的 Writer）。
+     * <p>只 flush 不 close：底层的 ServletOutputStream 由容器关。
+     */
+    public void writeCsv(ExportPlan plan, Writer out) throws IOException {
+        out.write(BOM);
+
+        // ---- 抬头汇总 ----
+        line(out, plan.title());
+        line(out, "账本名", plan.bookName());
+        line(out, "导出时间", plan.generatedAt());
+        line(out, "统计区间", plan.rangeText());
+        line(out, "期间收入", text(plan.totalIncome()));
+        line(out, "期间支出", text(plan.totalExpense()));
+        line(out, "期初结余", text(plan.opening()));
+        line(out, "期末结余", text(plan.closing()));
+        line(out);
+
+        // ---- 明细（含逐行结余） ----
+        line(out, "日期", "分类", "摘要", "收入", "支出", "结余");
+        for (TransactionBalanceRow row : plan.rows()) {
             boolean income = CategoryPresets.TYPE_INCOME.equals(row.getType());
-            line(csv,
+            line(out,
                     row.getTransDate().toString(),          // LocalDate.toString() 就是 yyyy-MM-dd
                     row.getCategoryName(),
                     row.getNote(),
@@ -121,30 +171,21 @@ public class TransactionExportService {
                     income ? null : text(row.getAmount()),
                     text(row.getBalanceAfter()));
         }
-        line(csv, "合计", null, null, text(totalIncome), text(totalExpense), text(closing));
+        line(out, "合计", null, null,
+                text(plan.totalIncome()), text(plan.totalExpense()), text(plan.closing()));
 
         // ---- 分类合计 ----
-        line(csv);
-        line(csv, "分类合计");
-        line(csv, "分类", "类型", "金额");
-        if (categoryTotals.isEmpty()) {
-            line(csv, "（无）", null, text(ZERO));
+        line(out);
+        line(out, "分类合计");
+        line(out, "分类", "类型", "金额");
+        if (plan.categoryTotals().isEmpty()) {
+            line(out, "（无）", null, text(ZERO));
         } else {
-            sortedCategoryTotals(categoryTotals).forEach(entry -> line(csv,
-                    entry.getKey().name(),
-                    typeLabel(entry.getKey().type()),
-                    text(entry.getValue())));
+            for (CategoryTotal total : plan.categoryTotals()) {
+                line(out, total.categoryName(), typeLabel(total.type()), text(total.amount()));
+            }
         }
-
-        String range = startDate == null && endDate == null
-                ? "全部"
-                : (startDate == null ? "最初" : COMPACT_DATE.format(startDate))
-                  + "-"
-                  + (endDate == null ? "至今" : COMPACT_DATE.format(endDate));
-        String filename = "班费流水_" + range + ".csv";
-
-        log.info("导出流水：bookId={}, 起始={}, 结束={}, 行数={}", bookId, startDate, endDate, rows.size());
-        return new CsvFile(filename, csv.toString().getBytes(StandardCharsets.UTF_8));
+        out.flush();
     }
 
     // ---------- 内部方法 ----------
@@ -152,14 +193,15 @@ public class TransactionExportService {
     private record CategoryKey(String type, String name) {
     }
 
-    /** 分类合计排序：支出在前（这是班费表的主要矛盾），同类内金额降序。 */
-    private static List<Map.Entry<CategoryKey, BigDecimal>> sortedCategoryTotals(
-            Map<CategoryKey, BigDecimal> totals) {
+    /** 分类合计先支出后收入（和班费表要表达的「钱花哪了」优先一致），同类内按金额降序 */
+    private static List<CategoryTotal> sortedCategoryTotals(Map<CategoryKey, BigDecimal> totals) {
         List<Map.Entry<CategoryKey, BigDecimal>> entries = new ArrayList<>(totals.entrySet());
         entries.sort(Comparator
                 .comparing((Map.Entry<CategoryKey, BigDecimal> e) -> !CategoryPresets.TYPE_EXPENSE.equals(e.getKey().type()))
                 .thenComparing(Map.Entry::getValue, Comparator.reverseOrder()));
-        return entries;
+        return entries.stream()
+                .map(e -> new CategoryTotal(e.getKey().name(), e.getKey().type(), e.getValue()))
+                .toList();
     }
 
     private static String typeLabel(String type) {
@@ -170,29 +212,29 @@ public class TransactionExportService {
         if (startDate == null && endDate == null) {
             return "全部";
         }
-        return (startDate == null ? "最初" : startDate.toString())
+        return (startDate == null ? "最早" : startDate.toString())
                 + " 至 "
-                + (endDate == null ? "至今" : endDate.toString());
+                + (endDate == null ? "今天" : endDate.toString());
     }
 
-    /** 金额统一两位小数；空单元格返回 null（由 cell 输出成空串，而不是 "null"）。 */
+    /** 金额统一两位小数；空单元格返回 null，由 cell 写成空串（不能出现 "null"） */
     private static String text(BigDecimal value) {
         return value == null ? null : StatisticCalculator.money(value).toPlainString();
     }
 
-    private static void line(StringBuilder csv, String... cells) {
+    private static void line(Writer out, String... cells) throws IOException {
         for (int i = 0; i < cells.length; i++) {
             if (i > 0) {
-                csv.append(',');
+                out.write(',');
             }
-            csv.append(cell(cells[i]));
+            out.write(cell(cells[i]));
         }
-        csv.append(EOL);
+        out.write(EOL);
     }
 
     /**
-     * CSV 转义：备注里出现逗号、引号、换行时必须整体加引号，内部引号写两遍。
-     * 少了这一步，一条「横幅,气球」的备注就会把整行挤错一列，而且只在特定数据下才暴露。
+     * CSV 转义：备注里有逗号、引号、换行时整体加引号，内部引号写两遍。
+     * 少这一步，一条「横幅,气球」的备注就会把表格挤错列。
      */
     private static String cell(String value) {
         if (value == null || value.isEmpty()) {

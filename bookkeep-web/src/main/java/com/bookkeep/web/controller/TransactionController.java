@@ -23,7 +23,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.io.BufferedWriter;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
@@ -78,20 +82,27 @@ public class TransactionController {
      * 导出班费收支表（CSV，UTF-8 BOM，含逐行结余）。
      * <p>成功时返回文件流而不是 JSON 信封——下载类接口只能这样，前端用 blob 接收。
      * <p>参数错误（开始晚于结束）仍走业务异常：HTTP 200 + JSON {@code code=400}，由前端统一拦截器提示。
+     * <p>响应体是 {@link StreamingResponseBody}：校验/取数在 {@code prepare} 里先做完（此时响应还没提交，
+     * 出错还能正常返回 JSON），之后逐行写到输出流，几千条流水也不在内存里攒整份文件。
      */
     @GetMapping("/export")
-    public ResponseEntity<byte[]> export(@RequestParam(required = false) LocalDate startDate,
-                                         @RequestParam(required = false) LocalDate endDate) {
-        TransactionExportService.CsvFile file = transactionExportService.export(startDate, endDate);
+    public ResponseEntity<StreamingResponseBody> export(@RequestParam(required = false) LocalDate startDate,
+                                                        @RequestParam(required = false) LocalDate endDate) {
+        TransactionExportService.ExportPlan plan = transactionExportService.prepare(startDate, endDate);
+
+        StreamingResponseBody body = outputStream -> {
+            Writer writer = new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
+            transactionExportService.writeCsv(plan, writer);
+        };
         return ResponseEntity.ok()
                 .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
                 // 文件名含中文，必须交给 ContentDisposition 生成 filename*=UTF-8''... 形式，
                 // 手写 header 会在部分浏览器上变成乱码或直接把附件名截断
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment()
-                                .filename(file.filename(), StandardCharsets.UTF_8)
+                                .filename(plan.filename(), StandardCharsets.UTF_8)
                                 .build()
                                 .toString())
-                .body(file.content());
+                .body(body);
     }
 }

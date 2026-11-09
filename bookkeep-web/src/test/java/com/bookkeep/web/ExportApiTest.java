@@ -21,9 +21,11 @@ import static com.bookkeep.web.support.AuthHelper.registerAndLogin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -50,8 +52,12 @@ class ExportApiTest {
         record(token, "聚餐", "expense", "620.00", "2026-10-12", "中秋聚餐");
         record(token, "班会物资", "expense", "86.50", "2026-11-08", "横幅,气球");
 
-        MvcResult result = mockMvc.perform(get("/api/transactions/export")
+        // 导出是流式响应（StreamingResponseBody），MockMvc 要显式走一遍异步派发才能拿到响应体
+        MvcResult async = mockMvc.perform(get("/api/transactions/export")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        MvcResult result = mockMvc.perform(asyncDispatch(async))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -164,8 +170,11 @@ class ExportApiTest {
     // ---------- 辅助方法 ----------
 
     private String export(String token, String query) throws Exception {
-        MvcResult result = mockMvc.perform(get("/api/transactions/export" + query)
+        MvcResult async = mockMvc.perform(get("/api/transactions/export" + query)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        MvcResult result = mockMvc.perform(asyncDispatch(async))
                 .andExpect(status().isOk())
                 .andReturn();
         return result.getResponse().getContentAsString(StandardCharsets.UTF_8);

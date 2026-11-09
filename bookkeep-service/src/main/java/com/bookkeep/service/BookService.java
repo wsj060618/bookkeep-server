@@ -25,8 +25,15 @@ public interface BookService {
     /** 生成 / 重置公示链接：每次调用都换新 token，有效期 3 天，旧链接立即失效 */
     ShareLinkResp share(Long bookId);
 
-    /** 重命名自己的账本 */
-    BookResp rename(Long id, BookUpdateReq req);
+    /** 修改账本：改名 +（可选）改学期截止日期；归档账本也允许改这两项 */
+    BookResp update(Long id, BookUpdateReq req);
+
+    /**
+     * 归档 / 取消归档（学期结束 ↔ 重新开启）。
+     * <p>归档后的账本**只读**：不能再记流水、不能增删改分类、不能应用模板；
+     * 但改名、改截止日期、导出、公示页都照常。重复调用幂等。
+     */
+    BookResp setArchived(Long id, boolean archived);
 
     /** 切换当前账本，返回切换后的完整列表 */
     List<BookResp> switchCurrent(Long id);
