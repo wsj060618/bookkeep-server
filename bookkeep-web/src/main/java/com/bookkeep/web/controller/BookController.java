@@ -1,6 +1,7 @@
 package com.bookkeep.web.controller;
 
 import com.bookkeep.common.result.Result;
+import com.bookkeep.model.dto.req.BookCreateReq;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
@@ -37,9 +38,9 @@ public class BookController {
         return Result.success(bookService.list());
     }
 
-    /** 新建账本：预置 13 条分类，并自动切为当前 */
+    /** 新建账本：按 templateId 预置分类（null/0 = 内置 13 条），并自动切为当前 */
     @PostMapping
-    public Result<BookResp> create(@Valid @RequestBody BookUpdateReq req) {
+    public Result<BookResp> create(@Valid @RequestBody BookCreateReq req) {
         return Result.success(bookService.create(req));
     }
 

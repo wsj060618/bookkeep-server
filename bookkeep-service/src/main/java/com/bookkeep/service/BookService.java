@@ -1,5 +1,6 @@
 package com.bookkeep.service;
 
+import com.bookkeep.model.dto.req.BookCreateReq;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
@@ -18,7 +19,8 @@ public interface BookService {
     List<BookResp> list();
 
     /** 新建账本（预置 13 条分类），并自动切为当前 */
-    BookResp create(BookUpdateReq req);
+    /** 新建账本：按所选模板（null/0 = 内置）预置分类，并自动设为当前 */
+    BookResp create(BookCreateReq req);
 
     /** 生成 / 重置公示链接：每次调用都换新 token，有效期 3 天，旧链接立即失效 */
     ShareLinkResp share(Long bookId);

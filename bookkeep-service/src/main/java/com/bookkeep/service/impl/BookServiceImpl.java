@@ -4,14 +4,17 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.common.util.SecurityUtil;
+import com.bookkeep.model.dto.req.BookCreateReq;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
+import com.bookkeep.model.dto.resp.CategoryTemplateResp;
 import com.bookkeep.model.dto.resp.ShareLinkResp;
 import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.Category;
 import com.bookkeep.model.entity.User;
 import com.bookkeep.service.BookService;
+import com.bookkeep.service.CategoryTemplateService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.CategoryMapper;
@@ -52,6 +55,7 @@ public class BookServiceImpl implements BookService {
     private final BookMapper bookMapper;
     private final CategoryMapper categoryMapper;
     private final UserMapper userMapper;
+    private final CategoryTemplateService categoryTemplateService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -63,35 +67,43 @@ public class BookServiceImpl implements BookService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public BookResp create(BookUpdateReq req) {
+    public BookResp create(BookCreateReq req) {
         User user = requireUser();
         long count = bookMapper.selectCount(Wrappers.<Book>query().eq("user_id", user.getId()));
         if (count >= MAX_BOOKS) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "账本最多 " + MAX_BOOKS + " 本，先删掉不用的");
         }
 
+        // 先取条目再落库：模板 id 不合法（别人的 / 不存在）时直接抛，不留半本账本
+        List<CategoryTemplateResp.Item> items = categoryTemplateService.itemsOf(req.templateId());
+        // null / 0 都是内置模板，落库存 NULL（列注释：NULL = 内置）
+        Long templateId = req.templateId() == null || req.templateId() == CategoryPresets.BUILTIN_ID
+                ? null : req.templateId();
+
         Book book = new Book();
         book.setUserId(user.getId());
-        book.setName(normalizeName(req));
+        book.setName(normalizeName(req.name()));
         book.setType(CategoryPresets.BOOK_CLASS);
+        book.setCategoryTemplateId(templateId);
         // 公示 token 不在这里发：必须由用户点「分享」显式生成，链接才有 3 天有效期可言
         bookMapper.insert(book);
 
-        // 与注册同一套模板：逐条 insert（同一事务、同一 SqlSession），不要用静态 Db.saveBatch
-        for (CategoryPresets.Seed seed : CategoryPresets.classCategories()) {
+        // 与注册同一套写法：逐条 insert（同一事务、同一 SqlSession），不要用静态 Db.saveBatch
+        for (CategoryTemplateResp.Item item : items) {
             Category category = new Category();
             category.setBookId(book.getId());
-            category.setName(seed.name());
-            category.setType(seed.type());
-            category.setIcon(seed.icon());
-            category.setColor(seed.color());
-            category.setSortOrder(seed.sortOrder());
+            category.setName(item.name());
+            category.setType(item.type());
+            category.setIcon(item.icon());
+            category.setColor(item.color());
+            category.setSortOrder(item.sortOrder());
             categoryMapper.insert(category);
         }
 
         // 新建即切换：用户刚建完账本，下一屏就该是它
         updateCurrentBookId(user.getId(), book.getId());
-        log.info("新建账本：userId={}, bookId={}, name={}", user.getId(), book.getId(), book.getName());
+        log.info("新建账本：userId={}, bookId={}, name={}, templateId={}, categories={}",
+                user.getId(), book.getId(), book.getName(), templateId, items.size());
         return BookResp.from(book, book.getId());
     }
 
@@ -262,7 +274,11 @@ public class BookServiceImpl implements BookService {
     }
 
     private String normalizeName(BookUpdateReq req) {
-        String name = req.name().trim();
+        return normalizeName(req.name());
+    }
+
+    private String normalizeName(String rawName) {
+        String name = rawName.trim();
         // @NotBlank 挡不住全空格，trim 之后才是最终值
         if (name.isEmpty()) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "账本名不能为空");

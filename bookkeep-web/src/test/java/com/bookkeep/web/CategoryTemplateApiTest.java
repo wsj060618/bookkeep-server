@@ -237,4 +237,93 @@ class CategoryTemplateApiTest {
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("当前账本还没有分类，先建一个分类再存为模板"));
     }
+
+    @Test
+    @DisplayName("新建账本时选模板：分类直接来自该模板，categoryTemplateId 回写，并自动切为当前")
+    void createBookWithTemplateSeedsItsCategories() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
+
+        // 先做出一个「只有 2 条分类」的模板：删掉其余 11 条再存为模板
+        JsonNode categories = getJson(mockMvc, objectMapper, "/api/categories", token).path("data");
+        for (int i = 2; i < categories.size(); i++) {
+            mockMvc.perform(delete("/api/categories/" + categories.get(i).path("id").asLong())
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                    .andExpect(jsonPath("$.code").value(200));
+        }
+        assertEquals(2, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
+        long templateId = json(
+                mockMvc.perform(post("/api/category-templates")
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"name\":\"精简模板\"}"))
+                        .andReturn(), objectMapper)
+                .path("data").path("id").asLong();
+
+        long newBookId = json(
+                mockMvc.perform(post("/api/books")
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"name\":\"第二本\",\"templateId\":" + templateId + "}"))
+                        .andReturn(), objectMapper)
+                .path("data").path("id").asLong();
+
+        // 新建即切为当前，所以这里查到的就是新账本的分类：直接就是模板那 2 条，不是内置 13 条
+        JsonNode seeded = getJson(mockMvc, objectMapper, "/api/categories", token).path("data");
+        assertEquals(2, seeded.size());
+        assertEquals(categories.get(0).path("name").asText(), seeded.get(0).path("name").asText());
+        assertEquals(categories.get(1).path("name").asText(), seeded.get(1).path("name").asText());
+
+        JsonNode books = getJson(mockMvc, objectMapper, "/api/books", token).path("data");
+        JsonNode created = null;
+        for (JsonNode book : books) {
+            if (book.path("id").asLong() == newBookId) {
+                created = book;
+            }
+        }
+        assertTrue(created != null, "新建的账本应出现在列表里");
+        assertEquals(templateId, created.path("categoryTemplateId").asLong());
+        assertTrue(created.path("current").asBoolean(), "新建账本应自动切为当前");
+    }
+
+    @Test
+    @DisplayName("新建账本不传模板 = 内置「班级班费」13 条，categoryTemplateId 为 null")
+    void createBookWithoutTemplateUsesBuiltin() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
+
+        JsonNode created = json(
+                mockMvc.perform(post("/api/books")
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"name\":\"默认账本\"}"))
+                        .andReturn(), objectMapper)
+                .path("data");
+
+        assertTrue(created.path("categoryTemplateId").isNull());
+        assertEquals(13, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
+    }
+
+    @Test
+    @DisplayName("用别人的模板建账本 → 404，且账本没建出来（不能留半本）")
+    void createBookWithOthersTemplateIsRejected() throws Exception {
+        String tokenA = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
+        String tokenB = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
+
+        long aTemplateId = json(
+                mockMvc.perform(post("/api/category-templates")
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenA)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"name\":\"A的模板\"}"))
+                        .andReturn(), objectMapper)
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/books")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenB)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"偷模板\",\"templateId\":" + aTemplateId + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.message").value("模板不存在"));
+
+        assertEquals(1, getJson(mockMvc, objectMapper, "/api/books", tokenB).path("data").size());
+    }
 }

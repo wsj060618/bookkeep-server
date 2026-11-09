@@ -193,6 +193,12 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
 
     /* ---------- 内部 ---------- */
 
+    @Override
+    public List<CategoryTemplateResp.Item> itemsOf(Long templateId) {
+        Long resolved = templateId == null ? CategoryPresets.BUILTIN_ID : templateId;
+        return resolveItems(resolved, SecurityUtil.getUserId());
+    }
+
     private CategoryTemplateResp builtinResp() {
         List<CategoryTemplateResp.Item> items = CategoryPresets.classCategories().stream()
                 .map(seed -> new CategoryTemplateResp.Item(

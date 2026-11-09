@@ -29,4 +29,12 @@ public interface CategoryTemplateService {
      * <p>账本里已有流水时一律 400——换模板会把分类整套换掉，历史流水的分类归属就断了。
      */
     void apply(Long id);
+
+    /**
+     * 取一套模板的条目，给「新建账本时按模板预置分类」用。
+     * <p>不走 {@code apply}：新账本还没有分类，不需要「先删后插」，也不能受「有流水才禁换」的限制。
+     *
+     * @param templateId 模板 id；**null 或 0 = 内置「班级班费」**
+     */
+    List<CategoryTemplateResp.Item> itemsOf(Long templateId);
 }

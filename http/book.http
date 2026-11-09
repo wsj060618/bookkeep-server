@@ -5,18 +5,30 @@
 @host = http://localhost:8080
 @token = {{token}}
 @bookId = {{bookId}}
+@templateId = {{templateId}}
 
 ### 1. 我的账本（注册后 1 本，current=true）
 GET {{host}}/api/books
 Authorization: Bearer {{token}}
 
-### 2. 新建账本（自动切为当前，事务内预置 13 条分类）
+### 2. 新建账本（自动切为当前；不传 templateId = 内置「班级班费」13 条）
 POST {{host}}/api/books
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
   "name": "二班账本"
+}
+
+### 2b. 新建账本时选一套自建模板（templateId 取 GET /api/category-templates 返回的 id；
+###     新账本直接就是那套模板的分类，categoryTemplateId 也会回写成它）
+POST {{host}}/api/books
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "三班账本",
+  "templateId": {{templateId}}
 }
 
 ### 3. 分类跟着当前账本走（新账本应是 13 条，id 与旧账本不同）

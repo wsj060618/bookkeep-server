@@ -279,8 +279,8 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/books` | 我的账本（不含回收站），带 `current` 标记 |
-| POST | `/api/books` | 新建 `{name, semesterEnd?}`，事务内预置 13 条分类，并自动切为当前 |
-| PUT | `/api/books/{id}` | **修改账本** `{name, semesterEnd?}`（改名 + 改学期，一次提交）；已有 `shareToken` 不变 |
+| POST | `/api/books` | 新建 `{name, templateId?}`：按模板预置分类（`templateId` 省略 / 0 = 内置 13 条），并自动切为当前 |
+| PUT | `/api/books/{id}` | **修改账本** `{name}`（只有改名；已有 `shareToken` 不变） |
 | POST | `/api/books/{id}/share` | 生成 / 重生公示链接 → `{token, expiresAt}`；**每次调用都换新 token** |
 | PUT | `/api/books/{id}/current` | 切换当前账本，返回切换后的完整列表 |
 | DELETE | `/api/books/{id}` | 删除 → 进回收站；**至少保留一本** |
@@ -339,6 +339,7 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | POST | `/api/category-templates/{id}/apply` | 应用到当前账本（`id=0` = 内置）；**账本有流水时 400** |
 
 - 内置模板**不入库**：内容取自 `CategoryPresets.classCategories()`，与注册时预置的 13 条同源，`book.category_template_id` 为 `NULL` 即表示内置
+- **新建账本就选模板**：`POST /api/books` 的 `templateId`（省略 / 0 = 内置）决定这本账本预置哪套分类，`book.category_template_id` 一并写入。这是「主力入口」——建好之后再换模板要满足「没有流水」，所以模板应该在新建时一次选对
 - 应用 = 逻辑删除旧分类 + 按模板条目逐条新建；分类是**复制**不是引用，删模板不影响已套用的账本
 - 不做「模板条目在线编辑」：要改模板就在账本里把分类调好再「存为模板」（模型简单，不会出现模板与账本两套编辑逻辑）
 
@@ -756,6 +757,7 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 > - 注销账户同步物理删除该用户的模板与条目（`BookMapper.hardDeleteTemplate*ByUser`），否则留下孤儿数据
 > - **不做模板条目在线编辑**：要改模板就在账本里把分类调好再「存为模板」，避免模板/账本两套编辑 UI
 > - 前端：分类页顶部模板条（下拉 + 应用到当前账本 / 存为模板 / 重命名 / 删除）；应用后要同时刷新分类缓存与 `auth.books`（`categoryTemplateId` 变了）
+> - **新建账本时选模板**：`POST /api/books` 增加 `templateId`（`BookCreateReq`，省略 / 0 = 内置），账本页新建行多一个模板下拉，默认沿用当前账本的模板——建好之后再换模板要求「没有流水」，所以模板应该在新建时一次选对
 > - 「记一笔」：分类下拉下面是**内联输入行**（不是 `el-select` 的 `#footer`），因为 footer 只在展开时存在，收起后输入框会跟着消失；新建成功后 `emit('category-created')` → layout 先插缓存再重拉，弹窗保持打开并选中新分类。输入框用 `@keydown.enter.prevent`，否则回车会连带触发整个表单的保存
 > - **拖拽排序：不做**（用户确认「顺序无所谓」）。`sort_order` 仍由后端新增时自增，没有 `PUT /api/categories/sort`
 > - **分类重名**：原 PLAN 假设「后端已有 400」，实际没有——补上 `CategoryServiceImpl.requireNameAvailable`，按 `(book_id, type)` 判重（模板本身就是支出/收入各一条「其他」，所以 type 必须在 key 里），新增与改名都拦。没有 DB 唯一索引，属于**应用层友好提示**，并发下仍可能插进两条同名
