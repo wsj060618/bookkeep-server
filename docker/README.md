@@ -6,7 +6,7 @@
 > **默认没有 HTTPS，这是有意的**：国内云服务器的域名**必须备案**才放行（未备案会被运营商拦成
 > 「网站未备案」），而裸 IP 又签不到可信证书（Let's Encrypt 不给 IP 签）。
 > 所以默认按「IP + HTTP」部署（`docker/nginx.conf`），安全补偿是：登录限流、
-> JWT 有效期 1 天、8080/3306 不 publish、只开 80。**别在这个环境里用常用密码。**
+> JWT 有效期 1 天、8080 不 publish、3306 只绑回环、只开 80。**别在这个环境里用常用密码。**
 > 真要 HTTPS 只有两条路：① 备案域名 + 国内服务器 ② 境外/香港服务器 + 任意域名
 > —— 那时把 `NGINX_CONF` 换成 `./nginx.tls.conf` 并放好 `certs/`。
 
@@ -15,6 +15,7 @@
 - 服务器：2C2G 起，Ubuntu 22.04/24.04，Docker + compose 插件
 - 域名：**不需要**（裸 IP 访问）；有备案域名或境外服务器时才走 TLS
 - 安全组/防火墙：只放 22、80（走 HTTPS 再放 443）；**不要放 3306 和 8080**
+  （3306 只绑在服务器回环上，给 SSH 隧道连库用；8080 只在 compose 内网）
 
 ## 1. 构建产物（在本地或 CI）
 
@@ -73,6 +74,24 @@ docker compose restart app           # 改 env 后重启
 docker compose down                  # 停（数据卷保留）
 ```
 
+### 连库改数据（MySQL 只绑了 127.0.0.1）
+
+命令行（在服务器上）：
+
+```bash
+cd /opt/bookkeep-server/docker
+docker compose exec mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" bookkeep'
+```
+
+图形化（Navicat / DBeaver）：在本机开隧道，把服务器本机的 3306 映射到本地 3307：
+
+```powershell
+ssh -L 3307:127.0.0.1:3306 root@服务器IP
+```
+
+然后连 `127.0.0.1:3307`，超时 `bookkeep` / 密码 `.env` 里的 `DB_PWD`。
+**云安全组不要开 3306**——端口只绑回环，开了也没用，但会让人误以为对外放开。
+
 **备份恢复演练**是 W4 验收项：dump → 新建库导入 → 核对行数与页面数据。
 票据图片在命名卷 `receipts_data` 里，**必须单独备份**，否则恢复后页面有记录、图全裂：
 
@@ -85,7 +104,8 @@ docker compose exec app tar xzf /tmp/receipts_2026-11-10.tgz -C /app/data       
 ## 6. 安全清单（上线前逐项打勾）
 
 - [ ] `DB_USER` 不是 root（compose 已默认建 `bookkeep` 专用账号，只授权本库）
-- [ ] 3306 / 8080 没有 publish；`docker compose ps` 里看不到对外端口
+- [ ] 3306 只绑 `127.0.0.1`（给 SSH 隧道用），8080 不 publish；**云安全组也别开 3306/8080**
+      验证：`ss -lntp | grep -E '3306|8080'` 应只有 `127.0.0.1:3306`，没有 8080
 - [ ] `JWT_SECRET` 随机且 ≥32 字符（prod 启动自检会拦默认值）
 - [ ] **明文传输已确认接受**：没有域名 → 没有 TLS，登录密码与 JWT 在公网上是明文。
       补偿：只在私人网络下登录管理端、`JWT_SECRET` 随机、`JWT_EXPIRE=86400`、不用常用密码
