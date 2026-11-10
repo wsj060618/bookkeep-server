@@ -108,7 +108,7 @@ class TransactionExportServiceTest {
         TransactionExportService.ExportPlan plan = exportService.prepare(start, end);
         String csv = toCsv(exportService, start, end);
 
-        assertEquals("班费流水_20261001-20261031.csv", plan.filename());
+        assertEquals("班级账本_部分_20261001-20261031.csv", plan.filename());
         assertTrue(csv.contains("统计区间,2026-10-01 至 2026-10-31"));
         assertTrue(csv.contains("期间收入,0.00"));
         assertTrue(csv.contains("期间支出,620.00"));

@@ -120,15 +120,16 @@ public class TransactionExportService {
             categoryTotals.merge(new CategoryKey(row.getType(), row.getCategoryName()), amount, BigDecimal::add);
         }
 
-        String range = startDate == null && endDate == null
+        // 文件名就用账本名 + 全部/部分：导出的文件直接以账本命名，发群不会认错
+        String suffix = startDate == null && endDate == null
                 ? "全部"
-                : (startDate == null ? "起" : COMPACT_DATE.format(startDate))
+                : "部分_" + (startDate == null ? "起" : COMPACT_DATE.format(startDate))
                   + "-"
                   + (endDate == null ? "今" : COMPACT_DATE.format(endDate));
 
         log.info("导出流水：bookId={}, 开始={}, 结束={}, 条数={}", bookId, startDate, endDate, rows.size());
         return new ExportPlan(
-                "班费流水_" + range + ".csv",
+                safeFileName(bookName) + "_" + suffix + ".csv",
                 bookName + " 班费收支明细",
                 bookName,
                 STAMP.format(LocalDateTime.now(ZONE)),
@@ -215,6 +216,16 @@ public class TransactionExportService {
         return (startDate == null ? "最早" : startDate.toString())
                 + " 至 "
                 + (endDate == null ? "今天" : endDate.toString());
+    }
+
+    /** 文件名里不能用 Windows 的保留字符，也不能太长：替换掉，保留中文与数字 */
+    private static String safeFileName(String name) {
+        String cleaned = name == null ? "班费" : name.trim();
+        cleaned = cleaned.replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]", "_");
+        if (cleaned.isEmpty()) {
+            cleaned = "班费";
+        }
+        return cleaned.length() > 40 ? cleaned.substring(0, 40) : cleaned;
     }
 
     /** 金额统一两位小数；空单元格返回 null，由 cell 写成空串（不能出现 "null"） */

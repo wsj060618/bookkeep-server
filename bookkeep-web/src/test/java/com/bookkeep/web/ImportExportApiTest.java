@@ -78,32 +78,55 @@ class ImportExportApiTest {
         byte[] bytes = result.getResponse().getContentAsByteArray();
         assertTrue(bytes.length > 0);
         try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(bytes))) {
+            // 只留一张可见表，图表数据在隐藏的「统计」
             assertEquals(2, workbook.getNumberOfSheets());
-            var sheet = workbook.getSheet("收支明细");
-            assertNotNull(sheet, "应有「收支明细」sheet");
+            assertTrue(workbook.isSheetHidden(1), "图表数据源 sheet 应隐藏");
+            var sheet = workbook.getSheetAt(0);
+            assertEquals("收支明细", sheet.getSheetName());
             assertEquals("班级账本 班费收支明细", sheet.getRow(0).getCell(1).getStringCellValue());
-            // 顶部三行汇总：收入 / 支出 / 结余
+            // 顶部三行汇总：收入 / 支出 / 结余（金额在 D 列）
             assertEquals("收入", sheet.getRow(1).getCell(1).getStringCellValue());
             assertEquals(1900.00, sheet.getRow(1).getCell(3).getNumericCellValue(), 0.001);
             assertEquals("支出", sheet.getRow(3).getCell(1).getStringCellValue());
             assertEquals(620.00, sheet.getRow(3).getCell(3).getNumericCellValue(), 0.001);
             assertEquals("结余", sheet.getRow(5).getCell(1).getStringCellValue());
             assertEquals(1280.00, sheet.getRow(5).getCell(3).getNumericCellValue(), 0.001);
-            // 两行表头：收入 / 支出 分组
-            assertEquals("序号", sheet.getRow(7).getCell(1).getStringCellValue());
-            assertEquals("收入", sheet.getRow(7).getCell(4).getStringCellValue());
-            assertEquals("支出", sheet.getRow(7).getCell(7).getStringCellValue());
-            assertEquals("总价", sheet.getRow(8).getCell(6).getStringCellValue());
-            assertEquals("金额", sheet.getRow(8).getCell(9).getStringCellValue());
-            // 明细从第 10 行（0 基 9）开始：序号 1 是那笔收入
-            assertEquals(1, (int) sheet.getRow(9).getCell(1).getNumericCellValue());
-            assertEquals("收取班费", sheet.getRow(9).getCell(3).getStringCellValue());
-            assertEquals(1900.00, sheet.getRow(9).getCell(6).getNumericCellValue(), 0.001);
-            assertEquals(1900.00, sheet.getRow(9).getCell(10).getNumericCellValue(), 0.001);
-            assertEquals(620.00, sheet.getRow(10).getCell(9).getNumericCellValue(), 0.001);
-
-            assertNotNull(workbook.getSheet("分类合计"), "图表数据源 sheet 应在");
+            // 单行表头：序号 日期 摘要 收入 支出 班费结余 备注（没有数量/单价这类系统里没有的列）
+            String[] titles = {"序号", "日期", "摘要", "收入", "支出", "班费结余", "备注"};
+            for (int i = 0; i < titles.length; i++) {
+                assertEquals(titles[i], sheet.getRow(7).getCell(1 + i).getStringCellValue());
+            }
+            // 明细从第 9 行（0 基 8）开始：收入记在「收入」列，支出记在「支出」列
+            assertEquals(1, (int) sheet.getRow(8).getCell(1).getNumericCellValue());
+            assertEquals("收取班费", sheet.getRow(8).getCell(3).getStringCellValue());
+            assertEquals(1900.00, sheet.getRow(8).getCell(4).getNumericCellValue(), 0.001);
+            assertEquals(1900.00, sheet.getRow(8).getCell(6).getNumericCellValue(), 0.001);
+            assertEquals(620.00, sheet.getRow(9).getCell(5).getNumericCellValue(), 0.001);
         }
+    }
+
+    @Test
+    @DisplayName("文件名用账本名：无区间叫「_全部」，带区间叫「_部分_起-止」")
+    void exportFileNameUsesBookName() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("xls"));
+
+        MvcResult all = mockMvc.perform(get("/api/transactions/export?format=xlsx")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        String allName = mockMvc.perform(asyncDispatch(all)).andReturn()
+                .getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION);
+        assertTrue(allName.contains("_%E5%85%A8%E9%83%A8"), "全部导出应带「_全部」：" + allName);
+
+        MvcResult part = mockMvc.perform(get("/api/transactions/export?format=xlsx"
+                        + "&startDate=2026-10-01&endDate=2026-10-31")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        String partName = mockMvc.perform(asyncDispatch(part)).andReturn()
+                .getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION);
+        assertTrue(partName.contains("_%E9%83%A8%E5%88%86_20261001-20261031"),
+                "区间导出应带「_部分_起-止」：" + partName);
     }
 
     @Test

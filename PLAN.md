@@ -745,21 +745,24 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 ### 10.3 导出 / 导入 Excel 与导入 CSV ✅ 已完成（2026-11-10）
 
 **导出**：`GET /api/transactions/export?format=csv|xlsx`（默认 csv）。
-`format=xlsx` 是真正的 Excel（Apache POI 5.4.1）：`收支表` sheet 顶部是汇总与**两张分类柱状图**
-（支出 / 收入，和统计页一个思路），第 21 行起是明细；`分类合计` sheet 是图表的数据源。
-两种格式共用 `TransactionExportService.prepare()` 取数，口径不会分叉。仍是**流式**输出
-（`StreamingResponseBody`，校验在写响应之前完成，失败仍返回 JSON 信封）。
+`format=xlsx` 是真正的 Excel（Apache POI 5.4.1），版式对齐真实班费表：可见 sheet「收支明细」
+顶部是 `收入 / 支出 / 结余` 三行彩色汇总 + 柱状图（三色）+ 环形图（收支占比），
+第 8 行是单行表头 `序号 | 日期 | 摘要 | 收入 | 支出 | 班费结余 | 备注`，第 9 行起是明细；
+图表数据放在隐藏 sheet「统计」。**刻意不做数量 / 单价 / 人均缴纳**：系统只存金额，编造数量会误导看表的人。
+文件名 `{账本名}_全部` / `{账本名}_部分_{起}-{止}`。两种格式共用 `TransactionExportService.prepare()`，
+口径不会分叉；仍是**流式**输出（`StreamingResponseBody`，校验在写响应之前完成，失败仍返回 JSON 信封）。
 
-**导入**：`POST /api/transactions/import`（multipart，`.csv` / `.xlsx`）→ `{success, failed:[{line, reason}]}`。
+**导入**：`POST /api/transactions/import`（multipart，**只收 `.csv`**）→ `{success, failed:[{line, reason}]}`。
 
 - 列固定：`日期, 类型, 分类, 金额, 备注`；类型认「收入/支出」与 `income/expense`；UTF-8（含 BOM 也认）
 - **行级失败不阻塞其它行**：成功行入库，失败行带**文件行号**（1 基，含表头，和 Excel 左侧一致）与原因
 - **分类不存在直接报错，不自动建分类**；支出仍受余额约束（按文件顺序累加余额）
 - 限制：≤5MB（`spring.servlet.multipart.max-file-size`）、≤2000 行；空文件 / 只有表头 / 超限整份 400
 - 归档账本只读：导入前先拦，返回与记账相同的 400
-- **自动找表头**：扫描「日期」开头的那一行，跳过导出文件里的标题 / 汇总 / 图表区；
+- **只收 CSV**：`.xlsx` 直接 400（提示先另存为 CSV UTF-8）——Excel 版式千人千面，强行解析只会满屏报错
+- **自动找表头**：扫描「日期」开头的那一行，跳过导出 CSV 里的标题 / 汇总；
   同时认两种列结构——标准 `日期,类型,分类,金额,备注` 与本系统导出的 `日期,分类,摘要,收入,支出,结余`
-  （按收入/支出哪列有值判断方向），所以**导出 → 导入可原样转回**
+  （按收入/支出哪列有值判断方向），所以**导出 CSV → 导入可原样转回**
 - 前端：导出改成下拉（CSV / Excel）、导入弹窗（选文件 + 下载模板 + 失败明细表），
   导入有成功行时 `notifyTxChanged()` 让列表与统计页一起刷新
 
