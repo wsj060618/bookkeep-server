@@ -5,11 +5,15 @@ import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.model.dto.req.CategoryReq;
 import com.bookkeep.model.dto.resp.CategoryResp;
+import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.Category;
+import com.bookkeep.model.entity.CategoryTemplateItem;
 import com.bookkeep.service.CategoryService;
 import com.bookkeep.service.CurrentBookService;
 import com.bookkeep.service.constant.CategoryPresets;
+import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.CategoryMapper;
+import com.bookkeep.service.mapper.CategoryTemplateItemMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +35,8 @@ public class CategoryServiceImpl implements CategoryService {
     private final CategoryMapper categoryMapper;
     private final TransactionMapper transactionMapper;
     private final CurrentBookService currentBookService;
+    private final BookMapper bookMapper;
+    private final CategoryTemplateItemMapper templateItemMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -64,11 +70,46 @@ public class CategoryServiceImpl implements CategoryService {
         category.setColor(StringUtils.hasText(req.color()) ? req.color().trim() : "gray");
         // 排在现有分类之后：取当前最大值 +1。不写死 0，否则新分类会插到最前面
         category.setSortOrder(nextSortOrder(bookId));
+        // 顺手补进账本用的那套模板：否则「记一笔」里新建的分类在分类页看不到
+        category.setTemplateItemId(appendToTemplate(bookId, category));
         categoryMapper.insert(category);
 
         log.info("新增分类：bookId={}, categoryId={}, name={}, type={}",
                 bookId, category.getId(), category.getName(), category.getType());
         return CategoryResp.from(category);
+    }
+
+    /**
+     * 把新分类补进账本当前用的模板，返回条目 id（账本没有模板指针时返回 null）。
+     * <p>模板里已有同方向同名条目就复用，避免之后保存模板时撞名。
+     */
+    private Long appendToTemplate(Long bookId, Category category) {
+        Book book = bookMapper.selectById(bookId);
+        Long templateId = book == null ? null : book.getCategoryTemplateId();
+        if (templateId == null) {
+            return null;
+        }
+        CategoryTemplateItem existing = templateItemMapper.selectOne(Wrappers.<CategoryTemplateItem>query()
+                .eq("template_id", templateId)
+                .eq("type", category.getType())
+                .eq("name", category.getName())
+                .last("LIMIT 1"));
+        if (existing != null) {
+            return existing.getId();
+        }
+        CategoryTemplateItem last = templateItemMapper.selectOne(Wrappers.<CategoryTemplateItem>query()
+                .eq("template_id", templateId)
+                .orderByDesc("sort_order")
+                .last("LIMIT 1"));
+        CategoryTemplateItem item = new CategoryTemplateItem();
+        item.setTemplateId(templateId);
+        item.setName(category.getName());
+        item.setType(category.getType());
+        item.setIcon(category.getIcon());
+        item.setColor(category.getColor());
+        item.setSortOrder(last == null || last.getSortOrder() == null ? 1 : last.getSortOrder() + 1);
+        templateItemMapper.insert(item);
+        return item.getId();
     }
 
     @Override

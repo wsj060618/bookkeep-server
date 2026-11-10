@@ -95,6 +95,30 @@ class CategoryApiTest {
     }
 
     @Test
+    @DisplayName("「记一笔」里新建的分类会补进当前账本用的模板（分类页能看到，新书也能用）")
+    void createCategoryAppendsToTemplate() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("cat"));
+
+        mockMvc.perform(post("/api/categories")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"班服\",\"type\":\"expense\",\"icon\":\"cloth\",\"color\":\"blue\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        JsonNode items = getJson(mockMvc, objectMapper, "/api/category-templates", token)
+                .path("data").get(0).path("items");
+        assertEquals(12, items.size(), "注册时 11 条 + 新建的 1 条");
+
+        JsonNode last = items.get(items.size() - 1);
+        assertEquals("班服", last.path("name").asText());
+        assertEquals("expense", last.path("type").asText());
+        assertEquals("cloth", last.path("icon").asText());
+        assertEquals("blue", last.path("color").asText());
+        assertTrue(last.path("id").asLong() > 0, "要带上模板条目 id，账本分类靠它认亲");
+    }
+
+    @Test
     @DisplayName("同一账本同一方向不允许重名（跨方向可以）：新增/改名都拦，改回自己名字放行")
     void duplicateNameRejected() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("cat"));
