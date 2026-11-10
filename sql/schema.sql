@@ -73,16 +73,13 @@ CREATE TABLE book (
   user_id     BIGINT NOT NULL COMMENT '归属用户 user.id',
   name        VARCHAR(50) NOT NULL COMMENT '账本名',
   type        VARCHAR(10) NOT NULL DEFAULT 'class' COMMENT '账本类型，当前固定 class 班级',
-  share_token VARCHAR(32) COMMENT '公示页随机 token（免登录只读，见 PLAN §5.9）',
-  share_token_expires_at DATETIME NULL COMMENT '公示链接到期时间；NULL 或已过期 = 链接失效（分享时重新生成，有效期 3 天）',
   category_template_id BIGINT NULL COMMENT '当前分类来自哪套自定义模板；NULL = 内置「班级班费」模板（id=0 不入库）',
   semester_end DATE NULL COMMENT '学期截止日期（可空）；只用于展示与提示，不影响任何统计口径',
   archived    TINYINT NOT NULL DEFAULT 0 COMMENT '学期归档：1 = 只读（仍可改名/改截止日期/取消归档/导出/公示）',
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删',
-  deleted_at  DATETIME NULL COMMENT '进入回收站的时间（deleted=1 时才有值）；满 15 天连同分类/流水彻底删除',
-  UNIQUE KEY uk_book_share_token (share_token)
+  deleted_at  DATETIME NULL COMMENT '进入回收站的时间（deleted=1 时才有值）；满 15 天连同分类/流水彻底删除'
 ) COMMENT='账本表';
 
 -- ------------------------------------------------------------
@@ -167,3 +164,29 @@ CREATE TABLE category_template_item (
   sort_order  INT DEFAULT 0 COMMENT '排序，越小越靠前',
   KEY idx_cti_template (template_id)
 ) COMMENT='模板条目（物理删除）';
+
+-- ------------------------------------------------------------
+-- 10) share_link 公示链接：**一条链接可以带 1..N 本账本**（PLAN §5.9）
+--     每个账号最多一条有效链接：重新分享会删掉旧链接，泄漏时再分享一次即可作废
+-- ------------------------------------------------------------
+CREATE TABLE share_link (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  user_id     BIGINT NOT NULL COMMENT '归属用户 user.id',
+  token       VARCHAR(32) NOT NULL COMMENT '32 位随机 token（免登录只读）',
+  expires_at  DATETIME NOT NULL COMMENT '到期时间（创建时 now + 3 天）',
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  UNIQUE KEY uk_share_link_token (token),
+  KEY idx_share_link_user (user_id)
+) COMMENT='公示链接（一条链接 = 1..N 本账本）';
+
+-- ------------------------------------------------------------
+-- 11) share_link_book 公示链接包含的账本（物理删除；账本彻底删除时一并清掉）
+-- ------------------------------------------------------------
+CREATE TABLE share_link_book (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  share_link_id BIGINT NOT NULL COMMENT '归属链接 share_link.id',
+  book_id       BIGINT NOT NULL COMMENT '被包含的账本 book.id',
+  sort_order    INT DEFAULT 0 COMMENT '展示顺序',
+  KEY idx_slb_link (share_link_id),
+  KEY idx_slb_book (book_id)
+) COMMENT='公示链接包含的账本（物理删除）';

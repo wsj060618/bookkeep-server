@@ -182,8 +182,8 @@ class BatchApiTest {
     }
 
     @Test
-    @DisplayName("批量分享：一次给多本出链接；第二次调用复用未过期的旧链接，token 不变且公示页可读")
-    void batchShareReusesValidToken() throws Exception {
+    @DisplayName("分享弹窗：一条链接覆盖选中的多本账本；再次分享换新 token，旧链接失效")
+    void batchShareCreatesOneLinkForSelectedBooks() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("bat"));
         long first = bookId(token, 0);
         long second = createBook(token, "第二本");
@@ -193,29 +193,29 @@ class BatchApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"ids\":[" + first + "," + second + "]}"))
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.length()").value(2))
-                .andExpect(jsonPath("$.data[0].reused").value(false))
-                .andExpect(jsonPath("$.data[1].reused").value(false))
+                .andExpect(jsonPath("$.data.books.length()").value(2))
+                .andExpect(jsonPath("$.data.books[0].id").value(first))
+                .andExpect(jsonPath("$.data.books[1].id").value(second))
                 .andReturn();
-        JsonNode links = json(created, objectMapper).path("data");
-        String tokenOfFirst = links.get(0).path("token").asText();
-        assertEquals(32, tokenOfFirst.length());
+        String shareToken = json(created, objectMapper).path("data").path("token").asText();
+        assertEquals(32, shareToken.length());
 
-        // 第二次：两本都还在有效期内 → 原样复用
-        MvcResult again = mockMvc.perform(post("/api/books/share")
+        // 一条链接同时能看到两本
+        JsonNode books = getJson(mockMvc, objectMapper, "/api/public/report/" + shareToken, token)
+                .path("data").path("books");
+        assertEquals(2, books.size());
+
+        // 再分享一次：换新 token，旧的立刻 404
+        String again = json(mockMvc.perform(post("/api/books/share")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"ids\":[" + first + "," + second + "]}"))
-                .andExpect(jsonPath("$.code").value(200))
-                .andReturn();
-        JsonNode reused = json(again, objectMapper).path("data");
-        assertTrue(reused.get(0).path("reused").asBoolean());
-        assertEquals(tokenOfFirst, reused.get(0).path("token").asText(), "未过期就不该换 token");
-
-        // 公示页匿名可读
-        mockMvc.perform(get("/api/public/report/" + tokenOfFirst))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200));
+                .andReturn(), objectMapper).path("data").path("token").asText();
+        assertFalse(again.equals(shareToken), "每次分享都换新 token（泄漏时再分享一次即可作废）");
+        assertEquals(404, getJson(mockMvc, objectMapper, "/api/public/report/" + shareToken, token)
+                .path("code").asInt());
+        assertEquals(200, getJson(mockMvc, objectMapper, "/api/public/report/" + again, token)
+                .path("code").asInt());
     }
 
     @Test

@@ -3,7 +3,7 @@ package com.bookkeep.service;
 import com.bookkeep.model.dto.req.BookCreateReq;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
-import com.bookkeep.model.dto.resp.BookShareResp;
+import com.bookkeep.model.dto.resp.ShareLinkCreatedResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
 import com.bookkeep.model.dto.resp.ShareLinkResp;
 
@@ -23,14 +23,14 @@ public interface BookService {
     /** 新建账本：按所选模板（null/0 = 内置）预置分类，并自动设为当前 */
     BookResp create(BookCreateReq req);
 
-    /** 生成 / 重置公示链接：每次调用都换新 token，有效期 3 天，旧链接立即失效 */
+    /** 生成 / 重置单本账本的公示链接（等价于「只选一本」的分享）：每次调用都换新 token，3 天有效 */
     ShareLinkResp share(Long bookId);
 
     /**
-     * 批量出链接（分享弹窗用）：**已有未过期链接的账本原样复用**，只给没有/已过期的生成新的。
-     * <p>这样「只是想把链接都列出来」不会把已经发到班群的旧链接顶掉。
+     * 生成一条公示链接，包含选中的全部账本（分享弹窗用）。
+     * <p>**每次都换新 token**：旧链接立即失效，泄漏时再分享一次就能掐掉它。
      */
-    List<BookShareResp> shareBatch(List<Long> bookIds);
+    ShareLinkCreatedResp shareBatch(List<Long> bookIds);
 
     /** 修改账本：改名 +（可选）改学期截止日期；归档账本也允许改这两项 */
     BookResp update(Long id, BookUpdateReq req);

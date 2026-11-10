@@ -5,7 +5,7 @@ import com.bookkeep.model.dto.req.BatchIdsReq;
 import com.bookkeep.model.dto.req.BookCreateReq;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
-import com.bookkeep.model.dto.resp.BookShareResp;
+import com.bookkeep.model.dto.resp.ShareLinkCreatedResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
 import com.bookkeep.model.dto.resp.ShareLinkResp;
 import com.bookkeep.service.BookService;
@@ -47,11 +47,11 @@ public class BookController {
     }
 
     /**
-     * 批量出公示链接（分享弹窗用）：已有未过期链接的账本原样复用，只给没有/过期的生成新的。
-     * <p>注意与 {@code POST /{id}/share} 的区别：那个接口是「重新分享 = 换新 token」。
+     * 生成一条公示链接，**包含选中的全部账本**（分享弹窗用）。
+     * <p>账本集合与某条未过期链接完全一致时直接复用；否则作废旧链接再建新的。
      */
     @PostMapping("/share")
-    public Result<List<BookShareResp>> shareBatch(@Valid @RequestBody BatchIdsReq req) {
+    public Result<ShareLinkCreatedResp> shareBatch(@Valid @RequestBody BatchIdsReq req) {
         return Result.success(bookService.shareBatch(req.ids()));
     }
 

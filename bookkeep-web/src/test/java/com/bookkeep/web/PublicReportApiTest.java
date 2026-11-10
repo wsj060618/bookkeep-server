@@ -62,8 +62,9 @@ class PublicReportApiTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn();
 
+        // 一条链接可以带多本账本：数据在 data.books[0] 里
         JsonNode data = objectMapper.readTree(
-                result.getResponse().getContentAsString(StandardCharsets.UTF_8)).path("data");
+                result.getResponse().getContentAsString(StandardCharsets.UTF_8)).path("data").path("books").get(0);
         assertEquals("班级账本", data.path("bookName").asText());
         assertEquals("2026-09", data.path("month").asText());
         assertEquals("1900.00", data.path("income").asText());
@@ -107,7 +108,7 @@ class PublicReportApiTest {
 
         JsonNode data = getJson(mockMvc, objectMapper,
                 "/api/public/report/" + shareToken(mockMvc, objectMapper, username) + "?month=2026-10", token)
-                .path("data");
+                .path("data").path("books").get(0);
 
         assertEquals("0.00", data.path("income").asText());
         assertEquals("620.00", data.path("expense").asText());
@@ -137,7 +138,8 @@ class PublicReportApiTest {
         String userB = nextUsername("pub");
         registerAndLogin(mockMvc, objectMapper, userB);
         JsonNode reportB = getJson(mockMvc, objectMapper,
-                "/api/public/report/" + shareToken(mockMvc, objectMapper, userB), tokenA).path("data");
+                "/api/public/report/" + shareToken(mockMvc, objectMapper, userB), tokenA)
+                .path("data").path("books").get(0);
 
         assertEquals("0.00", reportB.path("totalBalance").asText());
         assertEquals(0, reportB.path("transactions").size());
@@ -153,8 +155,9 @@ class PublicReportApiTest {
 
         mockMvc.perform(get("/api/public/report/" + token))
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.month").isNotEmpty())
-                .andExpect(jsonPath("$.data.income").value("0.00"));
+                .andExpect(jsonPath("$.data.books[0].month").isNotEmpty())
+                .andExpect(jsonPath("$.data.books[0].income").value("0.00"))
+                .andExpect(jsonPath("$.data.expiresAt").isNotEmpty());
 
         mockMvc.perform(get("/api/public/report/" + token + "?month=2026-9"))
                 .andExpect(jsonPath("$.code").value(400))

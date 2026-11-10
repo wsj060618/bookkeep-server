@@ -432,9 +432,11 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/public/report/{shareToken}?month=2026-08` | 免登录只读：本月收入/支出/结余 + 支出与收入两份分类占比 + 明细（含逐行结余） |
+| POST | `/api/books/share` | 生成**一条**公示链接 `{ids:[1,2]}` → `{token, expiresAt, books:[{id,name}]}`；一条链接可含多本账本 |
+| POST | `/api/books/{id}/share` | 单本分享（等价于只选一本），返回 `{token, expiresAt}` |
+| GET | `/api/public/report/{shareToken}?month=2026-08` | 免登录只读：链接里**每本账本**的收入/支出/结余 + 支出与收入两份分类占比 + 明细（含逐行结余） |
 
-响应体（W2 定稿）：`{bookName, month, income, expense, balance, totalBalance, expenseCategories:[…], incomeCategories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}`
+响应体：`{expiresAt, books:[{bookId, bookName, month, income, expense, balance, totalBalance, expenseCategories:[…], incomeCategories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}]}`
 
 > 分类占比给**两个方向**：`expenseCategories`（钱花哪了）与 `incomeCategories`（钱从哪来），
 > 两边的口径都走 `StatisticCalculator`，与登录态统计接口同一份。公示页**收入在左、支出在右并排**，
@@ -442,10 +444,14 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 > `receiptCount` / `receipts` 是 §10.9 公示票据的预留字段，票据功能落地前不返回（或恒为空）；图片本身不在 JSON 里，见 §10.9「公示页票据」。
 
-- `book.share_token` + `book.share_token_expires_at`：32 位随机串（`UUID` 去横线）+ 到期时间，
-  由 `POST /api/books/{id}/share` 生成，**有效期 3 天**；再分享一次即换新 token，旧链接立即失效
-- 查询条件必须同时带 `share_token = ?` 和 `share_token_expires_at > now()`：过期、从未分享、账本已注销
+- 链接是独立实体：`share_link`（token / 到期时间 / 归属用户）+ `share_link_book`（链接 ↔ 账本的多对多），
+  **不再挂 `book.share_token`**。原因：同学只想发一条链接就能同时看到几本账本
+- **每个账号最多一条有效链接**：`POST /api/books/share` 先删旧链接（含成员）再建新的，
+  **每次分享都换新 token**，旧链接立即失效——泄漏时再点一次「分享」就能掐掉它
+- 查询条件必须同时带 `token = ?` 和 `expires_at > now()`：过期、从未分享、成员全被彻底删除
   一律 `code=404「公示页不存在或已失效」`，**绝不能回落到「当前登录用户的账本」**
+- 账本进回收站时**不动**成员关系（恢复后链接照旧能看）；账本**彻底删除**时移除成员，
+  成员被清空的链接一并删掉（`ShareLinkMapper.deleteOrphanLinks`）
 - 明细按日期**升序**返回：逐行结余只有从上往下读才成立，翻页/倒序展示由前端处理
 - 明细不带 `id`、整页不含 `username`/`email`/`userId`：这个接口匿名可访问，能少暴露一个字段就少一个
   （票据只带 `receipts[].id`，那个 id 只在本链接内可用，见 §10.9「公示页票据」）

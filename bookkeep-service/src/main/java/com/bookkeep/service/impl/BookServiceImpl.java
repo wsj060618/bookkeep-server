@@ -7,11 +7,13 @@ import com.bookkeep.common.util.SecurityUtil;
 import com.bookkeep.model.dto.req.BookCreateReq;
 import com.bookkeep.model.dto.req.BookUpdateReq;
 import com.bookkeep.model.dto.resp.BookResp;
-import com.bookkeep.model.dto.resp.BookShareResp;
+import com.bookkeep.model.dto.resp.ShareLinkCreatedResp;
 import com.bookkeep.model.dto.resp.BookTrashResp;
 import com.bookkeep.model.dto.resp.CategoryTemplateResp;
 import com.bookkeep.model.dto.resp.ShareLinkResp;
 import com.bookkeep.model.entity.Book;
+import com.bookkeep.model.entity.ShareLink;
+import com.bookkeep.model.entity.ShareLinkBook;
 import com.bookkeep.model.entity.Category;
 import com.bookkeep.model.entity.User;
 import com.bookkeep.service.BookService;
@@ -19,6 +21,8 @@ import com.bookkeep.service.CategoryTemplateService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.CategoryMapper;
+import com.bookkeep.service.mapper.ShareLinkBookMapper;
+import com.bookkeep.service.mapper.ShareLinkMapper;
 import com.bookkeep.service.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -58,6 +63,8 @@ public class BookServiceImpl implements BookService {
     private final CategoryMapper categoryMapper;
     private final UserMapper userMapper;
     private final CategoryTemplateService categoryTemplateService;
+    private final ShareLinkMapper shareLinkMapper;
+    private final ShareLinkBookMapper shareLinkBookMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -114,57 +121,50 @@ public class BookServiceImpl implements BookService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ShareLinkResp share(Long bookId) {
-        User user = requireUser();
-        String token = UUID.randomUUID().toString().replace("-", "");
-        LocalDateTime expiresAt = LocalDateTime.now().plusDays(SHARE_LINK_DAYS);
-
-        // 归属条件写进 WHERE：知道别人的 id 也改不到，且只有一行受影响
-        int updated = bookMapper.update(null, Wrappers.<Book>update()
-                .eq("id", bookId)
-                .eq("user_id", user.getId())
-                .set("share_token", token)
-                .set("share_token_expires_at", expiresAt));
-        if (updated == 0) {
-            throw new BusinessException(ResultCode.NOT_FOUND, "账本不存在");
-        }
-
-        // 每次分享都换新 token：旧链接立即失效（3 天是按最后一次分享算，不是按建账本算）
-        log.info("生成公示链接：userId={}, bookId={}, 有效期至 {}", user.getId(), bookId, expiresAt);
-        return new ShareLinkResp(token, expiresAt);
+        // 单本分享 = 「只选了一本」的批量分享，保证两条路径只有一套逻辑
+        ShareLinkCreatedResp created = shareBatch(List.of(bookId));
+        return new ShareLinkResp(created.token(), created.expiresAt());
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public List<BookShareResp> shareBatch(List<Long> bookIds) {
+    public ShareLinkCreatedResp shareBatch(List<Long> bookIds) {
         User user = requireUser();
-        LocalDateTime now = LocalDateTime.now();
-        List<BookShareResp> result = new ArrayList<>(bookIds.size());
-
-        for (Long bookId : bookIds) {
-            Book book = requireOwned(bookId, user.getId());
-            boolean valid = book.getShareToken() != null
-                    && book.getShareTokenExpiresAt() != null
-                    && book.getShareTokenExpiresAt().isAfter(now);
-            if (valid) {
-                // 已经发出去的链接还在有效期：原样复用，别把它顶掉
-                result.add(new BookShareResp(book.getId(), book.getName(),
-                        book.getShareToken(), book.getShareTokenExpiresAt(), true));
-                continue;
-            }
-
-            String token = UUID.randomUUID().toString().replace("-", "");
-            LocalDateTime expiresAt = now.plusDays(SHARE_LINK_DAYS);
-            bookMapper.update(null, Wrappers.<Book>update()
-                    .eq("id", bookId)
-                    .eq("user_id", user.getId())
-                    .set("share_token", token)
-                    .set("share_token_expires_at", expiresAt));
-            result.add(new BookShareResp(book.getId(), book.getName(), token, expiresAt, false));
+        List<Long> unique = bookIds.stream().distinct().toList();
+        // 先全部校验归属：一条不是自己的就整批 404（和批量删除同一套口径）
+        List<Book> books = new ArrayList<>(unique.size());
+        for (Long bookId : unique) {
+            books.add(requireOwned(bookId, user.getId()));
         }
 
-        log.info("批量生成公示链接：userId={}, 账本={}, 新生成 {} 条",
-                user.getId(), bookIds, result.stream().filter(r -> !r.reused()).count());
-        return result;
+        LocalDateTime now = LocalDateTime.now();
+        // 每次分享都换新链接：旧链接立即失效（泄漏时再点一次「分享」就能掐掉它）
+        shareLinkMapper.deleteBookshipsByUser(user.getId());
+        shareLinkMapper.deleteByUser(user.getId());
+
+        ShareLink link = new ShareLink();
+        link.setUserId(user.getId());
+        link.setToken(UUID.randomUUID().toString().replace("-", ""));
+        link.setExpiresAt(now.plusDays(SHARE_LINK_DAYS));
+        shareLinkMapper.insert(link);
+
+        int order = 1;
+        for (Book book : books) {
+            ShareLinkBook member = new ShareLinkBook();
+            member.setShareLinkId(link.getId());
+            member.setBookId(book.getId());
+            member.setSortOrder(order++);
+            shareLinkBookMapper.insert(member);
+        }
+
+        log.info("生成公示链接：userId={}, 账本={}, 有效期至 {}", user.getId(), unique, link.getExpiresAt());
+        return new ShareLinkCreatedResp(link.getToken(), link.getExpiresAt(), toSharedBooks(books));
+    }
+
+    private static List<ShareLinkCreatedResp.SharedBook> toSharedBooks(List<Book> books) {
+        return books.stream()
+                .map(book -> new ShareLinkCreatedResp.SharedBook(book.getId(), book.getName()))
+                .toList();
     }
 
     @Override
@@ -318,10 +318,7 @@ public class BookServiceImpl implements BookService {
         if (bookMapper.selectTrashedId(id, userId) == null) {
             throw new BusinessException(ResultCode.NOT_FOUND, "账本不存在或不在回收站");
         }
-        // 顺序与定时清理一致：流水 → 分类 → 账本（从子表往父表删，不会报外键错）
-        bookMapper.hardDeleteTransactions(id);
-        bookMapper.hardDeleteCategories(id);
-        bookMapper.hardDeleteBook(id);
+        hardDeleteBookCascade(id);
         log.info("彻底删除账本：userId={}, bookId={}（连同分类与流水）", userId, id);
     }
 
@@ -338,9 +335,7 @@ public class BookServiceImpl implements BookService {
             }
         }
         for (Long id : unique) {
-            bookMapper.hardDeleteTransactions(id);
-            bookMapper.hardDeleteCategories(id);
-            bookMapper.hardDeleteBook(id);
+            hardDeleteBookCascade(id);
         }
         log.info("批量彻底删除账本：userId={}, bookIds={}（连同分类与流水）", userId, unique);
         return unique.size();
@@ -352,15 +347,25 @@ public class BookServiceImpl implements BookService {
         LocalDateTime deadline = LocalDateTime.now().minusDays(RETENTION_DAYS);
         List<Long> expired = bookMapper.selectExpiredIds(deadline);
         for (Long bookId : expired) {
-            // 先删子表再删主表：将来若真加了外键，这个顺序也不会报错
-            bookMapper.hardDeleteTransactions(bookId);
-            bookMapper.hardDeleteCategories(bookId);
-            bookMapper.hardDeleteBook(bookId);
+            hardDeleteBookCascade(bookId);
         }
         if (!expired.isEmpty()) {
             log.info("回收站到期清理：彻底删除 {} 本账本（含分类与流水），bookIds={}", expired.size(), expired);
         }
         return expired.size();
+    }
+
+    /**
+     * 彻底删除一本账本的全部数据：流水 → 分类 → 账本 → 公示链接成员 → 空链接。
+     * <p>顺序从子表往父表，将来真加了外键也不会报错；链接成员必须清掉，
+     * 否则公示链接里会留一个永远打不开的账本 id。
+     */
+    private void hardDeleteBookCascade(Long bookId) {
+        bookMapper.hardDeleteTransactions(bookId);
+        bookMapper.hardDeleteCategories(bookId);
+        bookMapper.hardDeleteBook(bookId);
+        shareLinkMapper.deleteBookshipsByBook(bookId);
+        shareLinkMapper.deleteOrphanLinks();
     }
 
     private List<BookResp> doList() {

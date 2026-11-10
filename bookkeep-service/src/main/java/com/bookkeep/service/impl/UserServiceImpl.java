@@ -12,6 +12,7 @@ import com.bookkeep.model.entity.User;
 import com.bookkeep.service.UserService;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.PasswordResetTokenMapper;
+import com.bookkeep.service.mapper.ShareLinkMapper;
 import com.bookkeep.service.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +35,7 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final BookMapper bookMapper;
     private final PasswordResetTokenMapper tokenMapper;
+    private final ShareLinkMapper shareLinkMapper;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -110,6 +112,9 @@ public class UserServiceImpl implements UserService {
         // 模板跟账号走，也必须清掉：否则注销后留下没人能访问的孤儿数据
         bookMapper.hardDeleteTemplateItemsByUser(user.getId());
         bookMapper.hardDeleteTemplatesByUser(user.getId());
+        // 公示链接同理：注销后链接必须立刻打不开
+        shareLinkMapper.deleteBookshipsByUser(user.getId());
+        shareLinkMapper.deleteByUser(user.getId());
         tokenMapper.deleteByUser(user.getId());
         userMapper.hardDeleteById(user.getId());
 
