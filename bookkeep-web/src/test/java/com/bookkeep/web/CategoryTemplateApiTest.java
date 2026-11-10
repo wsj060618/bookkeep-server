@@ -55,8 +55,8 @@ class CategoryTemplateApiTest {
                     + "{\"name\":\"班费\",\"type\":\"income\",\"icon\":\"fee\",\"color\":\"green\"}]}";
 
     @Test
-    @DisplayName("模板库默认只有内置「班级班费」：id=0、11 条、排第一、没有「其他」")
-    void builtinTemplateIsListed() throws Exception {
+    @DisplayName("注册即落一套真实默认模板：11 条、可编辑（不再只有 id=0 的只读投影）")
+    void defaultTemplateIsMaterializedAtRegistration() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
 
         mockMvc.perform(get("/api/category-templates")
@@ -64,9 +64,10 @@ class CategoryTemplateApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.length()").value(1))
-                .andExpect(jsonPath("$.data[0].id").value(0))
+                // 是一条真实的模板行（id > 0），不是 id=0 的常量投影
+                .andExpect(jsonPath("$.data[0].id").value(org.hamcrest.Matchers.greaterThan(0)))
                 .andExpect(jsonPath("$.data[0].name").value("班级班费"))
-                .andExpect(jsonPath("$.data[0].builtin").value(true))
+                .andExpect(jsonPath("$.data[0].builtin").value(false))
                 .andExpect(jsonPath(BUILTIN_ITEMS + ".length()").value(11))
                 .andExpect(jsonPath(BUILTIN_ITEMS + "[0].name").value("班会物资"))
                 .andExpect(jsonPath(BUILTIN_ITEMS + "[0].sortOrder").value(1));
@@ -74,6 +75,15 @@ class CategoryTemplateApiTest {
         // 「其他」是记一笔里的虚拟入口，不是预置分类
         assertFalse(getJson(mockMvc, objectMapper, "/api/category-templates", token)
                 .path("data").get(0).path("items").toString().contains("其他"));
+
+        // 默认模板就是普通模板：能直接改名（不用先「存为模板」）
+        long templateId = getJson(mockMvc, objectMapper, "/api/category-templates", token)
+                .path("data").get(0).path("id").asLong();
+        mockMvc.perform(put("/api/category-templates/" + templateId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"我们班的分类\"}"))
+                .andExpect(jsonPath("$.code").value(200));
     }
 
     @Test

@@ -14,9 +14,13 @@ import com.bookkeep.model.dto.resp.LoginResp;
 import com.bookkeep.model.dto.resp.UserResp;
 import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.Category;
+import com.bookkeep.model.entity.CategoryTemplate;
+import com.bookkeep.model.entity.CategoryTemplateItem;
 import com.bookkeep.model.entity.User;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.CategoryMapper;
+import com.bookkeep.service.mapper.CategoryTemplateItemMapper;
+import com.bookkeep.service.mapper.CategoryTemplateMapper;
 import com.bookkeep.service.mapper.UserMapper;
 import com.bookkeep.service.support.AuthThrottle;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +47,8 @@ public class AuthServiceImpl implements AuthService {
     private final UserMapper userMapper;
     private final BookMapper bookMapper;
     private final CategoryMapper categoryMapper;
+    private final CategoryTemplateMapper templateMapper;
+    private final CategoryTemplateItemMapper templateItemMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final AuthThrottle authThrottle;
@@ -85,17 +91,37 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ResultCode.BAD_REQUEST, "用户名或邮箱已被注册");
         }
 
-        // 2) 班级账本：注册必建，名字可空（为空用默认「班级账本」）
+        // 2) 默认分类模板：**当成普通模板落库**（不再只有 id=0 的常量投影）。
+        //    这样账号一注册就有可编辑的一套，页面也不用「点编辑先复制一份」。
+        //    历史账号由 DefaultTemplateInitializer 在启动时补上（仅当该账号一套模板都没有）。
+        CategoryTemplate template = new CategoryTemplate();
+        template.setUserId(user.getId());
+        template.setName(CategoryPresets.BUILTIN_NAME);
+        templateMapper.insert(template);
+        for (CategoryPresets.Seed seed : seeds) {
+            CategoryTemplateItem item = new CategoryTemplateItem();
+            item.setTemplateId(template.getId());
+            item.setName(seed.name());
+            item.setType(seed.type());
+            item.setIcon(seed.icon());
+            item.setColor(seed.color());
+            item.setSortOrder(seed.sortOrder());
+            templateItemMapper.insert(item);
+        }
+
+        // 3) 班级账本：注册必建，名字可空（为空用默认「班级账本」）
         Book book = new Book();
         book.setUserId(user.getId());
         book.setName(StringUtils.hasText(req.bookName())
                 ? req.bookName().trim()
                 : CategoryPresets.DEFAULT_BOOK_NAME);
         book.setType(CategoryPresets.BOOK_CLASS);
+        // 指向刚建的默认模板：账本里这些分类就是它的拷贝，前端能显示「当前用的是哪套模板」
+        book.setCategoryTemplateId(template.getId());
         // 公示链接不在这里建：用户点「分享」才生成，链接只活 3 天（PLAN §5.9）
         bookMapper.insert(book);
 
-        // 3) 预置分类模板：逐条 insert，和用户/账本共用同一个 SqlSession 与事务。
+        // 4) 按同一套 seeds 预置账本的分类：逐条 insert，和用户/账本共用同一个 SqlSession 与事务。
         //    这里**不用** MyBatis-Plus 的 Db.saveBatch：它是静态工具，自己取 Session，
         //    在「外层已有事务」的场景下写入不一定挂在当前事务上——测试里就表现为
         //    「日志显示插了 13 条，同一事务却查不到」（MySQL 默认 REPEATABLE READ，

@@ -62,12 +62,14 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
     public List<CategoryTemplateResp> list() {
         Long userId = SecurityUtil.getUserId();
         List<CategoryTemplateResp> result = new ArrayList<>();
-        result.add(builtinResp());
 
         List<CategoryTemplate> templates = templateMapper.selectList(Wrappers.<CategoryTemplate>query()
                 .eq("user_id", userId)
                 .orderByAsc("id"));
         if (templates.isEmpty()) {
+            // 兜底：注册时一定会写一套真实模板（见 AuthServiceImpl 与 DefaultTemplateInitializer），
+            // 走到这里说明是历史账号且模板被全删了——继续给一个只读的内置投影，页面不至于空
+            result.add(builtinResp());
             return result;
         }
 
