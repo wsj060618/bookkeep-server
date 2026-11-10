@@ -49,6 +49,10 @@ services:
       MAIL_FROM: ${MAIL_FROM:-}
       MAIL_FROM_NAME: ${MAIL_FROM_NAME:-bookkeep}
       APP_BASE_URL: ${APP_BASE_URL:?请在 .env 里设置 APP_BASE_URL，例如 https://你的域名}
+      # 票据图片落在命名卷里（不放镜像、不放数据库卷）：docker compose down 不丢，down -v 才删
+      RECEIPT_DIR: /app/data/receipts
+    volumes:
+      - receipts_data:/app/data/receipts
 
   nginx:
     image: nginx:1.27-alpine
@@ -59,9 +63,12 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${NGINX_CONF:-./nginx.conf}:/etc/nginx/nginx.conf:ro
       - ${FRONTEND_DIST:-../bookkeep-web/dist}:/usr/share/nginx/html:ro
+      # 只有改走 TLS（nginx.tls.conf + 备案域名/境外服务器）时才需要证书目录
       - ./certs:/etc/nginx/certs:ro
 
 volumes:
   db_data:
+  # 票据图片（PLAN §10.9）。备份：docker compose exec app tar czf - -C /app/data receipts > receipts.tgz
+  receipts_data:

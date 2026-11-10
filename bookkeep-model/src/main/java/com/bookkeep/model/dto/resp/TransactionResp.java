@@ -12,6 +12,7 @@ import java.time.LocalDate;
  * 前端不做二次查询（PLAN §5.0 第 5 条）。这是最容易漏、一联调就暴露的字段。
  * <p>{@code amount} 是 BigDecimal，由 JacksonConfig 全局按**字符串**序列化（{@code "620.00"}），
  * 前端不要 parseFloat 后累加。
+ * <p>{@code receiptCount} 是票据张数（列表徽标用）；只给数量不给内容，图片走独立接口。
  */
 public record TransactionResp(
         Long id,
@@ -22,14 +23,19 @@ public record TransactionResp(
         Long categoryId,
         String categoryName,
         String categoryIcon,
-        String categoryColor
+        String categoryColor,
+        int receiptCount
 ) {
 
     /**
      * @param category 可能为 null（分类被删掉但流水还留着），此时名称给「已删除分类」，
-     *                 保证前端列表不会出现空白格
+     *                 保证前端列表不会出现空白。
      */
     public static TransactionResp from(Transaction transaction, Category category) {
+        return from(transaction, category, 0);
+    }
+
+    public static TransactionResp from(Transaction transaction, Category category, int receiptCount) {
         return new TransactionResp(
                 transaction.getId(),
                 transaction.getType(),
@@ -39,7 +45,8 @@ public record TransactionResp(
                 transaction.getCategoryId(),
                 category == null ? "已删除分类" : category.getName(),
                 category == null ? "other" : category.getIcon(),
-                category == null ? "gray" : category.getColor()
+                category == null ? "gray" : category.getColor(),
+                receiptCount
         );
     }
 }

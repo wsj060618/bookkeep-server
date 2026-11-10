@@ -10,8 +10,8 @@ spring:
   # 流水导入是 multipart：默认上限只有 1MB，导入 5MB 以内的文件会被拦
   servlet:
     multipart:
-      max-file-size: 5MB
-      max-request-size: 6MB
+      max-file-size: 6MB
+      max-request-size: 8MB
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://${DB_HOST:localhost}:3306/bookkeep?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
@@ -35,6 +35,10 @@ spring:
       mail.smtp.timeout: 10000
 
 app:
+  # 票据图片落盘根目录（相对路径以它为基准）；容器里由 compose 挂命名卷，
+  # 本机由 deploy/env.ps1 的 RECEIPT_DIR 指到 deploy/data/receipts
+  receipt:
+    dir: ${RECEIPT_DIR:./data/receipts}
   mail:
     # 发件人地址，必须是 MAIL_USERNAME 那个邮箱（QQ 会校验发件人一致）；只放纯地址
     from: ${MAIL_FROM:}

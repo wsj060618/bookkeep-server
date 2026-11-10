@@ -8,7 +8,9 @@ import com.bookkeep.model.dto.req.AccountDeleteReq;
 import com.bookkeep.model.dto.req.PasswordUpdateReq;
 import com.bookkeep.model.dto.req.UserUpdateReq;
 import com.bookkeep.model.dto.resp.UserResp;
+import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.User;
+import com.bookkeep.service.ReceiptService;
 import com.bookkeep.service.UserService;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.PasswordResetTokenMapper;
@@ -21,6 +23,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+
+import java.util.List;
 
 /**
  * 用户自助管理实现。
@@ -37,6 +41,7 @@ public class UserServiceImpl implements UserService {
     private final PasswordResetTokenMapper tokenMapper;
     private final ShareLinkMapper shareLinkMapper;
     private final PasswordEncoder passwordEncoder;
+    private final ReceiptService receiptService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -106,9 +111,11 @@ public class UserServiceImpl implements UserService {
         }
 
         // 注销 = 立即清空，不进回收站、不等 15 天：子表先删，账本最后删（子查询依赖 book 还在）
+        // 票据目录名要账本名，所以删库之前先把 (id, name) 捞出来
+        List<Book> books = bookMapper.selectList(Wrappers.<Book>query().eq("user_id", user.getId()));
         bookMapper.hardDeleteTransactionsByUser(user.getId());
         bookMapper.hardDeleteCategoriesByUser(user.getId());
-        int books = bookMapper.hardDeleteBooksByUser(user.getId());
+        int bookCount = bookMapper.hardDeleteBooksByUser(user.getId());
         // 模板跟账号走，也必须清掉：否则注销后留下没人能访问的孤儿数据
         bookMapper.hardDeleteTemplateItemsByUser(user.getId());
         bookMapper.hardDeleteTemplatesByUser(user.getId());
@@ -118,7 +125,12 @@ public class UserServiceImpl implements UserService {
         tokenMapper.deleteByUser(user.getId());
         userMapper.hardDeleteById(user.getId());
 
-        log.info("注销账户（已物理删除）：userId={}，username={}，删除账本 {} 本", user.getId(), user.getUsername(), books);
+        // 票据：库记录已随流水删掉，这里清磁盘目录（失败只记日志，不能让注销回滚）
+        for (Book book : books) {
+            receiptService.purgeBookQuietly(book.getId(), book.getName());
+        }
+
+        log.info("注销账户（已物理删除）：userId={}，username={}，删除账本 {} 本", user.getId(), user.getUsername(), bookCount);
     }
 
     private User requireCurrentUser() {

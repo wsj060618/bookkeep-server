@@ -1,0 +1,226 @@
+package com.bookkeep.service.support;
+
+import com.bookkeep.common.exception.BusinessException;
+import com.bookkeep.common.result.ResultCode;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+import java.util.UUID;
+
+/**
+ * 票据文件的落盘规则（PLAN §10.9），只有这一处实现：
+ *
+ * <pre>
+ * {receipt.dir}
+ *   └── {安全化账本名}_{bookId}/
+ *         └── {yyyy-MM}/                 ← 取流水的 trans_date，不是上传时间
+ *               └── {uuid}.{jpg|png|webp}
+ * </pre>
+ *
+ * <p>三条硬规则：
+ * <ol>
+ *   <li>落盘名一律服务端 UUID，**用户起的标题永不进路径**（否则 `../` 就能写到目录外）</li>
+ *   <li>扩展名按**魔数识别**出来的类型定，不看用户上传的文件名（`.php` 改成 `.jpg` 也骗不过）</li>
+ *   <li>账本改名不搬目录：{@code stored_path} 才是唯一事实来源，目录名只是便于人看</li>
+ * </ol>
+ */
+@Slf4j
+@Component
+public class ReceiptStorage {
+
+    /** 单张上限 5MB：手机随手拍一张小票通常 1–3MB，够用又不至于把试用机磁盘塞满 */
+    public static final long MAX_FILE_BYTES = 5L * 1024 * 1024;
+
+    /** 单笔最多 9 张：一张小票拆多张拍也就 2–3 张，9 张已经非常宽松 */
+    public static final int MAX_PER_TRANSACTION = 9;
+
+    /** 单用户总配额 500MB：超了提示清理，避免试用机磁盘被打满 */
+    public static final long MAX_BYTES_PER_USER = 500L * 1024 * 1024;
+
+    private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("yyyy-MM");
+
+    /** 目录名里不能出现的字符（Windows 最严格：\ / : * ? " < > | 与控制字符） */
+    private static final String ILLEGAL = "\\\\/:*?\"<>|";
+
+    private static final int DIR_NAME_MAX = 30;
+
+    private final Path root;
+
+    public ReceiptStorage(@Value("${app.receipt.dir:./data/receipts}") String dir) {
+        this.root = Paths.get(dir).toAbsolutePath().normalize();
+    }
+
+    public Path root() {
+        return root;
+    }
+
+    /* ---------- 类型识别 ---------- */
+
+    /** 按魔数识别图片类型；不认识就抛 400（SVG 属于「不认识」，它能带脚本，等于存储型 XSS） */
+    public static ImageType detect(byte[] bytes) {
+        if (bytes == null || bytes.length < 12) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "文件太小，不像是图片");
+        }
+        if ((bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8 && (bytes[2] & 0xFF) == 0xFF) {
+            return ImageType.JPEG;
+        }
+        if ((bytes[0] & 0xFF) == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G'
+                && (bytes[4] & 0xFF) == 0x0D && (bytes[5] & 0xFF) == 0x0A
+                && (bytes[6] & 0xFF) == 0x1A && (bytes[7] & 0xFF) == 0x0A) {
+            return ImageType.PNG;
+        }
+        if (bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F'
+                && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P') {
+            return ImageType.WEBP;
+        }
+        throw new BusinessException(ResultCode.BAD_REQUEST, "只支持 jpg / png / webp 图片");
+    }
+
+    /** 图片类型：扩展名与 Content-Type 都由它决定，不让调用方各写一份 */
+    public enum ImageType {
+        JPEG("jpg", "image/jpeg"),
+        PNG("png", "image/png"),
+        WEBP("webp", "image/webp");
+
+        private final String ext;
+        private final String contentType;
+
+        ImageType(String ext, String contentType) {
+            this.ext = ext;
+            this.contentType = contentType;
+        }
+
+        public String ext() {
+            return ext;
+        }
+
+        public String contentType() {
+            return contentType;
+        }
+    }
+
+    /* ---------- 路径规则 ---------- */
+
+    /**
+     * 账本目录名：安全化后的账本名 + {@code _bookId}。
+     * <p>拼 bookId 是为了改名/重名时不串目录；账本名全是非法字符时回落 {@code book_{id}}。
+     */
+    public static String bookDirName(Long bookId, String bookName) {
+        String cleaned = bookName == null ? "" : bookName;
+        StringBuilder sb = new StringBuilder(cleaned.length());
+        for (char c : cleaned.toCharArray()) {
+            if (ILLEGAL.indexOf(c) >= 0 || c < 0x20) {
+                continue;
+            }
+            sb.append(c);
+        }
+        String safe = sb.toString().trim().replaceAll("^\\.+", "").replaceAll("\\.+$", "").trim();
+        if (safe.length() > DIR_NAME_MAX) {
+            safe = safe.substring(0, DIR_NAME_MAX).trim();
+        }
+        if (safe.isEmpty()) {
+            safe = "book";
+        }
+        return safe + "_" + bookId;
+    }
+
+    /** 相对路径：{账本目录}/{yyyy-MM}/{uuid}.{ext} */
+    public static String relativePath(String bookDir, LocalDate transDate, String ext) {
+        return bookDir + "/" + MONTH.format(transDate) + "/" + UUID.randomUUID().toString().replace("-", "")
+                + "." + ext;
+    }
+
+    /** 把库里的相对路径解析成本机绝对路径，并挡住越界（理论上不会发生，但这是最后一道闸） */
+    public Path resolve(String storedPath) {
+        Path path = root.resolve(storedPath).normalize();
+        if (!path.startsWith(root)) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "票据不存在");
+        }
+        return path;
+    }
+
+    /* ---------- 读写 ---------- */
+
+    public void write(String storedPath, byte[] bytes) {
+        Path path = resolve(storedPath);
+        try {
+            Files.createDirectories(path.getParent());
+            Files.write(path, bytes);
+        } catch (IOException e) {
+            log.error("票据落盘失败：{}", path, e);
+            throw new BusinessException(ResultCode.ERROR, "票据保存失败，请稍后重试");
+        }
+    }
+
+    /** 删除单个文件：失败只记日志，不把业务流程带崩（文件删不掉比上传失败影响小得多） */
+    public void deleteQuietly(String storedPath) {
+        if (storedPath == null || storedPath.isBlank()) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(resolve(storedPath));
+        } catch (RuntimeException | IOException e) {
+            log.warn("删除票据文件失败（忽略）：{}，原因：{}", storedPath, e.getMessage());
+        }
+    }
+
+    /** 删掉整本账本的票据目录；失败只记日志（注销账号不能因为文件删不掉就回滚） */
+    public void deleteBookDirQuietly(Long bookId, String bookName) {
+        try {
+            deleteRecursively(root.resolve(bookDirName(bookId, bookName)).normalize());
+        } catch (RuntimeException e) {
+            log.warn("删除账本票据目录失败（忽略）：bookId={}，原因：{}", bookId, e.getMessage());
+        }
+    }
+
+    private void deleteRecursively(Path dir) {
+        if (!Files.exists(dir)) {
+            return;
+        }
+        try (var walk = Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+        } catch (IOException | UncheckedIOException e) {
+            log.warn("删除目录失败（忽略）：{}，原因：{}", dir, e.getMessage());
+        }
+    }
+
+    /** 原始文件名去扩展名当默认标题（「超市小票.jpg」→「超市小票」），空/超长时兜底 */
+    public static String defaultTitle(String originalName) {
+        String name = originalName == null ? "" : originalName.trim();
+        if (name.startsWith(".")) {
+            // ".jpg" / ".hidden" 这类只有扩展名/隐藏名的文件，没有可用的标题
+            name = "";
+        } else {
+            int dot = name.lastIndexOf('.');
+            if (dot > 0) {
+                name = name.substring(0, dot);
+            }
+        }
+        name = name.replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]", " ").trim();
+        if (name.isEmpty()) {
+            return "票据";
+        }
+        return name.length() > 30 ? name.substring(0, 30) : name;
+    }
+
+    public static String lowerExt(String filename) {
+        String name = filename == null ? "" : filename;
+        int dot = name.lastIndexOf('.');
+        return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
+    }
+}

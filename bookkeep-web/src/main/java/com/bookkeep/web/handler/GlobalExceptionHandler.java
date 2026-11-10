@@ -16,6 +16,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -114,6 +115,17 @@ public class GlobalExceptionHandler {
                 : ((NoHandlerFoundException) e).getRequestURL();
         log.warn("接口不存在: /{}", path);
         return Result.error(ResultCode.NOT_FOUND);
+    }
+
+    /**
+     * 上传文件超过 multipart 上限。
+     * <p>这一层是 Spring 在进 Controller 之前抛的，业务代码里的「≤5MB」根本轮不到判断；
+     * 不显式接住会落到兜底的 500，用户只看到「系统繁忙」，完全不知道为什么传不上去。
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public Result<Void> handleTooLarge(MaxUploadSizeExceededException e) {
+        log.warn("上传文件超过上限: {}", e.getMessage());
+        return Result.error(ResultCode.BAD_REQUEST, "文件太大：单张图片上限 5MB，导入文件上限 5MB");
     }
 
     /** 兜底：不向客户端泄露内部信息，完整堆栈只进日志。 */

@@ -18,6 +18,7 @@ import com.bookkeep.model.entity.Category;
 import com.bookkeep.model.entity.User;
 import com.bookkeep.service.BookService;
 import com.bookkeep.service.CategoryTemplateService;
+import com.bookkeep.service.ReceiptService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.CategoryMapper;
@@ -65,6 +66,7 @@ public class BookServiceImpl implements BookService {
     private final CategoryTemplateService categoryTemplateService;
     private final ShareLinkMapper shareLinkMapper;
     private final ShareLinkBookMapper shareLinkBookMapper;
+    private final ReceiptService receiptService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -361,11 +363,15 @@ public class BookServiceImpl implements BookService {
      * 否则公示链接里会留一个永远打不开的账本 id。
      */
     private void hardDeleteBookCascade(Long bookId) {
+        // 目录名要账本名，必须在删 book 之前取；否则只能用 book_{id} 兜底，图片目录会变成孤儿
+        Book book = bookMapper.selectById(bookId);
         bookMapper.hardDeleteTransactions(bookId);
         bookMapper.hardDeleteCategories(bookId);
         bookMapper.hardDeleteBook(bookId);
         shareLinkMapper.deleteBookshipsByBook(bookId);
         shareLinkMapper.deleteOrphanLinks();
+        // 票据：先删库记录，再删整本目录（文件删失败只记日志，不回滚已完成的删除）
+        receiptService.purgeBookQuietly(bookId, book == null ? null : book.getName());
     }
 
     private List<BookResp> doList() {

@@ -12,6 +12,9 @@ import java.time.LocalDate;
 @Data
 public class TransactionBalanceRow {
 
+    /** 流水 id：公示页要靠它把票据挂到对应的行上 */
+    private Long id;
+
     private LocalDate transDate;
 
     private String type;

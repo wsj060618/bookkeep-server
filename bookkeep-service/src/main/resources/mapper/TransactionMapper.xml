@@ -126,7 +126,8 @@
     -->
     <select id="selectRangeWithRunningBalance" resultType="com.bookkeep.service.mapper.row.TransactionBalanceRow">
         <include refid="runningBalanceSource"/>
-        SELECT trans_date,
+        SELECT id,
+               trans_date,
                type,
                amount,
                note,
@@ -143,7 +144,8 @@
     <!-- 某月 + 逐行结余（公示页用） -->
     <select id="selectMonthWithRunningBalance" resultType="com.bookkeep.service.mapper.row.TransactionBalanceRow">
         <include refid="runningBalanceSource"/>
-        SELECT trans_date,
+        SELECT id,
+               trans_date,
                type,
                amount,
                note,

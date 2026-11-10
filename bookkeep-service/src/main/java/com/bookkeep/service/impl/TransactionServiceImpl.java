@@ -16,6 +16,8 @@ import com.bookkeep.service.TransactionService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
+import com.bookkeep.service.mapper.TransactionReceiptMapper;
+import com.bookkeep.service.mapper.row.ReceiptCountRow;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -42,6 +44,7 @@ public class TransactionServiceImpl implements TransactionService {
 
     private final TransactionMapper transactionMapper;
     private final CategoryMapper categoryMapper;
+    private final TransactionReceiptMapper transactionReceiptMapper;
     private final CurrentBookService currentBookService;
 
     @Override
@@ -69,8 +72,10 @@ public class TransactionServiceImpl implements TransactionService {
                 new Page<>(query.getPage(), query.getSize()), wrapper);
 
         Map<Long, Category> categoryMap = loadCategories(result.getRecords());
+        Map<Long, Integer> receiptCounts = loadReceiptCounts(result.getRecords());
         List<TransactionResp> list = result.getRecords().stream()
-                .map(t -> TransactionResp.from(t, categoryMap.get(t.getCategoryId())))
+                .map(t -> TransactionResp.from(t, categoryMap.get(t.getCategoryId()),
+                        receiptCounts.getOrDefault(t.getId(), 0)))
                 .toList();
 
         return new PageResult<>(result.getTotal(), list);
@@ -128,7 +133,8 @@ public class TransactionServiceImpl implements TransactionService {
         Transaction updated = transactionMapper.selectById(id);
         log.info("修改流水：bookId={}, transactionId={}, type={}, amount={}", bookId, id,
                 updated.getType(), updated.getAmount());
-        return TransactionResp.from(updated, category);
+        return TransactionResp.from(updated, category,
+                (int) transactionReceiptMapper.countByTransaction(id));
     }
 
     @Override
@@ -246,5 +252,16 @@ public class TransactionServiceImpl implements TransactionService {
         }
         return categoryMapper.selectBatchIds(categoryIds).stream()
                 .collect(Collectors.toMap(Category::getId, Function.identity()));
+    }
+
+    /** 一页流水的票据张数，同样一次 IN 查询（没有票据的流水不会出现在结果里，取默认 0） */
+    private Map<Long, Integer> loadReceiptCounts(List<Transaction> transactions) {
+        List<Long> ids = transactions.stream().map(Transaction::getId).toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return transactionReceiptMapper.countByTransactionIds(ids).stream()
+                .collect(Collectors.toMap(ReceiptCountRow::getTransactionId,
+                        row -> row.getCnt() == null ? 0 : row.getCnt().intValue()));
     }
 }

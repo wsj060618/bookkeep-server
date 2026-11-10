@@ -21,6 +21,11 @@
     并反代 `/api` → `127.0.0.1:8080`；后端只监听回环地址（不对外端口），Nginx 监听 80（局域网可访问）
   - **云端（演示与取证，按需开启）**：Docker Compose 编排 `mysql` + `app` + `nginx`，部署到轻量应用服务器；
     **只在试用期 / 面试期开启**，不做长期租用（理由与成本见 §9）
+  - **云端没有 HTTPS，是刻意接受的**：国内云服务器的域名**必须备案**才放行，裸 IP 又签不到可信证书
+    （Let's Encrypt 不给 IP 签；自签证书在手机上人人弹警告）。所以云端是 `http://服务器IP/`，
+    `docker/nginx.conf` 只监听 80、不加 HSTS；补偿手段是登录限流 + `JWT_EXPIRE=86400` +
+    3306/8080 不 publish + 只开 80。要上 HTTPS 只有「备案域名」或「境外服务器」两条路，
+    那时换 `docker/nginx.tls.conf`（compose 的 `NGINX_CONF` 切换），代码不用动
   - 配置差异：本地 `application-local.yml`（gitignore），云端走环境变量；`nginx.conf` 两边共用，只改 `root` 与 `proxy_pass`
 - 部署边界：**不做**前后端两个端口直连（会引入 CORS），一律「Nginx 同源托管 + 反代」，后端只出 JSON
 
