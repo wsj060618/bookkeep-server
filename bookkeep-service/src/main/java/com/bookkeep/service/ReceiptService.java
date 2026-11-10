@@ -37,6 +37,14 @@ public interface ReceiptService {
     /** 账本彻底删除时清掉票据记录与整本目录（文件删失败只记日志） */
     void purgeBookQuietly(Long bookId, String bookName);
 
+    /**
+     * 清理孤儿文件：磁盘上有、库里没有记录的图片（先落盘后插库，插库失败就会留下）。
+     *
+     * @param minAge 只清理最后修改时间早于此刻往前 minAge 的文件，避免删掉「正在上传、还没入库」的那张
+     * @return 删除的文件数
+     */
+    int purgeOrphanFiles(java.time.Duration minAge);
+
     /** 票据文件的落点（Controller 负责流式输出，Service 不碰 HttpServletResponse） */
     record ReceiptFile(Path path, String contentType, String filename) {
     }

@@ -162,6 +162,17 @@ public class ReceiptServiceImpl implements ReceiptService {
         storage.deleteBookDirQuietly(bookId, bookName);
     }
 
+    @Override
+    public int purgeOrphanFiles(java.time.Duration minAge) {
+        // 库里全部相对路径一次取回：磁盘上有、这里没有的就是孤儿
+        var keep = new java.util.HashSet<>(receiptMapper.selectAllStoredPaths());
+        int removed = storage.pruneOrphans(keep, minAge);
+        if (removed > 0) {
+            log.info("清理孤儿票据文件：{} 个（库里 {} 条记录）", removed, keep.size());
+        }
+        return removed;
+    }
+
     /* ---------- 内部 ---------- */
 
     private Transaction requireOwnedTransaction(Long transactionId, Long bookId) {

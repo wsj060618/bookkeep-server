@@ -116,8 +116,8 @@ public class ReceiptController {
                         .filename(file.filename(), StandardCharsets.UTF_8)
                         .build()
                         .toString())
-                .header("X-Content-Type-Options", "nosniff")
                 // 图片不大、链接可能 3 天过期；不设 public，避免中间缓存留存
+                // nosniff 由 Spring Security 的默认安全头统一输出，这里不要再写一遍（会变成两个同名头）
                 .cacheControl(CacheControl.maxAge(5, TimeUnit.MINUTES).cachePrivate())
                 .body(new FileSystemResource(file.path()));
     }

@@ -15,9 +15,13 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayInputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -55,6 +59,9 @@ class ReceiptExportApiTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     @Test
     @DisplayName("账本级导出：zip 内按 账本名_bookId/月份 分层，重名加 _2，manifest 行数对齐")
@@ -124,6 +131,33 @@ class ReceiptExportApiTest {
         Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
         assertEquals(2, entries.size(), "单笔导出 = manifest + 这一笔的 1 张图：" + entries.keySet());
         assertFalse(entries.keySet().stream().anyMatch(n -> n.endsWith("十月小票.png")), entries.keySet().toString());
+    }
+
+    @Test
+    @DisplayName("磁盘上缺了图片：跳过该文件，manifest 里标「文件缺失」，其余照常打包")
+    void missingFileIsSkippedAndMarked() throws Exception {
+        Fixture f = new Fixture("3班班费");
+        long txId = f.create("income", "收取班费", "100.00", "2026-09-05");
+        f.upload(txId, "还在的.png");
+        f.upload(txId, "会消失的.png");
+
+        // 从磁盘删掉其中一张，模拟「只恢复了数据库、没恢复票据卷」
+        List<String> stored = jdbcTemplate.queryForList(
+                "SELECT r.stored_path FROM transaction_receipt r "
+                        + "JOIN `transaction` t ON t.id = r.transaction_id WHERE t.book_id = ?",
+                String.class, f.bookId);
+        assertEquals(2, stored.size());
+        Path root = Paths.get("./target/test-receipts").toAbsolutePath().normalize();
+        Files.delete(root.resolve(stored.get(0)));
+
+        MvcResult result = download("/api/transactions/receipts/export", f.token);
+        Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
+
+        assertEquals(2, entries.size(), "manifest + 剩下那一张，实际：" + entries.keySet());
+        String manifest = new String(entries.get("manifest.csv"), StandardCharsets.UTF_8);
+        assertTrue(manifest.contains("文件缺失"), "manifest 要标出缺了哪个：" + manifest);
+        assertEquals(2, manifest.replace("\uFEFF", "").trim().split("\n").length - 1,
+                "缺文件的那行也要留在 manifest 里，方便人工核对");
     }
 
     @Test

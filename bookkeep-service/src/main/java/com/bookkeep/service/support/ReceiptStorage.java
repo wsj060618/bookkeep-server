@@ -14,6 +14,7 @@ import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -196,6 +197,68 @@ public class ReceiptStorage {
             });
         } catch (IOException | UncheckedIOException e) {
             log.warn("删除目录失败（忽略）：{}，原因：{}", dir, e.getMessage());
+        }
+    }
+
+    /**
+     * 清理孤儿文件：磁盘上有、库里没有对应记录的图片。
+     * <p>哪些情况会产生孤儿：上传时先写盘再插库，插库失败/回滚；手工删库；迁移时只拷了一半。
+     * <p><b>{@code minAge} 不能省</b>：正在上传的文件是「先落盘、后插库」，如果清理任务正好插在两者之间，
+     * 会把一张刚写好、还没入库的图删掉。所以只清理「最后修改时间早于 minAge」的文件。
+     *
+     * @param keepPaths 库里仍然有效的相对路径（正斜杠）
+     * @return 实际删除的文件数
+     */
+    public int pruneOrphans(Set<String> keepPaths, java.time.Duration minAge) {
+        if (!Files.isDirectory(root)) {
+            return 0;
+        }
+        long cutoff = System.currentTimeMillis() - minAge.toMillis();
+        int removed = 0;
+        try (var walk = Files.walk(root)) {
+            for (Path path : (Iterable<Path>) walk::iterator) {
+                if (!Files.isRegularFile(path)) {
+                    continue;
+                }
+                String relative = root.relativize(path).toString().replace('\\', '/');
+                if (keepPaths.contains(relative)) {
+                    continue;
+                }
+                try {
+                    if (Files.getLastModifiedTime(path).toMillis() > cutoff) {
+                        continue; // 可能是刚上传、还没入库的
+                    }
+                    Files.delete(path);
+                    removed++;
+                } catch (IOException e) {
+                    log.warn("删除孤儿票据失败（忽略）：{}，原因：{}", relative, e.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            log.warn("扫描票据目录失败：{}，原因：{}", root, e.getMessage());
+            return removed;
+        }
+        removeEmptyDirs(root);
+        return removed;
+    }
+
+    /** 顺手删掉空目录（账本删完、文件清完会剩下空壳） */
+    private void removeEmptyDirs(Path dir) {
+        try (var walk = Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder())
+                    .filter(Files::isDirectory)
+                    .filter(path -> !path.equals(root))
+                    .forEach(path -> {
+                        try (var children = Files.list(path)) {
+                            if (children.findAny().isEmpty()) {
+                                Files.delete(path);
+                            }
+                        } catch (IOException e) {
+                            log.debug("删除空目录失败（忽略）：{}", path);
+                        }
+                    });
+        } catch (IOException e) {
+            log.debug("清理空目录失败（忽略）：{}", e.getMessage());
         }
     }
 

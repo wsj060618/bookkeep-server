@@ -30,15 +30,11 @@ public interface TransactionReceiptMapper extends BaseMapper<TransactionReceipt>
     @Select("SELECT COUNT(*) FROM transaction_receipt WHERE transaction_id = #{transactionId}")
     long countByTransaction(@Param("transactionId") Long transactionId);
 
-    /**
-     * 某用户已占用多少字节（配额用）。
-     * <p>必须只算「未删除的流水 + 未删除的账本」：回收站里的账本仍占磁盘，
-     * 但用户已经看不见它们了，算进配额只会让人莫名其妙被拦住。
-     */
+    /** 某用户已占用多少字节（配额用） */
     @Select("SELECT COALESCE(SUM(r.size_bytes), 0) FROM transaction_receipt r "
             + "JOIN `transaction` t ON t.id = r.transaction_id "
             + "JOIN book b ON b.id = t.book_id "
-            + "WHERE b.user_id = #{userId} AND t.deleted = 0 AND b.deleted = 0")
+            + "WHERE b.user_id = #{userId}")
     long sumSizeByUser(@Param("userId") Long userId);
 
     /** 账本下的票据（导出用），带日期区间筛选；两端都可为 null（= 不限） */
@@ -70,4 +66,8 @@ public interface TransactionReceiptMapper extends BaseMapper<TransactionReceipt>
     @org.apache.ibatis.annotations.Delete("DELETE r FROM transaction_receipt r "
             + "JOIN `transaction` t ON t.id = r.transaction_id WHERE t.book_id = #{bookId}")
     int hardDeleteByBook(@Param("bookId") Long bookId);
+
+    /** 全部在库的相对路径（孤儿文件清理用：磁盘上有、库里没有的就是孤儿） */
+    @Select("SELECT stored_path FROM transaction_receipt")
+    List<String> selectAllStoredPaths();
 }

@@ -185,14 +185,23 @@ public class ReceiptExportService {
             String pathInZip = dir + name;
 
             Path file = storagePath(receipt.getStoredPath());
-            entries.add(new Entry(pathInZip, file));
+            // 磁盘上没这张图（只恢复了数据库、或手工删过文件）时不能直接拷贝：
+            // Files.copy 会抛异常，而响应早已开始写，客户端只会拿到一个「图是 0 字节」的坏包。
+            // 这里跳过文件本身，但 manifest 里留一行「文件缺失」，便于人工核对缺了什么。
+            boolean readable = Files.isReadable(file);
+            if (readable) {
+                entries.add(new Entry(pathInZip, file));
+            } else {
+                log.warn("导出票据时文件缺失，已跳过：receiptId={}, path={}", receipt.getId(), file);
+            }
+
             manifest.append(DATE.format(transaction.getTransDate())).append(',')
                     .append("income".equals(transaction.getType()) ? "收入" : "支出").append(',')
                     .append(csv(categoryNames.getOrDefault(transaction.getCategoryId(), "已删除分类"))).append(',')
                     .append(transaction.getAmount().toPlainString()).append(',')
                     .append(csv(transaction.getNote() == null ? "" : transaction.getNote())).append(',')
                     .append(csv(receipt.getTitle())).append(',')
-                    .append(csv(pathInZip)).append('\n');
+                    .append(csv(readable ? pathInZip : pathInZip + "（文件缺失，未打包）")).append('\n');
         }
         return new ExportPlan(filename, entries, manifest.toString());
     }
