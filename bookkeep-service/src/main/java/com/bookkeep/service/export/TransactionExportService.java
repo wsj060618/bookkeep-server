@@ -130,7 +130,7 @@ public class TransactionExportService {
         log.info("导出流水：bookId={}, 开始={}, 结束={}, 条数={}", bookId, startDate, endDate, rows.size());
         return new ExportPlan(
                 safeFileName(bookName) + "_" + suffix + ".csv",
-                bookName + " 班费收支明细",
+                bookName + " 收支明细",
                 bookName,
                 STAMP.format(LocalDateTime.now(ZONE)),
                 rangeText(startDate, endDate),

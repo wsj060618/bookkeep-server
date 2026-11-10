@@ -84,7 +84,7 @@ class ImportExportApiTest {
             assertEquals("收支明细", sheet.getSheetName());
             assertTrue(sheet.isColumnHidden(9), "图表数据列 J 应隐藏");
             assertTrue(sheet.isColumnHidden(10), "图表数据列 K 应隐藏");
-            assertEquals("班级账本 班费收支明细", sheet.getRow(0).getCell(0).getStringCellValue());
+            assertEquals("班级账本 收支明细", sheet.getRow(0).getCell(0).getStringCellValue());
             // 顶部三行汇总：收入 / 支出 / 结余（A:B 合并放标签，金额在 C 列）
             assertEquals("收入", sheet.getRow(1).getCell(0).getStringCellValue());
             assertEquals(1900.00, sheet.getRow(1).getCell(2).getNumericCellValue(), 0.001);
