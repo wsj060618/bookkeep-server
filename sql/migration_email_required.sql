@@ -3,6 +3,7 @@
 --    本项目的两个老账号（wsj060618、demo3ban）都没有邮箱，按定稿口径直接清理。
 --    执行前请先 mysqldump 备份（deploy/backup/before-email-*.sql）。
 USE bookkeep;
+SET NAMES utf8mb4;   -- 中文注释/数据必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
 
 -- 1) 先清子表再清父表，避免留下孤儿数据
 DELETE FROM `transaction`

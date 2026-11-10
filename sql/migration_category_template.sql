@@ -6,6 +6,7 @@
 -- ============================================================
 
 USE bookkeep;
+SET NAMES utf8mb4;   -- 中文注释/数据必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
 
 -- 1) 账本记录「当前分类来自哪套模板」：NULL = 内置班级模板（id=0 不入库）
 ALTER TABLE book

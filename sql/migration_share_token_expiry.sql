@@ -1,6 +1,7 @@
 -- 公示链接改成「3 天有效、每次分享重新生成」（只跑一次；新库用 schema.sql 即可）。
 -- 不跑这一列：Book 实体多一个字段，所有 book 查询直接报 Unknown column 'share_token_expires_at'。
 USE bookkeep;
+SET NAMES utf8mb4;   -- 中文注释/数据必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
 
 ALTER TABLE book
     ADD COLUMN share_token_expires_at DATETIME NULL

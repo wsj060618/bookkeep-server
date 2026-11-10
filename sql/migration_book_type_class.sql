@@ -16,6 +16,7 @@
 --      需要班级模板的话，重新注册一个账号即可（或手工删掉旧分类后重新建）
 -- ------------------------------------------------------------
 USE bookkeep;
+SET NAMES utf8mb4;   -- 中文注释/数据必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
 
 ALTER TABLE book
   MODIFY type VARCHAR(10) NOT NULL DEFAULT 'class' COMMENT '账本类型，当前固定 class 班级';

@@ -2,6 +2,8 @@
 --   * 没有 deleted 列：票据随流水的生命周期走（流水软删时票据保留，与回收站语义一致；
 --     账本/账号被物理删除时才连记录带文件一起清）
 --   * stored_path 是相对 receipt.dir 的路径，唯一事实来源；目录名只是给人看的
+SET NAMES utf8mb4;   -- 中文注释必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
+
 CREATE TABLE IF NOT EXISTS transaction_receipt (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   transaction_id BIGINT NOT NULL COMMENT '归属流水 transaction.id',

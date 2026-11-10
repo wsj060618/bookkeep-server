@@ -16,6 +16,7 @@ CREATE DATABASE IF NOT EXISTS bookkeep DEFAULT CHARACTER SET utf8mb4 COLLATE utf
 
 -- 2) 切到 bookkeep 库，后续建表都在这里
 USE bookkeep;
+SET NAMES utf8mb4;   -- 中文注释/数据必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
 
 -- ------------------------------------------------------------
 -- 3) user 用户表
@@ -73,7 +74,7 @@ CREATE TABLE book (
   user_id     BIGINT NOT NULL COMMENT '归属用户 user.id',
   name        VARCHAR(50) NOT NULL COMMENT '账本名',
   type        VARCHAR(10) NOT NULL DEFAULT 'class' COMMENT '账本类型，当前固定 class 班级',
-  category_template_id BIGINT NULL COMMENT '当前分类来自哪套自定义模板；NULL = 内置「班级班费」模板（id=0 不入库）',
+  category_template_id BIGINT NULL COMMENT '当前分类来自哪套模板；NULL = 老数据（历史版本里默认模板还没有行）',
   semester_end DATE NULL COMMENT '学期截止日期（可空）；只用于展示与提示，不影响任何统计口径',
   archived    TINYINT NOT NULL DEFAULT 0 COMMENT '学期归档：1 = 只读（仍可改名/改截止日期/取消归档/导出/公示）',
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

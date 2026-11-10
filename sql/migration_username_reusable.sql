@@ -14,6 +14,7 @@
 -- ============================================================
 
 USE bookkeep;
+SET NAMES utf8mb4;   -- 中文注释/数据必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
 
 -- ---------- 1) 库级默认排序规则 ----------
 -- general_ci 是 MySQL 5.x 时代的老规则：排序不符合 Unicode，emoji/生僻字比较不可靠。

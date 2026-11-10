@@ -1,6 +1,7 @@
 -- 改成「邮箱登录 + 用户名可改 + 去掉昵称」（只跑一次；新库用 schema.sql）。
 -- ⚠️ 执行前先 mysqldump 备份（deploy/backup/before-email-login-*.sql）。
 USE bookkeep;
+SET NAMES utf8mb4;   -- 中文注释/数据必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
 
 -- 1) 邮箱成为登录凭据：必须唯一（只约束未删除行，注销后释放，和 username 的套路一致）
 --    加之前确认没有重复：SELECT email, COUNT(*) FROM user WHERE deleted=0 GROUP BY email HAVING COUNT(*) > 1;

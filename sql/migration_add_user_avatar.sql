@@ -6,6 +6,7 @@
 -- ============================================================
 
 USE bookkeep;
+SET NAMES utf8mb4;   -- 中文注释/数据必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
 
 ALTER TABLE `user`
   ADD COLUMN avatar VARCHAR(500) NULL COMMENT '头像 URL，可空' AFTER email;

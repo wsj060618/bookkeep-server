@@ -13,6 +13,7 @@
 -- ============================================================
 
 USE bookkeep;
+SET NAMES utf8mb4;   -- 中文注释/数据必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
 
 CREATE TABLE IF NOT EXISTS share_link (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',

@@ -8,6 +8,7 @@
 -- ============================================================
 
 USE bookkeep;
+SET NAMES utf8mb4;   -- 中文注释/数据必须按 UTF-8 解释，否则会双重编码（见 migration_fix_mojibake_comments.sql）
 
 ALTER TABLE book
     ADD COLUMN deleted_at DATETIME NULL
