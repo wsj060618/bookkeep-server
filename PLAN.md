@@ -641,6 +641,13 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 38. **Docker 里后端必须监听 0.0.0.0**：默认 `server.address=127.0.0.1` 只适合 Windows 直跑；
     compose 里用 `SERVER_ADDRESS=0.0.0.0` 让 nginx 容器能访问，同时**绝不能 publish 8080**，
     否则回环隔离就白做了
+39. **POI 图表：数据放隐藏区会整条序列消失**。`<c:plotVisOnly val="true"/>`（POI 默认）表示
+    「只画可见单元格」，数据源一旦放在隐藏 sheet **或隐藏列**里，Excel/WPS 直接丢掉整条序列——
+    表现是只剩坐标轴和图例、柱子全是空的，而且不报错。必须 `chart.setPlotOnlyVisibleCells(false)`。
+    同一个坑还有三处：`addSeries()` 不给序列名会写空的 `<c:tx/>`（同样被判无效）；
+    柱状图缺 `<c:grouping>`（POI 的 XDDF 工厂不写）；环形图不写 `<c:holeSize>` 会渲染成实心饼。
+40. **`XSSFFont.setFontHeight(short)` 的单位是 1/20 磅**：想要 8 磅要传 160，写 16 就成了 0.8 磅——
+    标题在 Excel 里缩成一条虚线，肉眼几乎看不见。要用 `setFontHeightInPoints((short) 14)` 这种带单位的写法
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
@@ -746,9 +753,10 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 
 **导出**：`GET /api/transactions/export?format=csv|xlsx`（默认 csv）。
 `format=xlsx` 是真正的 Excel（Apache POI 5.4.1），版式对齐真实班费表：可见 sheet「收支明细」
-顶部是 `收入 / 支出 / 结余` 三行彩色汇总 + 柱状图（三色）+ 环形图（收支占比），
-第 8 行是单行表头 `序号 | 日期 | 摘要 | 收入 | 支出 | 班费结余 | 备注`，第 9 行起是明细；
-图表数据放在隐藏 sheet「统计」。**刻意不做数量 / 单价 / 人均缴纳**：系统只存金额，编造数量会误导看表的人。
+顶部左侧是 `收入 / 支出 / 结余` 三行彩色汇总（A:B 标签 + C 金额），右侧 D..G 四列里
+**柱状图与环形图并排一行、各占一半宽度**（竖柱三色：收入蓝 / 支出绿 / 结余灰；环形只比收支），
+整个头部与表格同宽、左对齐；第 13 行是单行表头 `序号 | 日期 | 摘要 | 收入 | 支出 | 班费结余 | 备注`，第 14 行起是明细。
+图表数据放在**同表隐藏的 J/K 列**（不能放隐藏 sheet：Excel 会丢数据源）。**刻意不做数量 / 单价 / 人均缴纳**：系统只存金额，编造数量会误导看表的人。
 文件名 `{账本名}_全部` / `{账本名}_部分_{起}-{止}`。两种格式共用 `TransactionExportService.prepare()`，
 口径不会分叉；仍是**流式**输出（`StreamingResponseBody`，校验在写响应之前完成，失败仍返回 JSON 信封）。
 

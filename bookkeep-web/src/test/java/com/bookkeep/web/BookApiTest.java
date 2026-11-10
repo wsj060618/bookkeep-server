@@ -13,9 +13,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import static com.bookkeep.web.support.AuthHelper.json;
 import static com.bookkeep.web.support.AuthHelper.nextUsername;
 import static com.bookkeep.web.support.AuthHelper.registerAndLogin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -37,14 +39,14 @@ class BookApiTest {
     private ObjectMapper objectMapper;
 
     @Test
-    @DisplayName("改名成功：登录响应里的账本名变了，已有的 shareToken 不变（旧链接不失效）")
+    @DisplayName("改名成功：登录响应里的账本名变了，已有的公示链接不失效")
     void renameIsReflectedInNextLogin() throws Exception {
         String username = nextUsername("book");
         String token = registerAndLogin(mockMvc, objectMapper, username);
 
         JsonNode before = loginData(username).path("books").get(0);
         long bookId = before.path("id").asLong();
-        // 先真的分享一次（链接是点分享才生成的），再改名，验证 token 不被改名覆盖
+        // 先真的分享一次（链接是点分享才生成的），再改名，验证链接不被改名作废
         String shareToken = AuthHelper.shareToken(mockMvc, objectMapper, username);
         assertEquals("班级账本", before.path("name").asText());
 
@@ -56,12 +58,13 @@ class BookApiTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.id").value(bookId))
                 .andExpect(jsonPath("$.data.name").value("计科2301班费"))
-                .andExpect(jsonPath("$.data.current").value(true))
-                .andExpect(jsonPath("$.data.shareToken").value(shareToken));
+                .andExpect(jsonPath("$.data.current").value(true));
 
         JsonNode after = loginData(username).path("books").get(0);
         assertEquals("计科2301班费", after.path("name").asText());
-        assertEquals(shareToken, after.path("shareToken").asText(), "改名不能顺带换掉公示 token");
+        // 改名不影响公示链接：旧 token 仍能打开公示页
+        assertEquals(200, json(mockMvc.perform(get("/api/public/report/" + shareToken)).andReturn(), objectMapper)
+                .path("code").asInt(), "改名不能作废公示链接");
     }
 
     @Test

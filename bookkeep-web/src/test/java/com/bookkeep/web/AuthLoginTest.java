@@ -75,9 +75,9 @@ class AuthLoginTest {
                 .andExpect(jsonPath("$.data.books.length()").value(1))
                 .andExpect(jsonPath("$.data.books[0].name").value("我的账本"))
                 .andExpect(jsonPath("$.data.books[0].type").value("class"))
-                // 公示链接改成「点分享才生成」：注册后应是没有链接的状态，有效期字段同为 null
-                .andExpect(jsonPath("$.data.books[0].shareToken").value(nullValue()))
-                .andExpect(jsonPath("$.data.books[0].shareTokenExpiresAt").value(nullValue()))
+                // 公示链接已迁到 share_link：BookResp 里不再有 shareToken 字段
+                .andExpect(jsonPath("$.data.books[0].shareToken").doesNotExist())
+                .andExpect(jsonPath("$.data.books[0].shareTokenExpiresAt").doesNotExist())
                 .andExpect(jsonPath("$.data.books[0].current").value(true))
                 .andReturn();
 

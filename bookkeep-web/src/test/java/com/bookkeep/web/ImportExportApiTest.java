@@ -78,30 +78,43 @@ class ImportExportApiTest {
         byte[] bytes = result.getResponse().getContentAsByteArray();
         assertTrue(bytes.length > 0);
         try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(bytes))) {
-            // 只留一张可见表，图表数据在隐藏的「统计」
-            assertEquals(2, workbook.getNumberOfSheets());
-            assertTrue(workbook.isSheetHidden(1), "图表数据源 sheet 应隐藏");
+            // 只有一张表：图表数据在同表的隐藏 J/K 列（隐藏 sheet 会让 Excel 画不出柱子）
+            assertEquals(1, workbook.getNumberOfSheets());
             var sheet = workbook.getSheetAt(0);
             assertEquals("收支明细", sheet.getSheetName());
+            assertTrue(sheet.isColumnHidden(9), "图表数据列 J 应隐藏");
+            assertTrue(sheet.isColumnHidden(10), "图表数据列 K 应隐藏");
             assertEquals("班级账本 班费收支明细", sheet.getRow(0).getCell(0).getStringCellValue());
-            // 顶部三行汇总：收入 / 支出 / 结余（金额在 D 列）
+            // 顶部三行汇总：收入 / 支出 / 结余（A:B 合并放标签，金额在 C 列）
             assertEquals("收入", sheet.getRow(1).getCell(0).getStringCellValue());
             assertEquals(1900.00, sheet.getRow(1).getCell(2).getNumericCellValue(), 0.001);
             assertEquals("支出", sheet.getRow(3).getCell(0).getStringCellValue());
             assertEquals(620.00, sheet.getRow(3).getCell(2).getNumericCellValue(), 0.001);
             assertEquals("结余", sheet.getRow(5).getCell(0).getStringCellValue());
             assertEquals(1280.00, sheet.getRow(5).getCell(2).getNumericCellValue(), 0.001);
-            // 单行表头（第 17 行）：序号 日期 摘要 收入 支出 班费结余 备注
+            // 单行表头（第 13 行）：序号 日期 摘要 收入 支出 班费结余 备注
             String[] titles = {"序号", "日期", "摘要", "收入", "支出", "班费结余", "备注"};
             for (int i = 0; i < titles.length; i++) {
-                assertEquals(titles[i], sheet.getRow(16).getCell(i).getStringCellValue());
+                assertEquals(titles[i], sheet.getRow(12).getCell(i).getStringCellValue());
             }
-            // 明细从第 18 行（0 基 17）开始：收入记在「收入」列，支出记在「支出」列
-            assertEquals(1, (int) sheet.getRow(17).getCell(0).getNumericCellValue());
-            assertEquals("收取班费", sheet.getRow(17).getCell(2).getStringCellValue());
-            assertEquals(1900.00, sheet.getRow(17).getCell(3).getNumericCellValue(), 0.001);
-            assertEquals(1900.00, sheet.getRow(17).getCell(5).getNumericCellValue(), 0.001);
-            assertEquals(620.00, sheet.getRow(18).getCell(4).getNumericCellValue(), 0.001);
+            // 明细从第 14 行（0 基 13）开始：收入记在「收入」列，支出记在「支出」列
+            assertEquals(1, (int) sheet.getRow(13).getCell(0).getNumericCellValue());
+            assertEquals("收取班费", sheet.getRow(13).getCell(2).getStringCellValue());
+            assertEquals(1900.00, sheet.getRow(13).getCell(3).getNumericCellValue(), 0.001);
+            assertEquals(1900.00, sheet.getRow(13).getCell(5).getNumericCellValue(), 0.001);
+            assertEquals(620.00, sheet.getRow(14).getCell(4).getNumericCellValue(), 0.001);
+
+            // 两张图并排：柱状图（3 根竖柱）+ 环形图，且必须关掉 plotVisOnly，
+            // 否则 Excel 会丢掉隐藏 J/K 列里的数据、整条序列消失（只剩坐标轴）
+            var drawing = ((org.apache.poi.xssf.usermodel.XSSFSheet) sheet).getDrawingPatriarch();
+            assertEquals(2, drawing.getCharts().size());
+            var barChart = drawing.getCharts().get(0).getCTChart();
+            assertEquals(1, barChart.getPlotArea().getBarChartArray(0).sizeOfSerArray());
+            assertTrue(barChart.getPlotArea().getBarChartArray(0).getSerArray(0).isSetTx(), "序列名不能为空");
+            assertEquals(Boolean.FALSE, barChart.getPlotVisOnly().getVal());
+            var doughnut = drawing.getCharts().get(1).getCTChart().getPlotArea().getDoughnutChartArray(0);
+            assertEquals(1, doughnut.sizeOfSerArray());
+            assertEquals(50, (short) doughnut.getHoleSize().getVal());
         }
     }
 
