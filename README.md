@@ -18,11 +18,19 @@
 
 ## 技术栈
 
-| 层 | 选型 |
-|---|---|
-| 后端 | Java 17、Spring Boot 3.5、MyBatis-Plus、MySQL 8.4 |
-| 前端 | Vue 3 + TypeScript + Element Plus + Vite |
-| 部署 | Nginx + Docker Compose（纯 HTTP，裸 IP 访问） |
+![Java 17](https://img.shields.io/badge/Java-17-ED8B00?logo=openjdk&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5-6DB33F?logo=springboot&logoColor=white)
+![MyBatis-Plus](https://img.shields.io/badge/MyBatis--Plus-3.5-1F6FEB)
+![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
+![Maven](https://img.shields.io/badge/Maven-3.9-C71A36?logo=apachemaven&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![Nginx](https://img.shields.io/badge/Nginx-1.27-009639?logo=nginx&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+前端（另一个仓库）：![Vue 3](https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
+![Element Plus](https://img.shields.io/badge/Element_Plus-2-409EFF)
 
 ## 项目结构
 
@@ -148,3 +156,7 @@ npm run build
 | [docs/security.md](docs/security.md) | 安全审计与加固记录 |
 | [PLAN.md](PLAN.md) | 设计文档：需求、数据模型、踩坑清单、已知缺口 |
 | [AGENTS.md](AGENTS.md) | 维护约定：模块边界、当前状态、测试与坑 |
+
+## License
+
+MIT © 2026 wsj — 见 [LICENSE](LICENSE)。
