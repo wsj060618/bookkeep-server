@@ -83,25 +83,25 @@ class ImportExportApiTest {
             assertTrue(workbook.isSheetHidden(1), "图表数据源 sheet 应隐藏");
             var sheet = workbook.getSheetAt(0);
             assertEquals("收支明细", sheet.getSheetName());
-            assertEquals("班级账本 班费收支明细", sheet.getRow(0).getCell(1).getStringCellValue());
+            assertEquals("班级账本 班费收支明细", sheet.getRow(0).getCell(0).getStringCellValue());
             // 顶部三行汇总：收入 / 支出 / 结余（金额在 D 列）
-            assertEquals("收入", sheet.getRow(1).getCell(1).getStringCellValue());
-            assertEquals(1900.00, sheet.getRow(1).getCell(3).getNumericCellValue(), 0.001);
-            assertEquals("支出", sheet.getRow(3).getCell(1).getStringCellValue());
-            assertEquals(620.00, sheet.getRow(3).getCell(3).getNumericCellValue(), 0.001);
-            assertEquals("结余", sheet.getRow(5).getCell(1).getStringCellValue());
-            assertEquals(1280.00, sheet.getRow(5).getCell(3).getNumericCellValue(), 0.001);
+            assertEquals("收入", sheet.getRow(1).getCell(0).getStringCellValue());
+            assertEquals(1900.00, sheet.getRow(1).getCell(2).getNumericCellValue(), 0.001);
+            assertEquals("支出", sheet.getRow(3).getCell(0).getStringCellValue());
+            assertEquals(620.00, sheet.getRow(3).getCell(2).getNumericCellValue(), 0.001);
+            assertEquals("结余", sheet.getRow(5).getCell(0).getStringCellValue());
+            assertEquals(1280.00, sheet.getRow(5).getCell(2).getNumericCellValue(), 0.001);
             // 单行表头：序号 日期 摘要 收入 支出 班费结余 备注（没有数量/单价这类系统里没有的列）
             String[] titles = {"序号", "日期", "摘要", "收入", "支出", "班费结余", "备注"};
             for (int i = 0; i < titles.length; i++) {
-                assertEquals(titles[i], sheet.getRow(7).getCell(1 + i).getStringCellValue());
+                assertEquals(titles[i], sheet.getRow(7).getCell(i).getStringCellValue());
             }
             // 明细从第 9 行（0 基 8）开始：收入记在「收入」列，支出记在「支出」列
-            assertEquals(1, (int) sheet.getRow(8).getCell(1).getNumericCellValue());
-            assertEquals("收取班费", sheet.getRow(8).getCell(3).getStringCellValue());
-            assertEquals(1900.00, sheet.getRow(8).getCell(4).getNumericCellValue(), 0.001);
-            assertEquals(1900.00, sheet.getRow(8).getCell(6).getNumericCellValue(), 0.001);
-            assertEquals(620.00, sheet.getRow(9).getCell(5).getNumericCellValue(), 0.001);
+            assertEquals(1, (int) sheet.getRow(8).getCell(0).getNumericCellValue());
+            assertEquals("收取班费", sheet.getRow(8).getCell(2).getStringCellValue());
+            assertEquals(1900.00, sheet.getRow(8).getCell(3).getNumericCellValue(), 0.001);
+            assertEquals(1900.00, sheet.getRow(8).getCell(5).getNumericCellValue(), 0.001);
+            assertEquals(620.00, sheet.getRow(9).getCell(4).getNumericCellValue(), 0.001);
         }
     }
 

@@ -68,13 +68,14 @@ public class TransactionExcelExportService {
     private static final int HEADER_ROW = 7;
     private static final int FIRST_DATA_ROW = 8;
 
-    private static final int COL_SEQ = 1;        // B
-    private static final int COL_DATE = 2;       // C
-    private static final int COL_SUMMARY = 3;    // D
-    private static final int COL_INCOME = 4;     // E
-    private static final int COL_EXPENSE = 5;    // F
-    private static final int COL_BALANCE = 6;    // G
-    private static final int COL_NOTE = 7;       // H
+    // 从 A 列开始（贴左），表头与顶部汇总用同一组列，宽度自然对齐
+    private static final int COL_SEQ = 0;        // A
+    private static final int COL_DATE = 1;       // B
+    private static final int COL_SUMMARY = 2;    // C
+    private static final int COL_INCOME = 3;     // D
+    private static final int COL_EXPENSE = 4;    // E
+    private static final int COL_BALANCE = 5;    // F
+    private static final int COL_NOTE = 6;       // G
 
     /** 与截图一致的三色：收入蓝 / 支出绿 / 结余灰 */
     private static final byte[] BLUE = {0x5B, (byte) 0x9B, (byte) 0xD5};
@@ -109,17 +110,17 @@ public class TransactionExcelExportService {
     private void writeSummary(XSSFSheet sheet, ExportPlan plan, Styles styles) {
         XSSFRow title = sheet.createRow(0);
         cell(title, COL_SEQ, plan.title(), styles.title);
-        for (int c = COL_SEQ + 1; c <= COL_NOTE + 4; c++) {
+        for (int c = COL_SEQ + 1; c <= COL_NOTE; c++) {
             title.createCell(c).setCellStyle(styles.title);
         }
-        sheet.addMergedRegion(new CellRangeAddress(0, 0, COL_SEQ, COL_NOTE + 4));
+        sheet.addMergedRegion(new CellRangeAddress(0, 0, COL_SEQ, COL_NOTE));
 
         summaryRow(sheet, 1, "收入", plan.totalIncome(), styles);
         summaryRow(sheet, 3, "支出", plan.totalExpense(), styles);
         summaryRow(sheet, 5, "结余", plan.closing(), styles);
 
-        sheet.setColumnWidth(COL_SEQ, 6 * 256);
-        sheet.setColumnWidth(COL_DATE, 12 * 256);
+        sheet.setColumnWidth(COL_SEQ, 7 * 256);
+        sheet.setColumnWidth(COL_DATE, 13 * 256);
         sheet.setColumnWidth(COL_SUMMARY, 30 * 256);
         sheet.setColumnWidth(COL_INCOME, 12 * 256);
         sheet.setColumnWidth(COL_EXPENSE, 12 * 256);
@@ -127,13 +128,13 @@ public class TransactionExcelExportService {
         sheet.setColumnWidth(COL_NOTE, 28 * 256);
     }
 
+    /** 顶部三行：标签占 A:B（与表格前两列同宽），金额放 C，右边就是图表区 */
     private void summaryRow(XSSFSheet sheet, int rowIndex, String label, BigDecimal value, Styles styles) {
         XSSFRow row = sheet.createRow(rowIndex);
-        // 标签横跨 B:C（蓝色底白字），金额放 D（浅灰底）
         cell(row, COL_SEQ, label, styles.summaryLabel);
         cell(row, COL_SEQ + 1, null, styles.summaryLabel);
         sheet.addMergedRegion(new CellRangeAddress(rowIndex, rowIndex, COL_SEQ, COL_SEQ + 1));
-        moneyCell(row, COL_SEQ + 2, value, styles.summaryMoney);
+        moneyCell(row, COL_SUMMARY, value, styles.summaryMoney);
     }
 
     /* ---------- 单行表头 ---------- */
@@ -197,7 +198,7 @@ public class TransactionExcelExportService {
 
     private void drawBarChart(XSSFSheet target, XSSFSheet dataSheet, int lastDataRow) {
         XSSFDrawing drawing = target.createDrawingPatriarch();
-        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, 4, 1, 9, 7);
+        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, 3, 1, 9, 7);
         XSSFChart chart = drawing.createChart(anchor);
         chart.setTitleText("收支对比");
         chart.setTitleOverlay(false);
@@ -226,7 +227,7 @@ public class TransactionExcelExportService {
 
     private void drawDoughnutChart(XSSFSheet target, XSSFSheet dataSheet, int lastDataRow) {
         XSSFDrawing drawing = target.createDrawingPatriarch();
-        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, 9, 1, 14, 7);
+        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, 9, 1, 15, 7);
         XSSFChart chart = drawing.createChart(anchor);
         chart.setTitleText("收支占比");
         chart.setTitleOverlay(false);
