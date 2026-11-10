@@ -557,7 +557,10 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 - **找回密码（邮箱一次性 token）**：注册时邮箱必填（也是登录凭据），忘记密码只填邮箱，
   邮件里给 15 分钟有效的一次性链接；重置成功即 `token_version + 1`，旧会话全部失效。
   **命令行的 `--reset-password` 已删除**——邮箱是唯一的重置通道，SMTP 必须配好（`deploy/env.ps1` 的 `MAIL_*`）
-- **云端（W4 周末）**：手机 4G 打开 `https://` 地址能登录、能记一笔；`docker compose ps` 三个容器 healthy；限流生效（连错 6 次被拒）；取证材料七项齐全
+- **分类模板 → 账本同步**：在分类页给模板加一条 → 回「记一笔」下拉能选到；改模板里的名字 → 流水里的分类名跟着变、
+  原流水还在；删一条没有流水的分类 → 账本的分类一起消失；删一条**有流水**的分类 → 提示「…下还有 N 笔流水，不能从模板删掉」，
+  模板和账本都没变（`CategoryTemplateSyncApiTest` 5 例钉住）
+- **云端（W4 周末）**：手机 4G 打开 `http://<IP>/` 地址能登录、能记一笔（无 HTTPS，见 §1）；`docker compose ps` 三个容器 healthy；限流生效（连错 6 次被拒）；取证材料七项齐全
 - **安全/运维（第 4–5 周）**：邮箱重置后**新密码能登录、旧 token 立刻 401、链接用过即废**；`docker compose down && up` 后数据仍在（卷挂载正确）；备份恢复演练过一次
 - **联调（每模块一次，§6.2）**：逐条核对 §5.0 五项——分页是 `{total, list}`、金额是字符串、日期是 `yyyy-MM-dd`、401 清 token 跳登录、列表直接带名称
 
@@ -647,6 +650,14 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
     柱状图缺 `<c:grouping>`（POI 的 XDDF 工厂不写）；环形图不写 `<c:holeSize>` 会渲染成实心饼。
 40. **`XSSFFont.setFontHeight(short)` 的单位是 1/20 磅**：想要 8 磅要传 160，写 16 就成了 0.8 磅——
     标题在 Excel 里缩成一条虚线，肉眼几乎看不见。要用 `setFontHeightInPoints((short) 14)` 这种带单位的写法
+41. **模板条目必须有 id 才能「改名」**：账本分类靠 `category.template_item_id` 认亲。如果保存模板时
+    删了重插（id 变化），所有账本分类立刻变成孤儿，下一次同步会重复插入同名分类；改名也会退化成
+    「删旧 + 建新」，一碰到流水就被拦下，用户永远改不动名字。所以 `PUT /category-templates/{id}`
+    按 id 增量 merge，前端必须把条目 id 原样带回（`TemplateItemInput.id`）。
+42. **`@Transactional` 的集成测试看不到「回滚后」的状态**：测试自己也跑在一个事务里，服务层抛异常只会
+    把当前事务标成 rollback-only，**本事务内后续查询仍能看到已执行的那部分改动**。所以「模板保存失败后
+    模板条目没少」这种断言不能直接写在 `@Transactional` 测试里（会假失败），要断言业务可见的部分
+    （分类还在、流水还在、响应 code=400 + 提示文案），回滚本身交给 Spring 的契约。
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
