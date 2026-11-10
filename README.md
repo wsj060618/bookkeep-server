@@ -1,92 +1,44 @@
-# 公网部署（Docker Compose）
+# bookkeep
 
-目标：一台试用期服务器上跑 `mysql + app + nginx`，只暴露 80/443，HTTPS 访问。
-本地开发仍然用 `deploy/` 的 Windows 直跑方案，**不需要装 Docker**。
+班级班费记账系统：Spring Boot 3.5 + Vue 3 + MySQL 8。四个模块的 Maven 后端 + 独立的前端仓库。
 
-## 0. 前置
+## 文档
 
-- 服务器：2C2G 起，Ubuntu 22.04/24.04，Docker + compose 插件
-- 域名：A 记录指向服务器 IP（没有域名可先用自签证书 + IP，但手机浏览器会警告）
-- 安全组/防火墙：只放 22、80、443；**不要放 3306 和 8080**
+| 文档 | 内容 |
+|---|---|
+| [docs/部署文档.md](docs/部署文档.md) | 云端部署（Docker Compose）、备份恢复、连库、排错 |
+| [docs/接口文档.md](docs/接口文档.md) | 前端对接用的接口说明（请求/响应/错误码） |
+| [docs/security.md](docs/security.md) | 安全审计与加固记录 |
+| [PLAN.md](PLAN.md) | 设计文档：需求、接口契约、踩坑清单、已知缺口 |
+| [AGENTS.md](AGENTS.md) | 给维护者/agent 的约定：当前状态、模块边界、测试与坑 |
 
-## 1. 构建产物（在本地或 CI）
+## 目录
+
+```
+bookkeep-common   Result / 异常 / JWT / SecurityUtil
+bookkeep-model    实体与 DTO
+bookkeep-service  mapper + 业务实现（统计口径、导出、导入、票据）
+bookkeep-web      启动类 + controller + 安全配置 + 集成测试
+sql/              schema.sql（全量）与 migration_*.sql（一次性变更）
+docker/           Dockerfile、compose、nginx 配置
+http/             IDEA HTTP Client 手工验收脚本
+deploy/           本机 Windows 部署脚本（gitignored，见 deploy/README.md）
+```
+
+## 本地运行
+
+需要 JDK 17 + Maven + MySQL 8.4（库名 `bookkeep`，utf8mb4）。
 
 ```powershell
-# 后端
-mvn -pl bookkeep-web -am -DskipTests package        # → bookkeep-web/target/bookkeep.jar
-# 前端（另一个仓库）
-cd D:\coding\bookkeep-web ; npm run build           # → dist
+$env:DB_USER="root"; $env:DB_PWD="你的密码"
+mvn -pl bookkeep-web -am clean test      # 跑测试（需要 DB_USER/DB_PWD）
+mvn -pl bookkeep-web spring-boot:run     # 开发运行
 ```
 
-把仓库和前端 `dist` 一起传到服务器（或 `FRONTEND_DIST` 指到服务器上的前端目录）。
+数据库初始化：`mysql -uroot -p --default-character-set=utf8mb4 -e "source sql/schema.sql"`。
+已存在的库按需执行 `sql/migration_*.sql`，执行时**必须**带 `--default-character-set=utf8mb4`。
 
-## 2. 配置
+## 检查门槛
 
-```bash
-cp docker/.env.example docker/.env
-vim docker/.env          # 填 MYSQL_ROOT_PASSWORD / DB_PWD / JWT_SECRET / APP_BASE_URL / MAIL_*
-```
-
-- `JWT_SECRET` 必须 ≥32 字符；prod profile 下若仍是仓库默认值，应用**拒绝启动**
-- `APP_BASE_URL` 必须是公网 HTTPS 地址，否则找回密码邮件里的链接点不开
-- `MAIL_FROM` 只填纯地址（必须与 `MAIL_USERNAME` 一致）；`MAIL_FROM_NAME` 控制收件人看到的发件人名字，默认项目名「bookkeep」
-
-## 3. 证书
-
-```bash
-mkdir -p docker/certs
-# Let's Encrypt（临时占用 80，签发后删掉 standalone 容器）
-docker run --rm -p 80:80 -v $PWD/docker/certs:/etc/letsencrypt/live/your.domain \
-  certbot/certbot certonly --standalone -d your.domain --agree-tos -m you@example.com
-# 把 live/your.domain/ 下的 fullchain.pem、privkey.pem 放到 docker/certs/
-```
-
-或直接用 Cloudflare Origin Certificate（同样放到 `docker/certs/`）。
-
-## 4. 启动
-
-```bash
-cd docker
-docker compose up -d --build
-docker compose ps                    # 三个服务都应 healthy / running
-curl -I https://your.domain/         # 200 + HSTS/CSP 等安全头
-```
-
-首次启动、`db_data` 为空时，MySQL 会自动执行 `sql/schema.sql` 建库建表。
-**已有数据的库**不要靠这个：手动导入 dump，或依次跑 `sql/migration_*.sql`。
-
-## 5. 日常运维
-
-```bash
-docker compose logs -f app           # 应用日志
-docker compose exec mysql sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --default-character-set=utf8mb4 bookkeep' > backup_$(date +%F).sql
-docker compose restart app           # 改 env 后重启
-docker compose down                  # 停（数据卷保留）
-```
-
-**备份恢复演练**是 W4 验收项：dump → 新建库导入 → 核对行数与页面数据。
-票据图片在命名卷 `receipts_data` 里，**必须单独备份**，否则恢复后页面有记录、图全裂：
-
-```bash
-docker compose exec app tar czf - -C /app/data receipts > receipts_$(date +%F).tgz   # 备份
-docker compose cp receipts_2026-11-10.tgz app:/tmp/ && \
-docker compose exec app tar xzf /tmp/receipts_2026-11-10.tgz -C /app/data            # 恢复
-```
-
-## 6. 安全清单（上线前逐项打勾）
-
-- [ ] `DB_USER` 不是 root（compose 已默认建 `bookkeep` 专用账号，只授权本库）
-- [ ] 3306 / 8080 没有 publish；`docker compose ps` 里看不到对外端口
-- [ ] `JWT_SECRET` 随机且 ≥32 字符（prod 启动自检会拦默认值）
-- [ ] 全站 HTTPS，HTTP 自动 301；HSTS 已开启
-- [ ] 登录/注册限流生效：连续输错 5 次被拒；单 IP 每分钟 30 次（`application-prod.yml`）
-- [ ] Nginx 透传 `X-Real-IP`（限流按真实 IP 算，否则形同虚设）
-- [ ] 邮箱找回密码配置了 `MAIL_*` 并实测收到一封
-- [ ] 备份能恢复到新库
-- [ ] 服务器只开 22/80/443
-
-## 7. 已知限制
-
-- 限流是**单实例内存**计数：多副本部署会各算各的（本项目单机，不用考虑）
-- 模板文件目录（§10.7 实现后）需要额外挂卷，否则容器重建会丢
-- 试用期结束前把备份拉回本地，服务器到期数据会消失
+- 后端：`mvn -pl bookkeep-web -am clean test`（**必须 clean**：增量编译会掩盖符号错误）
+- 前端：`npm run test` + `npm run build`
