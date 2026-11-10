@@ -7,9 +7,11 @@ import com.bookkeep.model.dto.req.TransactionQuery;
 import com.bookkeep.model.dto.req.TransactionReq;
 import com.bookkeep.model.dto.resp.ImportResultResp;
 import com.bookkeep.model.dto.resp.TransactionResp;
+import com.bookkeep.model.dto.resp.ZipImportResp;
 import com.bookkeep.service.TransactionService;
 import com.bookkeep.service.export.TransactionExcelExportService;
 import com.bookkeep.service.export.TransactionExportService;
+import com.bookkeep.service.imports.ReceiptZipImportService;
 import com.bookkeep.service.imports.TransactionImportService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +56,7 @@ public class TransactionController {
     private final TransactionExportService transactionExportService;
     private final TransactionExcelExportService transactionExcelExportService;
     private final TransactionImportService transactionImportService;
+    private final ReceiptZipImportService receiptZipImportService;
 
     /**
      * 分页查询。
@@ -134,12 +137,21 @@ public class TransactionController {
     }
 
     /**
-     * 导入流水（CSV / xlsx，multipart）。
+     * 导入流水（CSV，multipart）。
      * <p>行级失败不阻塞其它行：返回 {@code {success, failed:[{line, reason}]}}，
      * 前端把失败行列出来让用户改完重传；分类不存在**不会**自动创建。
      */
     @PostMapping("/import")
     public Result<ImportResultResp> importFile(@RequestParam("file") MultipartFile file) throws IOException {
         return Result.success(transactionImportService.importFile(file.getOriginalFilename(), file.getBytes()));
+    }
+
+    /**
+     * 导入压缩包：本系统「导出票据」生成的 zip（manifest.csv + 流水.csv + 图片）。
+     * <p>先导流水再挂图；失败分成「流水行」和「票据文件」两栏返回。
+     */
+    @PostMapping(value = "/import/zip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result<ZipImportResp> importZip(@RequestParam("file") MultipartFile file) throws IOException {
+        return Result.success(receiptZipImportService.importZip(file.getOriginalFilename(), file.getBytes()));
     }
 }

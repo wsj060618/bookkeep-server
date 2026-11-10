@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.common.util.SecurityUtil;
+import com.bookkeep.model.dto.resp.ReceiptImportResp;
 import com.bookkeep.model.dto.resp.ReceiptResp;
 import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.Transaction;
@@ -15,12 +16,14 @@ import com.bookkeep.service.mapper.TransactionMapper;
 import com.bookkeep.service.mapper.TransactionReceiptMapper;
 import com.bookkeep.service.support.ReceiptStorage;
 import com.bookkeep.service.support.ShareLinkResolver;
+import com.bookkeep.service.support.ZipExtractor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -58,7 +61,49 @@ public class ReceiptServiceImpl implements ReceiptService {
         // 归档账本只读：写操作统一走 writableBookId
         Long bookId = currentBookService.writableBookId();
         Transaction transaction = requireOwnedTransaction(transactionId, bookId);
+        return store(bookId, transaction, originalName, bytes, title);
+    }
 
+    @Override
+    public ReceiptImportResp importZip(Long transactionId, String filename, byte[] bytes) {
+        Long bookId = currentBookService.writableBookId();
+        Transaction transaction = requireOwnedTransaction(transactionId, bookId);
+
+        var dir = ZipExtractor.extract(bytes);
+        try {
+            int success = 0;
+            var failed = new java.util.ArrayList<ReceiptImportResp.FailedFile>();
+            for (var file : ZipExtractor.files(dir)) {
+                String relative = ZipExtractor.relative(dir, file);
+                String lower = relative.toLowerCase(java.util.Locale.ROOT);
+                // 只认图片；包里的说明文件/txt 直接报一行，不静默忽略（用户需要知道它没被导入）
+                if (!(lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                        || lower.endsWith(".png") || lower.endsWith(".webp"))) {
+                    failed.add(new ReceiptImportResp.FailedFile(relative, "只支持 jpg / png / webp 图片"));
+                    continue;
+                }
+                try {
+                    String name = file.getFileName().toString();
+                    store(bookId, transaction, name, java.nio.file.Files.readAllBytes(file),
+                            ReceiptStorage.defaultTitle(name));
+                    success++;
+                } catch (BusinessException e) {
+                    failed.add(new ReceiptImportResp.FailedFile(relative, e.getMessage()));
+                } catch (IOException e) {
+                    failed.add(new ReceiptImportResp.FailedFile(relative, "读取文件失败"));
+                }
+            }
+            log.info("票据压缩包导入：bookId={}, transactionId={}, 文件={}, 成功 {} 张，失败 {} 张",
+                    bookId, transactionId, filename, success, failed.size());
+            return new ReceiptImportResp(success, failed);
+        } finally {
+            ZipExtractor.deleteQuietly(dir);
+        }
+    }
+
+    /** 落盘 + 插库（upload 与 zip 导入共用；调用方负责归属校验与归档判断） */
+    private ReceiptResp store(Long bookId, Transaction transaction, String originalName, byte[] bytes, String title) {
+        Long transactionId = transaction.getId();
         // 类型按魔数识别（不看扩展名），顺便把 SVG 这类能带脚本的挡在门外
         ReceiptStorage.ImageType type = ReceiptStorage.detect(bytes);
         if (bytes.length > ReceiptStorage.MAX_FILE_BYTES) {

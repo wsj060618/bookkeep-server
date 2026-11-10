@@ -28,6 +28,12 @@ public interface ReceiptService {
 
     void delete(Long transactionId, Long receiptId);
 
+    /**
+     * 单笔票据的压缩包导入：包里放这一个流水的多张图片（可以都在一个子文件夹里）。
+     * <p>逐张处理、失败不阻塞其它张；文件名去扩展名当默认标题。
+     */
+    com.bookkeep.model.dto.resp.ReceiptImportResp importZip(Long transactionId, String filename, byte[] bytes);
+
     /** 登录态取单张（账本归属校验） */
     ReceiptFile load(Long transactionId, Long receiptId);
 

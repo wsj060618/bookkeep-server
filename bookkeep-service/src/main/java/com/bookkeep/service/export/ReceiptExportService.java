@@ -69,6 +69,7 @@ public class ReceiptExportService {
     private final TransactionMapper transactionMapper;
     private final TransactionReceiptMapper receiptMapper;
     private final ReceiptStorage storage;
+    private final TransactionExportService transactionExportService;
 
     /**
      * 账本级导出计划。参数错误/没有票据/超出上限都在这里抛业务异常（响应还没开始写）。
@@ -103,7 +104,10 @@ public class ReceiptExportService {
                 : "部分_" + (startDate == null ? "起" : COMPACT.format(startDate))
                   + "-" + (endDate == null ? "今" : COMPACT.format(endDate));
         String filename = safeName + "_票据_" + suffix + ".zip";
-        return build(safeName + "_" + bookId, filename, transactions, receipts);
+        // 包里再带一份完整流水 CSV：manifest 只记「有票据的流水」，
+        // 带上它才能做到「一个包 = 完整备份」，导入时也能把没票据的流水一起还原
+        TransactionExportService.ExportPlan flowPlan = transactionExportService.prepare(startDate, endDate);
+        return build(safeName + "_" + bookId, filename, transactions, receipts, flowPlan);
     }
 
     /** 流式写 zip：逐个文件 copy，不把图片读进内存 */
@@ -114,6 +118,15 @@ public class ReceiptExportService {
             zip.write("\uFEFF".getBytes(StandardCharsets.UTF_8));
             zip.write(plan.manifest().getBytes(StandardCharsets.UTF_8));
             zip.closeEntry();
+
+            // 流水.csv：和「导出 CSV」同一套内容（含标题/汇总/明细），导入端能直接识别
+            if (plan.flowPlan() != null) {
+                zip.putNextEntry(new ZipEntry("流水.csv"));
+                java.io.Writer writer = new java.io.OutputStreamWriter(zip, StandardCharsets.UTF_8);
+                transactionExportService.writeCsv(plan.flowPlan(), writer);
+                writer.flush();   // 不能 close：那会把整个 zip 关掉
+                zip.closeEntry();
+            }
 
             for (Entry entry : plan.entries()) {
                 zip.putNextEntry(new ZipEntry(entry.pathInZip()));
@@ -138,7 +151,8 @@ public class ReceiptExportService {
     }
 
     private ExportPlan build(String bookDir, String filename,
-                             List<Transaction> transactions, List<TransactionReceipt> receipts) {
+                             List<Transaction> transactions, List<TransactionReceipt> receipts,
+                             TransactionExportService.ExportPlan flowPlan) {
         Map<Long, Transaction> byId = transactions.stream()
                 .collect(Collectors.toMap(Transaction::getId, Function.identity()));
         Map<Long, String> categoryNames = loadCategoryNames(transactions);
@@ -181,7 +195,7 @@ public class ReceiptExportService {
                     .append(csv(receipt.getTitle())).append(',')
                     .append(csv(readable ? pathInZip : pathInZip + "（文件缺失，未打包）")).append('\n');
         }
-        return new ExportPlan(filename, entries, manifest.toString());
+        return new ExportPlan(filename, entries, manifest.toString(), flowPlan);
     }
 
     private Path storagePath(String storedPath) {
@@ -229,7 +243,8 @@ public class ReceiptExportService {
     public record Entry(String pathInZip, Path file) {
     }
 
-    /** 导出计划：文件名 + 条目 + manifest 内容 */
-    public record ExportPlan(String filename, List<Entry> entries, String manifest) {
+    /** 导出计划：文件名 + 条目 + manifest 内容 + 随包附带的流水 CSV 计划 */
+    public record ExportPlan(String filename, List<Entry> entries, String manifest,
+                             TransactionExportService.ExportPlan flowPlan) {
     }
 }

@@ -2,6 +2,7 @@ package com.bookkeep.web.controller;
 
 import com.bookkeep.common.result.Result;
 import com.bookkeep.model.dto.req.ReceiptRenameReq;
+import com.bookkeep.model.dto.resp.ReceiptImportResp;
 import com.bookkeep.model.dto.resp.ReceiptResp;
 import com.bookkeep.service.ReceiptService;
 import com.bookkeep.service.export.ReceiptExportService;
@@ -81,6 +82,13 @@ public class ReceiptController {
                                @PathVariable Long receiptId) {
         receiptService.delete(transactionId, receiptId);
         return Result.success();
+    }
+
+    /** 单笔票据的压缩包导入：包里放这一笔的多张图片（可都在一个子文件夹里） */
+    @PostMapping(value = "/{transactionId}/receipts/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result<ReceiptImportResp> importReceipts(@PathVariable Long transactionId,
+                                                    @RequestParam("file") MultipartFile file) throws IOException {
+        return Result.success(receiptService.importZip(transactionId, file.getOriginalFilename(), file.getBytes()));
     }
 
     /** 账本级导出：整个账本（可带日期区间）打成 zip，内含 manifest.csv */

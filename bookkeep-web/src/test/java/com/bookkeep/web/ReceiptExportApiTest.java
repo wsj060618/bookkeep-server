@@ -86,6 +86,10 @@ class ReceiptExportApiTest {
         assertTrue(entries.containsKey(bookDir + "/2026-09/2026-09-05_超市小票.png"), entries.keySet().toString());
         assertTrue(entries.containsKey(bookDir + "/2026-10/2026-10-08_聚餐小票.png"), entries.keySet().toString());
         assertTrue(entries.containsKey(bookDir + "/2026-10/2026-10-08_聚餐小票_2.png"), entries.keySet().toString());
+        // 包里还要带一份完整流水 CSV（manifest 只记有票据的流水，带上它才是完整备份）
+        assertTrue(entries.containsKey("流水.csv"), entries.keySet().toString());
+        String flowCsv = new String(entries.get("流水.csv"), StandardCharsets.UTF_8);
+        assertTrue(flowCsv.contains("1900.00"), "流水.csv 应含全部流水金额");
 
         String manifest = new String(entries.get("manifest.csv"), StandardCharsets.UTF_8);
         assertTrue(manifest.startsWith("\uFEFF日期,类型,分类,金额,备注,票据标题,相对路径"), "manifest 表头或 BOM 不对");
@@ -134,7 +138,7 @@ class ReceiptExportApiTest {
         MvcResult result = download("/api/transactions/receipts/export", f.token);
         Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
 
-        assertEquals(2, entries.size(), "manifest + 剩下那一张，实际：" + entries.keySet());
+        assertEquals(3, entries.size(), "manifest + 流水.csv + 剩下那一张，实际：" + entries.keySet());
         String manifest = new String(entries.get("manifest.csv"), StandardCharsets.UTF_8);
         assertTrue(manifest.contains("文件缺失"), "manifest 要标出缺了哪个：" + manifest);
         assertEquals(2, manifest.replace("\uFEFF", "").trim().split("\n").length - 1,

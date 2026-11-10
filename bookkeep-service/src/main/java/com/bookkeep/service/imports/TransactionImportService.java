@@ -57,7 +57,8 @@ public class TransactionImportService {
     private final CategoryMapper categoryMapper;
 
     /** 文件里的一行（已解析成字符串，未校验） */
-    private record RawRow(int line, String date, String type, String category, String amount, String note) {
+    /** 文件里的一行（已解析成字符串，未校验）；包级可见：账本包导入要复用它建流水 */
+    record RawRow(int line, String date, String type, String category, String amount, String note) {
     }
 
     /**
@@ -107,7 +108,8 @@ public class TransactionImportService {
 
     /* ---------- 校验 + 落库 ---------- */
 
-    private Transaction toTransaction(RawRow row, Long bookId, Map<String, Long> categoryIds, BigDecimal balance) {
+    /** 包级可见：账本包（zip）导入按 manifest 补建流水时复用同一套校验 */
+    Transaction toTransaction(RawRow row, Long bookId, Map<String, Long> categoryIds, BigDecimal balance) {
         LocalDate transDate;
         try {
             transDate = LocalDate.parse(row.date().trim());
@@ -201,7 +203,8 @@ public class TransactionImportService {
         EXPORTED
     }
 
-    private List<RawRow> parse(String filename, byte[] content) {
+    /** 包级可见：zip 导入要解析包内的「流水.csv」 */
+    List<RawRow> parse(String filename, byte[] content) {
         String lower = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
         // 导入只支持 CSV：Excel 的版式千人千面（合并单元格、数量/单价分组表头…），
         // 强行解析只会给出满屏的「日期格式不对」。要导 Excel 就先进 Excel 另存为 CSV。
