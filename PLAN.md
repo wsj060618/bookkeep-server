@@ -135,16 +135,9 @@ CREATE TABLE transaction (
   deleted     TINYINT DEFAULT 0
 );
 
-CREATE TABLE budget (
-  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-  book_id     BIGINT NOT NULL,
-  category_id BIGINT NOT NULL,
-  month       VARCHAR(7) NOT NULL,               -- '2026-08'
-  amount      DECIMAL(12,2) NOT NULL,
-  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_book_cat_month (book_id, category_id, month)
-);
+-- 预算表（budget）已移出范围并删除（见 §2.4）：不建表。
+-- 如要恢复：`(id, book_id, category_id, month 'YYYY-MM', amount DECIMAL(12,2), created_at, updated_at)`
+-- + UNIQUE(book_id, category_id, month)；无 deleted 列（物理删除，否则唯一键会和"删了再建"冲突）。
 ```
 
 ### 分类模板（注册时按账本类型预置，当前只有 class）
@@ -427,7 +420,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 ### 5.7 预算
 
-**不做**（见 §2.4）。表结构保留在 `schema.sql` 里，不建实体、不写接口。
+**不做**（见 §2.4）。建表语句已从 `schema.sql` 删除（`sql/migration_drop_budget.sql` 负责删掉老库里的空表），不建实体、不写接口。
 
 ### 5.8 AI 分析
 

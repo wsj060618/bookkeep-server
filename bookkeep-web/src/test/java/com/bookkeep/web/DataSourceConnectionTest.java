@@ -42,8 +42,9 @@ class DataSourceConnectionTest {
     @Test
     void bookkeepTablesShouldExist() {
         var required = java.util.List.of(
-                "user", "book", "category", "transaction", "budget",
-                "password_reset_token", "category_template", "category_template_item");
+                "user", "book", "category", "transaction",
+                "password_reset_token", "category_template", "category_template_item",
+                "share_link", "share_link_book", "transaction_receipt");
         for (String table : required) {
             Integer count = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM information_schema.tables "

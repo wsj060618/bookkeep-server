@@ -24,6 +24,8 @@ ALTER DATABASE bookkeep CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 ALTER TABLE `book`         CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 ALTER TABLE `category`     CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 ALTER TABLE `transaction`  CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+-- budget 表已删除（见 migration_drop_budget.sql），这一行只对没跑过删除脚本的老库有效；
+-- 若报「Table 'bookkeep.budget' doesn't exist」，直接跳过即可，不影响其余语句。
 ALTER TABLE `budget`       CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 -- ---------- 3) user 表：先整体转规则，再把 username 改回区分大小写 ----------

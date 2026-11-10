@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS password_reset_token (
 ) COMMENT='找回密码一次性 token';
 
 -- ------------------------------------------------------------
--- 4) book 账本表：一本账本 = 一套独立数据（分类/流水/预算）
+-- 4) book 账本表：一本账本 = 一套独立数据（分类/流水/票据）
 --    type：当前项目固定 class（班级账本），列保留以便将来扩展其它类型
 -- ------------------------------------------------------------
 CREATE TABLE book (
@@ -117,28 +117,12 @@ CREATE TABLE `transaction` (
   deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删'
 ) COMMENT='流水表（按账本隔离）';
 
--- ------------------------------------------------------------
--- 7) budget 预算表：某账本、某分类、某月一条
---    month：'2026-08' 格式（字符串，非 date）
---    uk_book_cat_month：同账本+同分类+同月唯一，防重复
---    注意：本表【没有】deleted 列，预算用物理删除（deleteById 真删）。
---          若加逻辑删除，会和 uk_book_cat_month 唯一键冲突（删了还想重建）。
--- ------------------------------------------------------------
-CREATE TABLE budget (
-  id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
-  book_id     BIGINT NOT NULL COMMENT '归属账本 book.id',
-  category_id BIGINT NOT NULL COMMENT '归属分类 category.id',
-  month       VARCHAR(7) NOT NULL COMMENT '预算月份 YYYY-MM',
-  amount      DECIMAL(12,2) NOT NULL COMMENT '预算金额，两位小数',
-  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  UNIQUE KEY uk_book_cat_month (book_id, category_id, month)
-) COMMENT='预算表（物理删除，无 deleted 列）';
+-- 预算（budget）已移出范围并删表（PLAN §2.4）：不建表，恢复时按 §2.4 的设计重建。
 
 -- ------------------------------------------------------------
--- 8) category_template 自定义分类模板：**跟账号走**，一套模板可用于该用户的任意账本
---    内置的「班级班费」模板**不入库**（id=0，直接取 CategoryTemplate.classCategories()），
---    这样模板内容与注册时预置的分类永远同源，不会各改一处。
+-- 7) category_template 分类模板：**跟账号走**，一套模板可用于该用户的任意账本
+--    注册时会落一套真实的「班级班费」（CategoryPresets.classCategories() 的 11 条），
+--    所以它和自建模板一样可改名/增删条目/删除；id=0 只在账号一套模板都没有时作为只读投影兜底。
 --    本表物理删除（无 deleted 列）：模板条目是整体替换的，逻辑删除只会越攒越多。
 -- ------------------------------------------------------------
 CREATE TABLE category_template (
@@ -151,7 +135,7 @@ CREATE TABLE category_template (
 ) COMMENT='自定义分类模板（跟账号走，物理删除）';
 
 -- ------------------------------------------------------------
--- 9) category_template_item 模板条目：字段与 category 一一对应，应用模板时按此逐条复制
+-- 8) category_template_item 模板条目：字段与 category 一一对应，应用模板时按此逐条复制
 --    没有 deleted 列：改模板 = 整体删掉重插（PLAN §10.4）
 -- ------------------------------------------------------------
 CREATE TABLE category_template_item (
@@ -166,7 +150,7 @@ CREATE TABLE category_template_item (
 ) COMMENT='模板条目（物理删除）';
 
 -- ------------------------------------------------------------
--- 10) share_link 公示链接：**一条链接可以带 1..N 本账本**（PLAN §5.9）
+-- 9) share_link 公示链接：**一条链接可以带 1..N 本账本**（PLAN §5.9）
 --     每个账号最多一条有效链接：重新分享会删掉旧链接，泄漏时再分享一次即可作废
 -- ------------------------------------------------------------
 CREATE TABLE share_link (
@@ -180,7 +164,7 @@ CREATE TABLE share_link (
 ) COMMENT='公示链接（一条链接 = 1..N 本账本）';
 
 -- ------------------------------------------------------------
--- 11) share_link_book 公示链接包含的账本（物理删除；账本彻底删除时一并清掉）
+-- 10) share_link_book 公示链接包含的账本（物理删除；账本彻底删除时一并清掉）
 -- ------------------------------------------------------------
 CREATE TABLE share_link_book (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
@@ -192,7 +176,7 @@ CREATE TABLE share_link_book (
 ) COMMENT='公示链接包含的账本（物理删除）';
 
 -- ------------------------------------------------------------
--- 12) transaction_receipt 流水票据（PLAN §10.9）
+-- 11) transaction_receipt 流水票据（PLAN §10.9）
 --   没有 deleted 列：票据随流水生命周期（流水软删时保留，账本/账号物理删除时连文件一起清）
 --   stored_path 是相对 receipt.dir 的路径：{账本名}_{bookId}/{yyyy-MM}/{uuid}.{ext}
 -- ------------------------------------------------------------
