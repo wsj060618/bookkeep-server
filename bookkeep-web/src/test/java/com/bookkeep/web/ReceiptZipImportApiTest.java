@@ -74,7 +74,8 @@ class ReceiptZipImportApiTest {
         upload(tokenA, income, "班服收据.png");
         upload(tokenA, expense, "聚餐小票.png");
 
-        byte[] zip = download("/api/transactions/receipts/export", tokenA);
+        // 账本导出包（format=zip）：流水.csv + manifest + 图片，才是可再导入的那种包
+        byte[] zip = download("/api/transactions/export?format=zip", tokenA);
 
         // B：另一个账号，导入同一个包
         String userB = nextUsername("zipb");

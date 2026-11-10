@@ -84,7 +84,7 @@ public class ReceiptZipImportService {
             Path manifest = find(files, dir, MANIFEST);
             if (manifest == null) {
                 throw new BusinessException(ResultCode.BAD_REQUEST,
-                        "包内缺少 manifest.csv：请用本系统「流水 → 导出 → 票据」生成的压缩包");
+                        "包内缺少 manifest.csv：请用本系统「流水 → 导出 → 账本导出（zip）」生成的压缩包");
             }
             Path flowCsv = findFlowCsv(files, dir);
 

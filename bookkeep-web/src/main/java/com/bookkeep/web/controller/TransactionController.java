@@ -9,6 +9,7 @@ import com.bookkeep.model.dto.resp.ImportResultResp;
 import com.bookkeep.model.dto.resp.TransactionResp;
 import com.bookkeep.model.dto.resp.ZipImportResp;
 import com.bookkeep.service.TransactionService;
+import com.bookkeep.service.export.ReceiptExportService;
 import com.bookkeep.service.export.TransactionExcelExportService;
 import com.bookkeep.service.export.TransactionExportService;
 import com.bookkeep.service.imports.ReceiptZipImportService;
@@ -57,6 +58,7 @@ public class TransactionController {
     private final TransactionExcelExportService transactionExcelExportService;
     private final TransactionImportService transactionImportService;
     private final ReceiptZipImportService receiptZipImportService;
+    private final ReceiptExportService receiptExportService;
 
     /**
      * 分页查询。
@@ -96,8 +98,9 @@ public class TransactionController {
     }
 
     /**
-     * 导出班费收支表（CSV 或 xlsx，含逐行结余）。
+     * 导出班费收支表（CSV / xlsx / zip，含逐行结余）。
      * <p>{@code format=xlsx} 时返回真正的 Excel：顶部汇总 + 两张分类柱状图 + 明细；
+     * {@code format=zip} 时是**账本导出包**（`流水.csv` + `manifest.csv` + 票据图片，可再导入）；
      * 默认 csv。
      * <p>成功时返回文件流而不是 JSON 信封——下载类接口只能这样，前端用 blob 接收。
      * <p>参数错误（开始晚于结束）仍走业务异常：HTTP 200 + JSON {@code code=400}，由前端统一拦截器提示。
@@ -108,6 +111,19 @@ public class TransactionController {
     public ResponseEntity<StreamingResponseBody> export(@RequestParam(required = false) LocalDate startDate,
                                                         @RequestParam(required = false) LocalDate endDate,
                                                         @RequestParam(required = false) String format) {
+        // format=zip：账本导出（流水.csv + manifest.csv + 票据图片），整本/区间都能再导入
+        if ("zip".equalsIgnoreCase(format)) {
+            ReceiptExportService.ExportPlan plan = receiptExportService.prepareBookPackage(startDate, endDate);
+            StreamingResponseBody zipBody = outputStream -> receiptExportService.write(plan, outputStream);
+            return ResponseEntity.ok()
+                    .contentType(new MediaType("application", "zip"))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                            .filename(plan.filename(), StandardCharsets.UTF_8)
+                            .build()
+                            .toString())
+                    .body(zipBody);
+        }
+
         TransactionExportService.ExportPlan plan = transactionExportService.prepare(startDate, endDate);
         boolean xlsx = "xlsx".equalsIgnoreCase(format);
         String filename = xlsx

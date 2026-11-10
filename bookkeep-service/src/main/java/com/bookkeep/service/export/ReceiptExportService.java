@@ -35,13 +35,20 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * 票据打包导出（PLAN §10.9）：**账本级**（可带日期区间）。
- * <p>单笔不打包：网页端在票据弹窗里把这一笔的图**逐张下载**（通常 1–3 张，zip 反而多一步）。
+ * zip 导出（PLAN §10.9），两种包**互相独立**：
  *
  * <pre>
- * {账本名}_票据_全部.zip
- *   ├── {账本名}_{bookId}/{yyyy-MM}/{日期}_{票据标题}.{ext}
- *   └── manifest.csv   (日期/类型/分类/金额/备注/票据标题/相对路径)
+ * ① 账本导出（GET /api/transactions/export?format=zip）——完整备份，可再导入
+ *   {账本名}_账本_全部.zip
+ *     ├── 流水.csv                     全部流水（与「导出 CSV」同一套内容）
+ *     ├── manifest.csv                有票据的流水：日期/类型/分类/金额/备注/标题/相对路径
+ *     └── {账本名}_{bookId}/{yyyy-MM}/{票据标题}.{ext}
+ *
+ * ② 票据导出（GET /api/transactions/receipts/export）——**只要图片**
+ *   {账本名}_票据_全部.zip
+ *     └── {账本名}_{bookId}/{yyyy-MM}/{票据标题}.{ext}
+ *
+ * 单笔（GET /api/transactions/{id}/receipts/export）同理只要图片，统一放「图片/」文件夹。
  * </pre>
  *
  * <p>zip 内目录与磁盘一致：解开就能对上 `data/receipts` 的结构，换届打包拷走不用额外整理。
@@ -72,10 +79,11 @@ public class ReceiptExportService {
     private final TransactionExportService transactionExportService;
 
     /**
-     * 账本级导出计划。参数错误/没有票据/超出上限都在这里抛业务异常（响应还没开始写）。
+     * 账本导出计划（`format=zip`）：**完整备份包**——流水.csv + manifest.csv + 票据图片。
+     * <p>没有票据也允许导出（照样是一份能再导入的流水包），只有「这个范围内没有流水」才 400。
      */
     @Transactional(readOnly = true)
-    public ExportPlan prepareBook(LocalDate startDate, LocalDate endDate) {
+    public ExportPlan prepareBookPackage(LocalDate startDate, LocalDate endDate) {
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "开始日期不能晚于结束日期");
         }
@@ -84,39 +92,59 @@ public class ReceiptExportService {
         String bookName = book == null ? "账本" : book.getName();
         String safeName = safeFileName(bookName);
 
-        List<Transaction> transactions = transactionMapper.selectList(Wrappers.<Transaction>query()
-                .eq("book_id", bookId)
-                .ge(startDate != null, "trans_date", startDate)
-                .le(endDate != null, "trans_date", endDate)
-                .orderByAsc("trans_date", "id"));
+        List<Transaction> transactions = selectTransactions(bookId, startDate, endDate);
+        if (transactions.isEmpty()) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "这个范围内没有流水，没什么可导出的");
+        }
+        List<TransactionReceipt> receipts = receiptMapper.selectByBookRange(bookId, startDate, endDate);
+        guardLimits(receipts);
+
+        // 包里那份流水 CSV：manifest 只记「有票据的流水」，带上它才是「一个包 = 完整备份」
+        TransactionExportService.ExportPlan flowPlan = transactionExportService.prepare(startDate, endDate);
+        return build(safeName + "_账本_" + rangeSuffix(startDate, endDate) + ".zip",
+                transactions, receipts, flowPlan,
+                transaction -> safeName + "_" + bookId + "/" + MONTH.format(transaction.getTransDate()) + "/",
+                false, true);
+    }
+
+    /**
+     * 票据导出计划（账本级，可带区间）：**只要图片**，不带 manifest / 流水 CSV。
+     * <p>用途是「把票据图拷走」，不是备份；要完整备份用 {@link #prepareBookPackage}。
+     * <pre>
+     * {账本名}_票据_全部.zip
+     *   └── {账本名}_{bookId}/{yyyy-MM}/{票据标题}.{ext}
+     * </pre>
+     */
+    @Transactional(readOnly = true)
+    public ExportPlan prepareBookImages(LocalDate startDate, LocalDate endDate) {
+        if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "开始日期不能晚于结束日期");
+        }
+        Long bookId = currentBookService.currentBookId();
+        Book book = bookMapper.selectById(bookId);
+        String bookName = book == null ? "账本" : book.getName();
+        String safeName = safeFileName(bookName);
+
+        List<Transaction> transactions = selectTransactions(bookId, startDate, endDate);
         if (transactions.isEmpty()) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "这个范围内没有流水，也就没有票据");
         }
-
         List<TransactionReceipt> receipts = receiptMapper.selectByBookRange(bookId, startDate, endDate);
         if (receipts.isEmpty()) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "这个范围内的流水还没有上传票据");
         }
         guardLimits(receipts);
 
-        String suffix = startDate == null && endDate == null
-                ? "全部"
-                : "部分_" + (startDate == null ? "起" : COMPACT.format(startDate))
-                  + "-" + (endDate == null ? "今" : COMPACT.format(endDate));
-        String filename = safeName + "_票据_" + suffix + ".zip";
-        // 包里再带一份完整流水 CSV：manifest 只记「有票据的流水」，
-        // 带上它才能做到「一个包 = 完整备份」，导入时也能把没票据的流水一起还原
-        TransactionExportService.ExportPlan flowPlan = transactionExportService.prepare(startDate, endDate);
-        return build(filename, transactions, receipts, flowPlan,
+        return build(safeName + "_票据_" + rangeSuffix(startDate, endDate) + ".zip",
+                transactions, receipts, null,
                 transaction -> safeName + "_" + bookId + "/" + MONTH.format(transaction.getTransDate()) + "/",
-                false);
+                false, false);
     }
 
     /**
-     * 单笔导出计划：这一笔的票据打成 zip，**图片统一放一个文件夹里**（单笔只有一个月，不必再分层）。
+     * 单笔导出计划：这一笔的票据打成 zip，**只要图片**，统一放一个文件夹里。
      * <pre>
      * {账本名}_{日期}_{分类}_{金额}.zip
-     *   ├── manifest.csv
      *   └── 图片/2026-09-05_超市小票.png
      * </pre>
      */
@@ -139,17 +167,19 @@ public class ReceiptExportService {
         String categoryName = category == null ? "已删除分类" : category.getName();
         String filename = safeFileName(bookName) + "_" + COMPACT.format(transaction.getTransDate())
                 + "_" + safeFileName(categoryName) + "_" + transaction.getAmount().toPlainString() + ".zip";
-        return build(filename, List.of(transaction), receipts, null, one -> "图片/", true);
+        return build(filename, List.of(transaction), receipts, null, one -> "图片/", true, false);
     }
 
-    /** 流式写 zip：逐个文件 copy，不把图片读进内存 */
+    /** 流式写 zip：逐个文件 copy，不把图片读进内存；manifest / 流水 CSV 按包里有没有来决定 */
     public void write(ExportPlan plan, OutputStream out) throws IOException {
         try (ZipOutputStream zip = new ZipOutputStream(out, StandardCharsets.UTF_8)) {
-            zip.putNextEntry(new ZipEntry("manifest.csv"));
-            // BOM：manifest 用 Excel 双击打开时中文不乱码（与 CSV 导出同一个约定）
-            zip.write("\uFEFF".getBytes(StandardCharsets.UTF_8));
-            zip.write(plan.manifest().getBytes(StandardCharsets.UTF_8));
-            zip.closeEntry();
+            if (plan.manifest() != null) {
+                zip.putNextEntry(new ZipEntry("manifest.csv"));
+                // BOM：manifest 用 Excel 双击打开时中文不乱码（与 CSV 导出同一个约定）
+                zip.write("\uFEFF".getBytes(StandardCharsets.UTF_8));
+                zip.write(plan.manifest().getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
 
             // 流水.csv：和「导出 CSV」同一套内容（含标题/汇总/明细），导入端能直接识别
             if (plan.flowPlan() != null) {
@@ -166,10 +196,27 @@ public class ReceiptExportService {
                 zip.closeEntry();
             }
         }
-        log.info("导出票据 zip：{}，{} 张", plan.filename(), plan.entries().size());
+        log.info("导出票据 zip：{}，{} 个文件", plan.filename(), plan.entries().size());
     }
 
     /* ---------- 内部 ---------- */
+
+    private List<Transaction> selectTransactions(Long bookId, LocalDate startDate, LocalDate endDate) {
+        return transactionMapper.selectList(Wrappers.<Transaction>query()
+                .eq("book_id", bookId)
+                .ge(startDate != null, "trans_date", startDate)
+                .le(endDate != null, "trans_date", endDate)
+                .orderByAsc("trans_date", "id"));
+    }
+
+    /** 文件名里的区间后缀：全部 / 部分_20260901-20260930 */
+    private static String rangeSuffix(LocalDate startDate, LocalDate endDate) {
+        if (startDate == null && endDate == null) {
+            return "全部";
+        }
+        return "部分_" + (startDate == null ? "起" : COMPACT.format(startDate))
+                + "-" + (endDate == null ? "今" : COMPACT.format(endDate));
+    }
 
     private void guardLimits(List<TransactionReceipt> receipts) {
         if (receipts.size() > MAX_RECEIPTS) {
@@ -185,13 +232,17 @@ public class ReceiptExportService {
     private ExportPlan build(String filename,
                              List<Transaction> transactions, List<TransactionReceipt> receipts,
                              TransactionExportService.ExportPlan flowPlan,
-                             Function<Transaction, String> dirOf, boolean dateInName) {
+                             Function<Transaction, String> dirOf, boolean dateInName,
+                             boolean withManifest) {
         Map<Long, Transaction> byId = transactions.stream()
                 .collect(Collectors.toMap(Transaction::getId, Function.identity()));
         Map<Long, String> categoryNames = loadCategoryNames(transactions);
 
         List<Entry> entries = new ArrayList<>(receipts.size());
-        StringBuilder manifest = new StringBuilder("日期,类型,分类,金额,备注,票据标题,相对路径\n");
+        // 只要图片的包（票据导出/单笔导出）不生成 manifest：那不是备份包，是「把图拷走」
+        StringBuilder manifest = withManifest
+                ? new StringBuilder("日期,类型,分类,金额,备注,票据标题,相对路径\n")
+                : null;
         // 同一目录下重名就加 _2 / _3（两张「超市小票」很常见）
         Map<String, Integer> seen = new HashMap<>();
 
@@ -223,15 +274,17 @@ public class ReceiptExportService {
                 log.warn("导出票据时文件缺失，已跳过：receiptId={}, path={}", receipt.getId(), file);
             }
 
-            manifest.append(DATE.format(transaction.getTransDate())).append(',')
-                    .append("income".equals(transaction.getType()) ? "收入" : "支出").append(',')
-                    .append(csv(categoryNames.getOrDefault(transaction.getCategoryId(), "已删除分类"))).append(',')
-                    .append(transaction.getAmount().toPlainString()).append(',')
-                    .append(csv(transaction.getNote() == null ? "" : transaction.getNote())).append(',')
-                    .append(csv(receipt.getTitle())).append(',')
-                    .append(csv(readable ? pathInZip : pathInZip + "（文件缺失，未打包）")).append('\n');
+            if (manifest != null) {
+                manifest.append(DATE.format(transaction.getTransDate())).append(',')
+                        .append("income".equals(transaction.getType()) ? "收入" : "支出").append(',')
+                        .append(csv(categoryNames.getOrDefault(transaction.getCategoryId(), "已删除分类"))).append(',')
+                        .append(transaction.getAmount().toPlainString()).append(',')
+                        .append(csv(transaction.getNote() == null ? "" : transaction.getNote())).append(',')
+                        .append(csv(receipt.getTitle())).append(',')
+                        .append(csv(readable ? pathInZip : pathInZip + "（文件缺失，未打包）")).append('\n');
+            }
         }
-        return new ExportPlan(filename, entries, manifest.toString(), flowPlan);
+        return new ExportPlan(filename, entries, manifest == null ? null : manifest.toString(), flowPlan);
     }
 
     private Path storagePath(String storedPath) {
@@ -279,7 +332,7 @@ public class ReceiptExportService {
     public record Entry(String pathInZip, Path file) {
     }
 
-    /** 导出计划：文件名 + 条目 + manifest 内容 + 随包附带的流水 CSV 计划 */
+    /** 导出计划：文件名 + 条目 + manifest 内容（仅账本包有）+ 随包附带的流水 CSV 计划（仅账本包有） */
     public record ExportPlan(String filename, List<Entry> entries, String manifest,
                              TransactionExportService.ExportPlan flowPlan) {
     }

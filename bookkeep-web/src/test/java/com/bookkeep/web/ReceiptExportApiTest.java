@@ -43,10 +43,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 票据 zip 导出集成测试（PLAN §10.9）。
- * <p>只测**账本级**导出（可带日期区间）：单笔在网页端是「逐张下载图片」，不再打包 zip。
- * <p>白盒关注：zip 内目录层级（账本/月份）、文件名规则（日期_标题）、同目录重名自动 _2、
- * manifest.csv 的行数与相对路径、以及「没票据 / 越权 / 区间反了」仍返回正常的 200+JSON 信封。
+ * zip 导出集成测试（PLAN §10.9）。两种包分开测：
+ * <ul>
+ *   <li>**账本导出**（{@code /api/transactions/export?format=zip}）：流水.csv + manifest.csv + 图片，可再导入</li>
+ *   <li>**票据导出**（{@code /api/transactions/receipts/export}）：**只有图片**，不带 manifest / 流水.csv</li>
+ * </ul>
+ * <p>白盒关注：zip 内目录层级（账本/月份）、文件名规则（日期_标题 / 票据标题）、同目录重名自动 _2、
+ * manifest 的行数与相对路径、以及「没票据 / 越权 / 区间反了」仍返回正常的 200+JSON 信封。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -64,8 +67,8 @@ class ReceiptExportApiTest {
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("账本级导出：zip 内按 账本名_bookId/月份 分层，重名加 _2，manifest 行数对齐")
-    void exportBookZipLayout() throws Exception {
+    @DisplayName("账本导出（format=zip）：流水.csv + manifest.csv + 图片，按 账本名_bookId/月份 分层，重名加 _2")
+    void bookPackageZipLayout() throws Exception {
         Fixture f = new Fixture("3班班费");
         long sep = f.create("income", "收取班费", "1900.00", "2026-09-05");
         long oct = f.create("expense", "聚餐", "62.00", "2026-10-08");
@@ -75,10 +78,10 @@ class ReceiptExportApiTest {
         // 同一天同一个标题 → 第二张必须加 _2，不能互相覆盖
         f.upload(oct, "聚餐小票.png");
 
-        MvcResult result = download("/api/transactions/receipts/export", f.token);
+        MvcResult result = download("/api/transactions/export?format=zip", f.token);
         assertEquals("application/zip", result.getResponse().getContentType());
         String filename = dispositionFilename(result);
-        assertTrue(filename.endsWith("_票据_全部.zip"), filename);
+        assertTrue(filename.endsWith("_账本_全部.zip"), filename);
 
         Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
         String bookDir = "3班班费_" + f.bookId;
@@ -86,7 +89,7 @@ class ReceiptExportApiTest {
         assertTrue(entries.containsKey(bookDir + "/2026-09/超市小票.png"), entries.keySet().toString());
         assertTrue(entries.containsKey(bookDir + "/2026-10/聚餐小票.png"), entries.keySet().toString());
         assertTrue(entries.containsKey(bookDir + "/2026-10/聚餐小票_2.png"), entries.keySet().toString());
-        // 包里还要带一份完整流水 CSV（manifest 只记有票据的流水，带上它才是完整备份）
+        // 账本包必须带完整流水 CSV：manifest 只记有票据的流水，带上它才是「一个包 = 完整备份」
         assertTrue(entries.containsKey("流水.csv"), entries.keySet().toString());
         String flowCsv = new String(entries.get("流水.csv"), StandardCharsets.UTF_8);
         assertTrue(flowCsv.contains("1900.00"), "流水.csv 应含全部流水金额");
@@ -100,8 +103,47 @@ class ReceiptExportApiTest {
     }
 
     @Test
-    @DisplayName("日期区间：只打区间内的票据，文件名变成「_部分_起-止」")
-    void exportBookRangeFilters() throws Exception {
+    @DisplayName("票据导出：**只有图片**，包里不能出现 manifest.csv / 流水.csv")
+    void receiptsExportIsImagesOnly() throws Exception {
+        Fixture f = new Fixture("3班班费");
+        long sep = f.create("income", "收取班费", "1900.00", "2026-09-05");
+        long oct = f.create("expense", "聚餐", "62.00", "2026-10-08");
+        f.upload(sep, "超市小票.png");
+        f.upload(oct, "聚餐小票.png");
+        f.upload(oct, "聚餐小票.png");
+
+        MvcResult result = download("/api/transactions/receipts/export", f.token);
+        assertEquals("application/zip", result.getResponse().getContentType());
+        assertTrue(dispositionFilename(result).endsWith("_票据_全部.zip"));
+
+        Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
+        String bookDir = "3班班费_" + f.bookId;
+        // 3 张图，一个不多一个不少
+        assertEquals(3, entries.size(), "票据导出只该有图片：" + entries.keySet());
+        assertFalse(entries.containsKey("manifest.csv"), entries.keySet().toString());
+        assertFalse(entries.containsKey("流水.csv"), entries.keySet().toString());
+        assertTrue(entries.containsKey(bookDir + "/2026-09/超市小票.png"), entries.keySet().toString());
+        assertTrue(entries.containsKey(bookDir + "/2026-10/聚餐小票.png"), entries.keySet().toString());
+        assertTrue(entries.containsKey(bookDir + "/2026-10/聚餐小票_2.png"), entries.keySet().toString());
+    }
+
+    @Test
+    @DisplayName("没有票据的账本也能做「账本导出」：流水.csv + 空 manifest 都是合法备份")
+    void bookPackageWorksWithoutReceipts() throws Exception {
+        Fixture f = new Fixture("3班班费");
+        f.create("expense", "聚餐", "20.00", "2026-10-08");
+
+        MvcResult result = download("/api/transactions/export?format=zip", f.token);
+        Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
+        assertEquals(2, entries.size(), "没票据时 = 流水.csv + manifest 表头：" + entries.keySet());
+        assertTrue(entries.containsKey("流水.csv"), entries.keySet().toString());
+        String manifest = new String(entries.get("manifest.csv"), StandardCharsets.UTF_8);
+        assertEquals(1, manifest.replace("\uFEFF", "").trim().split("\n").length, "只有表头");
+    }
+
+    @Test
+    @DisplayName("日期区间：票据导出只打区间内的票据，文件名变成「_票据_部分_起-止」")
+    void receiptsExportRangeFilters() throws Exception {
         Fixture f = new Fixture("3班班费");
         long sep = f.create("income", "收取班费", "100.00", "2026-09-05");
         long oct = f.create("expense", "聚餐", "50.00", "2026-10-08");
@@ -111,7 +153,7 @@ class ReceiptExportApiTest {
         MvcResult result = download(
                 "/api/transactions/receipts/export?startDate=2026-09-01&endDate=2026-09-30", f.token);
         String filename = dispositionFilename(result);
-        assertTrue(filename.contains("_部分_20260901-20260930.zip"), filename);
+        assertTrue(filename.contains("_票据_部分_20260901-20260930.zip"), filename);
 
         Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
         assertTrue(entries.keySet().stream().anyMatch(n -> n.endsWith("九月.png")), entries.keySet().toString());
@@ -135,7 +177,7 @@ class ReceiptExportApiTest {
         Path root = Paths.get("./target/test-receipts").toAbsolutePath().normalize();
         Files.delete(root.resolve(stored.get(0)));
 
-        MvcResult result = download("/api/transactions/receipts/export", f.token);
+        MvcResult result = download("/api/transactions/export?format=zip", f.token);
         Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
 
         assertEquals(3, entries.size(), "manifest + 流水.csv + 剩下那一张，实际：" + entries.keySet());
@@ -146,7 +188,7 @@ class ReceiptExportApiTest {
     }
 
     @Test
-    @DisplayName("单笔导出：图片统一放在「图片/」文件夹里，manifest 一行一票据")
+    @DisplayName("单笔导出：只要图片，全在「图片/」文件夹里")
     void exportSingleTransactionZip() throws Exception {
         Fixture f = new Fixture("3班班费");
         long sep = f.create("income", "收取班费", "1900.00", "2026-09-05");
@@ -161,16 +203,12 @@ class ReceiptExportApiTest {
                 filename);
 
         Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
-        // manifest + 两张图，且都在「图片/」这一个文件夹里（不按月份再分层）
-        assertEquals(3, entries.size(), "单笔导出 = manifest + 2 张图：" + entries.keySet());
-        assertTrue(entries.containsKey("manifest.csv"), entries.keySet().toString());
+        // 只要这两张图，且都在「图片/」这一个文件夹里（不按月份再分层）
+        assertEquals(2, entries.size(), "单笔导出 = 2 张图：" + entries.keySet());
+        assertFalse(entries.containsKey("manifest.csv"), entries.keySet().toString());
         assertTrue(entries.containsKey("图片/2026-09-05_九月小票.png"), entries.keySet().toString());
         assertTrue(entries.containsKey("图片/2026-09-05_班服收据.png"), entries.keySet().toString());
         assertFalse(entries.keySet().stream().anyMatch(n -> n.endsWith("十月小票.png")), entries.keySet().toString());
-
-        String manifest = new String(entries.get("manifest.csv"), StandardCharsets.UTF_8);
-        assertEquals(2, manifest.replace("\uFEFF", "").trim().split("\n").length - 1);
-        assertTrue(manifest.contains("图片/2026-09-05_九月小票.png"), manifest);
     }
 
     @Test
@@ -191,16 +229,22 @@ class ReceiptExportApiTest {
         assertTrue(badRange.path("message").asText().contains("不能晚于"), badRange.path("message").asText());
 
         String other = registerAndLogin(mockMvc, objectMapper, nextUsername("rcpz"));
-        // 单笔 zip 接口已下线（网页端改成逐张下载图片），越权检查改为盯「看图」接口
         f.upload(txId, "别人的图.png");
         long receiptId = jdbcTemplate.queryForObject(
                 "SELECT r.id FROM transaction_receipt r JOIN `transaction` t ON t.id = r.transaction_id "
                         + "WHERE t.book_id = ? LIMIT 1", Long.class, f.bookId);
+        // 越权：看图和单笔打包都要 404（不是 403，连「存在」都不该暴露）
         JsonNode foreignImage = json(mockMvc.perform(
                         get("/api/transactions/" + txId + "/receipts/" + receiptId)
                                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + other))
                 .andReturn(), objectMapper);
         assertEquals(404, foreignImage.path("code").asInt());
+
+        JsonNode foreignZip = json(mockMvc.perform(
+                        get("/api/transactions/" + txId + "/receipts/export")
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + other))
+                .andReturn(), objectMapper);
+        assertEquals(404, foreignZip.path("code").asInt());
     }
 
     /* ---------- 工具 ---------- */

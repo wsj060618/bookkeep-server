@@ -1104,7 +1104,8 @@ LangGraph 只用来表达「校验失败 → 重试 → 降级」的条件状态
 
 > 落地口径：见 `AGENTS.md` 的 Receipts 一条。要点补充——
 > 单笔 9 张 / 单张 5MB / 账号 500MB；魔数识别（SVG 拒收）；`stored_path` 为唯一事实来源；
-> 两种 zip（账本级带区间、单笔）共用目录规则与 `manifest.csv`；导出时**缺失文件跳过并在 manifest 标注**，
+> **导出现在分两种包**：`format=zip` 是「账本导出」（流水.csv + manifest.csv + 图片，唯一可再导入的包）；
+> 票据导出（账本级 / 单笔）**只要图片**，不带 manifest / CSV；导出时**缺失文件跳过并在 manifest 标注**，
 > 不产出 0 字节条目；`ReceiptOrphanJob` 每天 4:20 清理「超过 1 小时且库里没有记录」的孤儿文件
 > （上传是「先落盘、后插库」，minAge 就是为了不误删正在上传的那张）。
 > 前端看图必须走 blob（登录态接口不能 `<img src>`），所以 nginx 的 CSP `img-src` 必须含 `blob:`。
@@ -1143,22 +1144,27 @@ LangGraph 只用来表达「校验失败 → 重试 → 降级」的条件状态
 | GET | `/api/transactions/{id}/receipts/{receiptId}` | 下载/预览单张（inline，需登录 + 账本归属校验） |
 | PUT | `/api/transactions/{id}/receipts/{receiptId}` | 只改 `title`（≤30 字，空则回落原始名） |
 | DELETE | `/api/transactions/{id}/receipts/{receiptId}` | 删除单张（同时删文件，失败只记日志不阻断） |
-| GET | `/api/transactions/receipts/export?start&end` | 按区间导出 zip（含 `manifest.csv`） |
+| GET | `/api/transactions/receipts/export?start&end` | **票据导出**：按区间导出 zip，**只有图片**（无 manifest / CSV） |
+| GET | `/api/transactions/{id}/receipts/export` | **单笔票据导出**：zip，图片全在 `图片/` 文件夹里 |
+| POST | `/api/transactions/import/zip` | 导入「账本导出」包（必须先有 manifest.csv） |
 
 导出规则（与存储保持同一套命名/分层，导出的 zip 解开就能对上目录）：
 
-- **zip 内目录 = 账本名 / 月份**，与磁盘一致：
+- **账本导出**（`GET /api/transactions/export?format=zip`）= 唯一可再导入的包：
   ```
-  {账本名}_{bookId}.zip
-    ├── 计科2301班费_12/
-    │   ├── 2026-11/
-    │   │   ├── 2026-11-05_超市小票.jpg
-    │   │   └── 2026-11-06_班服收据.png
-    │   └── 2026-12/…
-    └── manifest.csv
+  {账本名}_账本_全部.zip
+    ├── 流水.csv                      全部流水（与「导出 CSV」同一套内容）
+    ├── manifest.csv                  有票据的流水：日期/类型/分类/金额/备注/标题/相对路径
+    └── 计科2301班费_12/
+        ├── 2026-11/
+        │   ├── 超市小票.jpg
+        │   └── 班服收据.png
+        └── 2026-12/…
   ```
-- 文件名 = `{日期}_{票据标题}.{ext}`（标题同样去非法字符、截断；同目录重名自动 `_2`、`_3`）
-- 单笔导出：zip 名 `{账本名}_{日期}_{分类}_{金额}.zip`，内部同结构（单月一个目录），附 `manifest.csv`
+  没有票据也照样能导（就是一份流水备份），只有「这个范围内没有流水」才 400。
+- **票据导出**（`/api/transactions/receipts/export`）= 只要图片，目录同上但**没有** manifest.csv / 流水.csv；
+  文件名 = `{票据标题}.{ext}`（同目录重名自动 `_2`、`_3`），zip 名 `{账本名}_票据_{全部|部分_起-止}.zip`
+- **单笔导出**：zip 名 `{账本名}_{日期}_{分类}_{金额}.zip`，图片全放 `图片/`，文件名带 `{日期}_{标题}`（文件夹本身没有日期）
 - `manifest.csv` 列：日期 / 类型 / 分类 / 金额 / 备注 / 票据标题 / 相对路径
 - 区间导出只导**当前账本**（和 CSV 导出一致）；要跨账本分别导两次
 - 上限：一次 ≤200 张、≤100MB；超了返回 400 并提示缩小范围（避免把试用机内存打满）
@@ -1194,7 +1200,8 @@ LangGraph 只用来表达「校验失败 → 重试 → 降级」的条件状态
 - 非图片/超 5MB/超 9 张 → 400；改标题超 30 字 → 400
 - 目录规则：上传落在 `{安全化账本名}_{bookId}/{yyyy-MM}/`，月份取 `trans_date`；账本改名后新图进新目录、老图仍可读
 - 越权：A 访问 B 的票据 → 404
-- 导出 zip：内部目录为 `账本名/月份/`、文件名 `{日期}_{标题}`、`manifest.csv` 行数与相对路径正确、重名自动加后缀
+- 账本导出（`format=zip`）：`流水.csv` + `manifest.csv` + 图片；manifest 行数与相对路径正确；重名自动加后缀
+- 票据导出（账本级 / 单笔）：zip 里**只有图片**，绝不能出现 `manifest.csv` / `流水.csv`
 - 注销账户/账本物理删除后：库里记录与磁盘目录都消失
 - 归档账本：上传 400、导出 200
 

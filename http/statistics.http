@@ -36,3 +36,12 @@ Authorization: Bearer {{token}}
 ### 8. 区间颠倒（预期 code=400「开始日期不能晚于结束日期」）
 GET {{host}}/api/transactions/export?startDate=2026-12-01&endDate=2026-11-01
 Authorization: Bearer {{token}}
+
+### 9. 账本导出（zip：流水.csv + manifest.csv + 票据图片，可再导入）
+###    和「票据导出」不同：票据导出（/api/transactions/receipts/export）只有图片，不能导入
+GET {{host}}/api/transactions/export?format=zip
+Authorization: Bearer {{token}}
+
+### 10. 票据导出（zip，只有图片；带区间时文件名是「_票据_部分_起-止.zip」）
+GET {{host}}/api/transactions/receipts/export
+Authorization: Bearer {{token}}
