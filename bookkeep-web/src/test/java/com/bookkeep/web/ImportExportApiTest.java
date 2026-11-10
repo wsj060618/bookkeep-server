@@ -177,7 +177,56 @@ class ImportExportApiTest {
                 .andExpect(jsonPath("$.message").value("当前账本已归档（学期结束），只读；先取消归档再记账或改分类"));
     }
 
+    @Test
+    @DisplayName("导出的 xlsx 能原样导入回来：导入会自动找表头（跳过标题/汇总/图表区）")
+    void exportedXlsxCanBeImportedBack() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("xls"));
+        record(token, categoryIdOf(token, "收取班费"), "income", "1900.00", "2026-09-05", "全班 38 人");
+        record(token, categoryIdOf(token, "聚餐"), "expense", "620.00", "2026-09-20", "中秋聚餐");
+
+        byte[] xlsx = downloadXlsx(token);
+        JsonNode data = uploadBytes(token, "班费流水_全部.xlsx", xlsx).path("data");
+        assertEquals(0, data.path("failed").size(),
+                "导出的文件自己都导不回来就说明列结构不匹配：" + data);
+        assertEquals(2, data.path("success").asInt());
+    }
+
+    @Test
+    @DisplayName("导出的 CSV 也能原样导入回来（明细表头不在第一行）")
+    void exportedCsvCanBeImportedBack() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("xls"));
+        record(token, categoryIdOf(token, "收取班费"), "income", "300.00", "2026-09-05", null);
+
+        MvcResult async = mockMvc.perform(get("/api/transactions/export")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        byte[] csv = mockMvc.perform(asyncDispatch(async)).andReturn().getResponse().getContentAsByteArray();
+
+        JsonNode data = uploadBytes(token, "班费流水_全部.csv", csv).path("data");
+        assertEquals(0, data.path("failed").size(), "导出的 CSV 应能导回：" + data);
+        assertEquals(1, data.path("success").asInt());
+    }
+
     // ---------- 辅助方法 ----------
+
+    private byte[] downloadXlsx(String token) throws Exception {
+        MvcResult async = mockMvc.perform(get("/api/transactions/export?format=xlsx")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        return mockMvc.perform(asyncDispatch(async)).andReturn().getResponse().getContentAsByteArray();
+    }
+
+    private JsonNode uploadBytes(String token, String filename, byte[] content) throws Exception {
+        MvcResult result = mockMvc.perform(multipart("/api/transactions/import")
+                        .file(new MockMultipartFile("file", filename,
+                                "application/octet-stream", content))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn();
+        return json(result, objectMapper);
+    }
 
     private JsonNode upload(String token, String filename, String content) throws Exception {
         MvcResult result = mockMvc.perform(multipart("/api/transactions/import")

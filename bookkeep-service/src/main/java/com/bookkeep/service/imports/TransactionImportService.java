@@ -187,61 +187,101 @@ public class TransactionImportService {
 
     /* ---------- 解析 ---------- */
 
+    /** 文件里的一整行（保留原始行号，列可能是任意长度） */
+    private record CellRow(int line, String[] cells) {
+        String at(int index) {
+            return index < cells.length && cells[index] != null ? cells[index] : "";
+        }
+    }
+
+    /** 两种列结构：标准导入格式，以及我们自己导出的明细格式 */
+    private enum Layout {
+        /** 日期, 类型, 分类, 金额, 备注 */
+        STANDARD,
+        /** 日期, 分类, 摘要, 收入, 支出, 结余（导出文件的明细区） */
+        EXPORTED
+    }
+
     private List<RawRow> parse(String filename, byte[] content) {
         String lower = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
-        return lower.endsWith(".xlsx") || lower.endsWith(".xls")
+        List<CellRow> table = lower.endsWith(".xlsx") || lower.endsWith(".xls")
                 ? parseWorkbook(content)
                 : parseCsv(content);
+        return extractDataRows(table);
     }
 
-    private List<RawRow> parseWorkbook(byte[] content) {
-        List<RawRow> rows = new ArrayList<>();
-        DataFormatter formatter = new DataFormatter();
-        try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(content))) {
-            Sheet sheet = workbook.getSheetAt(0);
-            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
-                Row row = sheet.getRow(i);
-                if (row == null) {
-                    continue;
-                }
-                RawRow parsed = new RawRow(
-                        i + 1, // Excel 行号从 1 开始，和用户看到的一致
-                        formatter.formatCellValue(row.getCell(0)),
-                        formatter.formatCellValue(row.getCell(1)),
-                        formatter.formatCellValue(row.getCell(2)),
-                        formatter.formatCellValue(row.getCell(3)),
-                        formatter.formatCellValue(row.getCell(4)));
-                if (isBlank(parsed)) {
-                    continue;
-                }
-                rows.add(parsed);
-            }
-        } catch (IOException | RuntimeException e) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "Excel 解析失败，请确认文件没损坏");
-        }
-        return rows;
-    }
-
-    private List<RawRow> parseCsv(byte[] content) {
-        String text = new String(content, StandardCharsets.UTF_8);
-        // Excel 另存为 CSV 会带 BOM，不去掉第一列就永远匹配不上表头/日期
-        if (text.startsWith("\uFEFF")) {
-            text = text.substring(1);
-        }
-        List<RawRow> rows = new ArrayList<>();
-        String[] lines = text.split("\r?\n", -1);
-        for (int i = 1; i < lines.length; i++) { // 跳过表头
-            if (lines[i].isBlank()) {
+    /**
+     * 从整张表里**找到表头**再取数据。
+     * <p>为什么不能假设表头在第一行：导出的 xlsx 第一行是标题，下面还有汇总和图表，
+     * 真正的明细表头在第 21 行。所以这里扫前几十行找表头，并同时认两种列结构，
+     * 让「导出 → 再导入」能原样转回去。
+     */
+    private List<RawRow> extractDataRows(List<CellRow> table) {
+        int headerIndex = -1;
+        Layout layout = Layout.STANDARD;
+        for (int i = 0; i < table.size(); i++) {
+            CellRow row = table.get(i);
+            if (!"日期".equals(row.at(0).trim())) {
                 continue;
             }
-            List<String> cells = splitCsvLine(lines[i]);
-            RawRow parsed = new RawRow(
-                    i + 1,
-                    cellAt(cells, 0),
-                    cellAt(cells, 1),
-                    cellAt(cells, 2),
-                    cellAt(cells, 3),
-                    cellAt(cells, 4));
+            String second = row.at(1).trim();
+            if ("类型".equals(second)) {
+                headerIndex = i;
+                layout = Layout.STANDARD;
+                break;
+            }
+            if ("分类".equals(second)) {
+                headerIndex = i;
+                layout = Layout.EXPORTED;
+                break;
+            }
+        }
+        if (headerIndex < 0) {
+            throw new BusinessException(ResultCode.BAD_REQUEST,
+                    "没找到表头：需要「日期, 类型, 分类, 金额, 备注」，或本系统导出的「日期, 分类, 摘要, 收入, 支出」");
+        }
+
+        // 导出格式的列顺序可能变，按表头名字定位列，比写死下标稳
+        CellRow header = table.get(headerIndex);
+        int dateCol = columnOf(header, 0, "日期");
+        int categoryCol = layout == Layout.STANDARD ? columnOf(header, 2, "分类") : columnOf(header, 1, "分类");
+        int typeCol = layout == Layout.STANDARD ? columnOf(header, 1, "类型") : -1;
+        int amountCol = layout == Layout.STANDARD ? columnOf(header, 3, "金额") : -1;
+        int noteCol = layout == Layout.STANDARD ? columnOf(header, 4, "备注") : columnOf(header, 2, "摘要");
+        int incomeCol = layout == Layout.EXPORTED ? columnOf(header, 3, "收入") : -1;
+        int expenseCol = layout == Layout.EXPORTED ? columnOf(header, 4, "支出") : -1;
+
+        List<RawRow> rows = new ArrayList<>();
+        for (int i = headerIndex + 1; i < table.size(); i++) {
+            CellRow row = table.get(i);
+            String first = row.at(0).trim();
+            // 明细区结束：合计行 / 下一个区块（分类合计）
+            if ("合计".equals(first) || "分类合计".equals(first) || "分类".equals(first)) {
+                break;
+            }
+            if (first.isEmpty() && row.at(1).trim().isEmpty() && row.at(2).trim().isEmpty()) {
+                continue; // 空行
+            }
+
+            RawRow parsed;
+            if (layout == Layout.STANDARD) {
+                parsed = new RawRow(row.line(), row.at(dateCol), row.at(typeCol),
+                        row.at(categoryCol), row.at(amountCol), row.at(noteCol));
+            } else {
+                // 导出的明细把收支拆成两列：哪列有值就是哪种方向
+                String income = row.at(incomeCol).trim();
+                String expense = row.at(expenseCol).trim();
+                boolean isIncome = !income.isEmpty();
+                parsed = new RawRow(row.line(), row.at(dateCol),
+                        isIncome ? "收入" : "支出",
+                        row.at(categoryCol),
+                        isIncome ? income : expense,
+                        row.at(noteCol));
+                if (income.isEmpty() && expense.isEmpty()) {
+                    // 收入支出都没填：这不是一笔流水，跳过（导出文件里的空行/说明行）
+                    continue;
+                }
+            }
             if (isBlank(parsed)) {
                 continue;
             }
@@ -250,8 +290,55 @@ public class TransactionImportService {
         return rows;
     }
 
-    private static String cellAt(List<String> cells, int index) {
-        return index < cells.size() ? cells.get(index) : "";
+    /** 表头里找列下标；找不到就退回默认位置，兼容只有部分列的文件 */
+    private static int columnOf(CellRow header, int fallback, String name) {
+        for (int i = 0; i < header.cells().length; i++) {
+            if (name.equals(header.at(i).trim())) {
+                return i;
+            }
+        }
+        return fallback;
+    }
+
+    private List<CellRow> parseWorkbook(byte[] content) {
+        List<CellRow> rows = new ArrayList<>();
+        DataFormatter formatter = new DataFormatter();
+        try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(content))) {
+            Sheet sheet = workbook.getSheetAt(0);
+            for (int i = 0; i <= sheet.getLastRowNum(); i++) {
+                Row row = sheet.getRow(i);
+                if (row == null) {
+                    continue;
+                }
+                int width = Math.max(row.getLastCellNum(), 6);
+                String[] cells = new String[width];
+                for (int c = 0; c < width; c++) {
+                    cells[c] = formatter.formatCellValue(row.getCell(c));
+                }
+                rows.add(new CellRow(i + 1, cells)); // Excel 行号从 1 开始，和用户看到的一致
+            }
+        } catch (IOException | RuntimeException e) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "Excel 解析失败，请确认文件没损坏");
+        }
+        return rows;
+    }
+
+    private List<CellRow> parseCsv(byte[] content) {
+        String text = new String(content, StandardCharsets.UTF_8);
+        // Excel 另存为 CSV 会带 BOM，不去掉第一列就永远匹配不上表头/日期
+        if (text.startsWith("\uFEFF")) {
+            text = text.substring(1);
+        }
+        List<CellRow> rows = new ArrayList<>();
+        String[] lines = text.split("\r?\n", -1);
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].isBlank()) {
+                continue;
+            }
+            List<String> cells = splitCsvLine(lines[i]);
+            rows.add(new CellRow(i + 1, cells.toArray(new String[0])));
+        }
+        return rows;
     }
 
     private static boolean isBlank(RawRow row) {
