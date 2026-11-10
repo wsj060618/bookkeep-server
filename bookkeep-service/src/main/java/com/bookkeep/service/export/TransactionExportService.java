@@ -28,24 +28,18 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 班费收支表导出（换届交接与公示用，PLAN §5.5.1）。
- * <p>导出 CSV 给 Excel 看：UTF-8 BOM + 两位小数 + yyyy-MM-dd；Excel 双击就出中文表格。
- * 要真 xlsx（双 sheet）再引 easyexcel，先卡住主线。
- * <p><strong>流式写</strong>：{@link #prepare} 只做校验 + 取数（出错还能返回正常 JSON 信封），
- * 之后由 controller 把响应体交给 {@link #writeCsv} 逐行写到输出流，不再在内存里拼一个
- * {@code byte[]}（几千条流水时那是整份文件的 2 份拷贝）。
- * <p>逐行结余在 <strong>全账本</strong>范围内算（见 TransactionMapper.xml）：
- * 只导出某个月时，第一行的结余也是真实余额，不是从 0 开始。
+ * 班费收支表导出（CSV）：UTF-8 BOM + 两位小数 + yyyy-MM-dd，Excel 双击就能看。
+ * <p>流式写：prepare 只校验并取数，writeCsv 逐行输出。
+ * <p>逐行结余在全账本范围内算，只导某个月时首行也是真实余额。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class TransactionExportService {
 
-    /** Excel 只有看到 BOM 才按 UTF-8 读，否则中文乱码——硬要求，不是可选项 */
+    /** Excel 只有看到 BOM 才按 UTF-8 读 */
     private static final String BOM = "\uFEFF";
 
-    /** CSV 用 CRLF：Windows 上的 Excel 对 \n 也认，但双平台统一用这个 */
     private static final String EOL = "\r\n";
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");

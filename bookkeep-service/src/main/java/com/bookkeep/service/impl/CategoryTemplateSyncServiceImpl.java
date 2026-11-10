@@ -23,10 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/**
- * 模板条目 → 账本分类同步（口径见 {@link CategoryTemplateSyncService}）。
- * <p>一本账本最多几百个分类，逐条比对足够；不做批量 SQL，保持与项目其他写入路径一致。
- */
+/** 模板条目 → 账本分类同步，口径见 {@link CategoryTemplateSyncService} */
 @Slf4j
 @Service
 @RequiredArgsConstructor

@@ -38,26 +38,22 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 账本业务实现（PLAN §5.2）。
- * <p>三条规则：
- * <ol>
- *   <li>归属一律按 {@code book.user_id} 校验；别人的账本回「不存在」，不暴露 id 是否有效</li>
- *   <li>删除 = 进回收站（{@code deleted=1 + deleted_at}），15 天内可恢复，到期才彻底删除</li>
- *   <li>始终至少留一本：删到最后一本直接 400，否则其它接口（分类/统计/流水）会全部无账本可用</li>
- * </ol>
+ * 账本业务。
+ * <p>归属一律按 book.user_id 校验（别人的账本返回「不存在」）；
+ * 删除 = 进回收站 15 天；至少留一本。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class BookServiceImpl implements BookService {
 
-    /** 每用户账本上限：单机自用够用，同时挡住脚本刷库 */
+    /** 每用户账本上限 */
     private static final int MAX_BOOKS = 10;
 
     /** 回收站保留天数 */
     public static final int RETENTION_DAYS = 15;
 
-    /** 公示链接有效期：每次分享重新计时，过期即 404 */
+    /** 公示链接有效期 */
     public static final int SHARE_LINK_DAYS = 3;
 
     private final BookMapper bookMapper;

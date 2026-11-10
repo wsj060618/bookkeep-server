@@ -35,12 +35,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 认证业务实现
- * <p>{@link PasswordEncoder} 用接口而不是 {@code BCryptPasswordEncoder}：
- * Bean 由 web 模块的 {@code SecurityConfig} 提供（service 模块不重复定义密码策略），
- * 编译期只依赖 {@code spring-security-crypto}（随 bookkeep-common 的 spring-security-core 传递进来）。
- */
+/** 注册 / 登录 / 当前用户 */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -56,10 +51,8 @@ public class AuthServiceImpl implements AuthService {
     private final AuthThrottle authThrottle;
 
     /**
-     * 注册：建用户 → 建首本账本 → 预置分类 → 回写 current_book_id
-     * <p>全部写操作在同一个事务里，任一步失败整单回滚——绝不能出现「有用户没账本」或「账本只有一半分类」。
-     * <p>用户名只 trim、<strong>不做大小写归一</strong>：{@code user.username} 是
-     * {@code utf8mb4_0900_as_cs}，Tom / tom 是两个账号。大小写语义由列定义保证，不依赖库默认排序规则。
+     * 注册：建用户 → 建首本账本 → 预置分类，同一事务。
+     * <p>用户名不做大小写归一，大小写由列的 as_cs 排序规则保证。
      */
     @Override
     @Transactional(rollbackFor = Exception.class)

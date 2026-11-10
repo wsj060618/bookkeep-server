@@ -18,18 +18,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * 只读安全的 zip 解包（票据导入用）。
- *
- * <p>压缩包来自用户，必须当成恶意输入处理，四条限制缺一不可：
- * <ol>
- *   <li>**条目数 ≤ 1000**：防止几百万个空条目把 inode 打爆</li>
- *   <li>**单条目 ≤ 20MB、解压总量 ≤ 100MB**：`readAllBytes` 读一个 1KB 的 zip 炸弹能解出 10GB，
- *       必须边读边计数、超了立刻中断（不能先读完再判断）</li>
- *   <li>**路径必须落在临时目录内**：`../`、绝对路径、Windows 盘符一律拒绝（Zip Slip）</li>
- *   <li>**只解到临时目录**，调用方读完自己 `deleteRecursively`</li>
- * </ol>
- *
- * <p>`__MACOSX/`、`.DS_Store` 这类 macOS 打包残留直接跳过——用户用访达「压缩」就会带上。
+ * 用户上传的 zip 解包，按恶意输入处理：
+ * 条目 ≤1000、单条目 ≤20MB、总量 ≤100MB（边读边计数）、路径必须在临时目录内。
+ * <p>macOS 打包残留（__MACOSX/、.DS_Store）跳过。
  */
 @Slf4j
 public final class ZipExtractor {

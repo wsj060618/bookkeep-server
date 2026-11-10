@@ -49,26 +49,14 @@ import java.io.OutputStream;
 import java.math.BigDecimal;
 
 /**
- * 流水导出成 xlsx（PLAN §10.3），版式对齐真实班费表：
- *
- * <pre>
- * A1:G1                   班级账本 班费收支明细
- * A2:B2 收入   C2 合计      D..E 柱状图（收入/支出/结余）    F..G 环形图（收支占比）
- * A4:B4 支出   C4 合计
- * A6:B6 结余   C6 合计
- * 第 13 行  序号 | 日期 | 摘要 | 收入 | 支出 | 班费结余 | 备注
- * 第 14 行起 明细
- * </pre>
- *
- * <p>刻意去掉「数量 / 单价 / 人均数量」：系统只存金额，编造数量会误导看表的人。
- * <p>图表数据放在表格右侧被隐藏的 J/K 列（**不是隐藏 sheet**：早先藏在隐藏 sheet 里时
- * Excel 只画出坐标轴、柱子全是空的），这样图表一定拿得到值。
+ * 流水导出 xlsx（版式：汇总在上、图表在右、明细从第 14 行起）。
+ * <p>图表数据放在隐藏的 J/K 列；隐藏 sheet 会让 Excel 丢掉整条序列。
  */
 @Slf4j
 @Service
 public class TransactionExcelExportService {
 
-    /** 表头行（0 基）：图表竖直排在它上面 */
+    /** 表头行（0 基） */
     private static final int HEADER_ROW = 12;
     private static final int FIRST_DATA_ROW = 13;
 

@@ -5,14 +5,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * 新增 / 修改分类的请求体。
- * <p>新增时 type 必填；修改时 type 不可变更（改了会让该分类下历史流水的收支方向失真），
- * Service 会校验「传上来的 type 与库里一致」。
- *
- * @param name  分类名，≤50
- * @param type  income / expense
- * @param icon  图标语义 key（前端映射），可空
- * @param color 颜色语义 key（前端映射），可空
+ * 新增 / 修改分类。修改时不能改 type（Service 校验）。
  */
 public record CategoryReq(
 

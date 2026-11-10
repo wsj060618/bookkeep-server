@@ -21,20 +21,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * 给**历史账号**补一套默认分类模板。
- *
- * <p>为什么需要：早期「内置模板」只是 `CategoryPresets` 的常量投影（id=0，库里没有行），
- * 所以改不了、也不能在列表里当普通模板编辑。现在注册时会直接落一套真实模板
- * （见 AuthServiceImpl#register），历史账号就得补一次，否则它们仍然只有那个只读投影。
- *
- * <p>三条安全约束：
- * <ol>
- *   <li>**只在账号一套模板都没有时**才补——用户自己删光了模板也不该被强行塞回来？
- *       这里选择补（否则该账号再也建不了模板，且页面只剩只读投影），代价是可以接受的一次性行为</li>
- *   <li>补完把 `book.category_template_id IS NULL` 的老账本指向它（旧语义 NULL = 内置），
- *       否则前端「当前账本用的是哪套模板」会显示不出来</li>
- *   <li>不改任何分类数据：账本里的 category 行保持原样（它们本来就是这套 seeds 的拷贝）</li>
- * </ol>
+ * 给历史账号补一套默认模板（注册时就有真实模板，这个只服务于老账号）。
+ * <p>仅当账号一套模板都没有时才补，补完把 category_template_id 为 NULL 的老账本指过去，
+ * 并把账本里同名的分类挂回条目。不改任何分类数据。
  */
 @Slf4j
 @Component

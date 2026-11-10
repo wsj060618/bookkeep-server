@@ -17,15 +17,9 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * 安全配置（第 7 天起为正式版）。
- * <p>规则：{@code /api/auth/register}、{@code /api/auth/login}、{@code /api/public/report/**} 放行，
- * 其余（含 {@code /api/auth/me}）都要 token。
- * <p>注意<strong>不能</strong>写成 {@code /api/auth/**}：那会把 {@code /api/auth/me} 也放行，
- * 匿名请求进去后 {@code SecurityUtil.getUserId()} 只能抛 401，等于把「是否登录」的判断散到业务层。
- * <p>过滤器手动 {@code new}：{@link JwtAuthenticationFilter} 不是 Bean，避免 Boot 把它额外注册到 Servlet 容器。
- * <p>401 / 403 都输出「真实状态码 + 同一套 JSON 信封」：401 由 {@link JwtAuthenticationEntryPoint} 写，
- * 403 由 {@link JwtAccessDeniedHandler} 写。这两个处理器是仅有的「状态码 ≠ 200」的出口，
- * 业务错误一律 200 + body.code（见 {@code GlobalExceptionHandler}）。
+ * 安全配置：注册/登录/找回密码/公示页放行，其余都要 token。
+ * <p>不能写成 /api/auth/**，会把 /me 也放行。
+ * <p>401/403 用真实状态码 + 同一套 JSON 信封，其余错误一律 200 + body.code。
  */
 @Configuration
 @EnableWebSecurity
@@ -47,19 +41,18 @@ public class SecurityConfig {
                         // 不放过就会在「响应已提交」之后抛 401，客户端只能拿到半截文件
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/api/auth/register", "/api/auth/login",
-                                "/api/auth/forgot-password", "/api/auth/reset-password").permitAll() // 登录/找回密码，其余 /api/auth/** 仍需认证
-                        // 公示页：同学看账不需要账号，这是公网唯一放行的只读入口（PLAN §5.9）
+                                "/api/auth/forgot-password", "/api/auth/reset-password").permitAll()
+                        // 公示页：免登录只读
                         .requestMatchers("/api/public/report/**").permitAll()
-                        .requestMatchers("/error").permitAll() // 容器错误转发也是过滤器链的一环，放行避免 401 盖掉真实错误
-                        .anyRequest().authenticated()) // 其余全部需要认证
+                        .requestMatchers("/error").permitAll()
+                        .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
-                        .authenticationEntryPoint(authenticationEntryPoint) // 401 统一 JSON
-                        .accessDeniedHandler(accessDeniedHandler)) // 403 统一 JSON（默认是 HTML 错误页）
-                // 注册在 UsernamePasswordAuthenticationFilter 之前：Spring Security 的惯例位置，
-                // 保证业务过滤器看到 SecurityContext 时已经填好
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler))
+                // 手动 new，避免 Boot 把 Filter 再注册一遍
                 .addFilterBefore(new JwtAuthenticationFilter(jwtUtil, userMapper), UsernamePasswordAuthenticationFilter.class)
-                .httpBasic(AbstractHttpConfigurer::disable) // 禁用 httpBasic
-                .formLogin(AbstractHttpConfigurer::disable); // 禁用 formLogin
+                .httpBasic(AbstractHttpConfigurer::disable)
+                .formLogin(AbstractHttpConfigurer::disable);
         return http.build();
     }
 }

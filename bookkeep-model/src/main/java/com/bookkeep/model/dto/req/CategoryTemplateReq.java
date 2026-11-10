@@ -7,16 +7,8 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 
 /**
- * 新建 / 修改分类模板的请求体。
- * <p>三种用法：
- * <ul>
- *   <li>{@code POST /api/category-templates} + items：从零新建一套模板</li>
- *   <li>{@code POST /api/category-templates/from-book}：只带 name，把当前账本的分类快照成模板</li>
- *   <li>{@code PUT /api/category-templates/{id}}：name 必填；items 非空时**整体替换**条目</li>
- * </ul>
- *
- * @param name  模板名，≤50，同一账号内唯一
- * @param items 模板条目；新建时必须非空，改名的 PUT 可以不传
+ * 新建 / 修改分类模板。
+ * <p>新建带 items；from-book 只带 name；PUT 时 items 不传 = 只改名。
  */
 public record CategoryTemplateReq(
 

@@ -21,14 +21,10 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * JWT 认证过滤器：解析 {@code Authorization: Bearer <token>}，把 userId 放进 SecurityContext。
- * <p>只负责「认证」（你是谁），不负责「403 / 401 长什么样」：token 无效时不认证、继续走链，
- * 由 {@code JwtAuthenticationEntryPoint} 统一输出 JSON —— 401 只有一处实现，前端不用分辨两种错误格式。
- * <p><strong>故意不加 {@code @Component}</strong>：Boot 会把容器里所有 {@code Filter} 类型的 Bean
- * 自动注册进 Servlet 容器，那样这个过滤器会在安全过滤链之外再跑一遍。改由 {@code SecurityConfig} 手动 new。
- * <p>每个已认证请求多一次 {@code selectById}：只为了比对 {@code user.token_version}，
- * 这是「改密码后旧 token 立即失效」的实现点。用户查不到（已注销）时仍放行认证，
- * 401 交给业务层，保持既有契约（{@code AuthMeTest.softDeletedUserTokenRejected}）。
+ * 解析 Bearer token，把 userId 放进 SecurityContext。
+ * <p>只做认证，不写 401（无效 token 就不认证，交给 EntryPoint）。
+ * <p>不能加 @Component：Boot 会把 Filter Bean 再注册一遍，由 SecurityConfig 手动 new。
+ * <p>每个请求多一次 selectById，用于比对 token_version（改密码后旧 token 失效）。
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -36,7 +32,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "Bearer ";
 
-    /** 目前没有角色概念，先给一个占位角色，后续要分权限时再改 */
+    /** 还没有角色概念，占位 */
     private static final List<SimpleGrantedAuthority> AUTHORITIES =
             List.of(new SimpleGrantedAuthority("ROLE_USER"));
 

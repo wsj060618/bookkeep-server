@@ -32,10 +32,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 流水业务实现。
- * <p>三条不变量：不越权（查询必带 book_id）、方向一致（流水 type = 分类 type）、支出不超余额。
- * <p>列表不 join category：过滤条件都在 transaction 表上，Wrapper 能白拿 {@code deleted = 0}；
- * 分类名再按 id 批量补一次（避免 N+1）。
+ * 流水业务。三条不变量：不越权（查询必带 book_id）、方向与分类一致、支出不超余额。
  */
 @Slf4j
 @Service

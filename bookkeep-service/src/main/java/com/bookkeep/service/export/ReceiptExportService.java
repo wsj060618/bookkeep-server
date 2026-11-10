@@ -35,35 +35,18 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * zip 导出（PLAN §10.9），两种包**互相独立**：
- *
- * <pre>
- * ① 账本导出（GET /api/transactions/export?format=zip）——完整备份，可再导入
- *   {账本名}_账本_全部.zip
- *     ├── 流水.csv                     全部流水（与「导出 CSV」同一套内容）
- *     ├── manifest.csv                有票据的流水：日期/类型/分类/金额/备注/标题/相对路径
- *     └── {账本名}_{bookId}/{yyyy-MM}/{票据标题}.{ext}
- *
- * ② 票据导出（GET /api/transactions/receipts/export）——**只要图片**
- *   {账本名}_票据_全部.zip
- *     └── {账本名}_{bookId}/{yyyy-MM}/{票据标题}.{ext}
- *
- * 单笔（GET /api/transactions/{id}/receipts/export）同理只要图片，统一放「图片/」文件夹。
- * </pre>
- *
- * <p>zip 内目录与磁盘一致：解开就能对上 `data/receipts` 的结构，换届打包拷走不用额外整理。
- * <p>上限（≤200 张、≤100MB）在**写响应之前**校验，超了还能正常返回 200+JSON 信封，
- * 而不是写到一半断流。
+ * 票据/账本的 zip 导出。
+ * <p>账本导出（format=zip）= 流水.csv + manifest.csv + 图片，可再导入；
+ * 票据导出（receipts/export）= 只要图片。
+ * <p>上限（≤200 张、≤100MB）在写响应前校验，超了还能返回正常的 200+JSON 信封。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ReceiptExportService {
 
-    /** 一次最多打 200 张：再多就该缩小日期范围，否则 try 机上内存和带宽都扛不住 */
     private static final int MAX_RECEIPTS = 200;
 
-    /** 一次最多 100MB */
     private static final long MAX_BYTES = 100L * 1024 * 1024;
 
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -78,10 +61,7 @@ public class ReceiptExportService {
     private final ReceiptStorage storage;
     private final TransactionExportService transactionExportService;
 
-    /**
-     * 账本导出计划（`format=zip`）：**完整备份包**——流水.csv + manifest.csv + 票据图片。
-     * <p>没有票据也允许导出（照样是一份能再导入的流水包），只有「这个范围内没有流水」才 400。
-     */
+    /** 账本导出包：流水.csv + manifest.csv + 图片；没有票据也能导，只是没有图片 */
     @Transactional(readOnly = true)
     public ExportPlan prepareBookPackage(LocalDate startDate, LocalDate endDate) {
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
@@ -107,14 +87,7 @@ public class ReceiptExportService {
                 false, true);
     }
 
-    /**
-     * 票据导出计划（账本级，可带区间）：**只要图片**，不带 manifest / 流水 CSV。
-     * <p>用途是「把票据图拷走」，不是备份；要完整备份用 {@link #prepareBookPackage}。
-     * <pre>
-     * {账本名}_票据_全部.zip
-     *   └── {账本名}_{bookId}/{yyyy-MM}/{票据标题}.{ext}
-     * </pre>
-     */
+    /** 票据导出：只要图片，不带 manifest / 流水 CSV */
     @Transactional(readOnly = true)
     public ExportPlan prepareBookImages(LocalDate startDate, LocalDate endDate) {
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
@@ -141,13 +114,7 @@ public class ReceiptExportService {
                 false, false);
     }
 
-    /**
-     * 单笔导出计划：这一笔的票据打成 zip，**只要图片**，统一放一个文件夹里。
-     * <pre>
-     * {账本名}_{日期}_{分类}_{金额}.zip
-     *   └── 图片/2026-09-05_超市小票.png
-     * </pre>
-     */
+    /** 单笔导出：只要图片，统一放「图片/」文件夹 */
     @Transactional(readOnly = true)
     public ExportPlan prepareSingle(Long transactionId) {
         Long bookId = currentBookService.currentBookId();
@@ -170,18 +137,17 @@ public class ReceiptExportService {
         return build(filename, List.of(transaction), receipts, null, one -> "图片/", true, false);
     }
 
-    /** 流式写 zip：逐个文件 copy，不把图片读进内存；manifest / 流水 CSV 按包里有没有来决定 */
+    /** 逐个文件 copy，不把图片读进内存 */
     public void write(ExportPlan plan, OutputStream out) throws IOException {
         try (ZipOutputStream zip = new ZipOutputStream(out, StandardCharsets.UTF_8)) {
             if (plan.manifest() != null) {
                 zip.putNextEntry(new ZipEntry("manifest.csv"));
-                // BOM：manifest 用 Excel 双击打开时中文不乱码（与 CSV 导出同一个约定）
+                // Excel 双击打开时中文不乱码
                 zip.write("\uFEFF".getBytes(StandardCharsets.UTF_8));
                 zip.write(plan.manifest().getBytes(StandardCharsets.UTF_8));
                 zip.closeEntry();
             }
 
-            // 流水.csv：和「导出 CSV」同一套内容（含标题/汇总/明细），导入端能直接识别
             if (plan.flowPlan() != null) {
                 zip.putNextEntry(new ZipEntry("流水.csv"));
                 java.io.Writer writer = new java.io.OutputStreamWriter(zip, StandardCharsets.UTF_8);
@@ -239,11 +205,11 @@ public class ReceiptExportService {
         Map<Long, String> categoryNames = loadCategoryNames(transactions);
 
         List<Entry> entries = new ArrayList<>(receipts.size());
-        // 只要图片的包（票据导出/单笔导出）不生成 manifest：那不是备份包，是「把图拷走」
+        // 票据导出不生成 manifest
         StringBuilder manifest = withManifest
                 ? new StringBuilder("日期,类型,分类,金额,备注,票据标题,相对路径\n")
                 : null;
-        // 同一目录下重名就加 _2 / _3（两张「超市小票」很常见）
+        // 同一目录下重名就加 _2 / _3
         Map<String, Integer> seen = new HashMap<>();
 
         for (TransactionReceipt receipt : receipts) {
@@ -253,8 +219,7 @@ public class ReceiptExportService {
             }
             String dir = dirOf.apply(transaction);
             String ext = extOf(receipt.getContentType());
-            // 账本级：目录已经是「账本/年月」，文件名直接用票据标题，不再重复日期；
-            // 单笔：图片都在一个「图片/」文件夹里，没有日期信息，文件名保留日期前缀。
+            // 账本级的日期已经在目录里了，文件名只用标题；单笔没有日期信息，保留前缀
             String base = dateInName
                     ? DATE.format(transaction.getTransDate()) + "_" + safeFileName(receipt.getTitle())
                     : safeFileName(receipt.getTitle());
@@ -264,9 +229,7 @@ public class ReceiptExportService {
             String pathInZip = dir + name;
 
             Path file = storagePath(receipt.getStoredPath());
-            // 磁盘上没这张图（只恢复了数据库、或手工删过文件）时不能直接拷贝：
-            // Files.copy 会抛异常，而响应早已开始写，客户端只会拿到一个「图是 0 字节」的坏包。
-            // 这里跳过文件本身，但 manifest 里留一行「文件缺失」，便于人工核对缺了什么。
+            // 文件缺失不能直接 copy（响应已开始写，客户端会拿到坏包）；跳过，但 manifest 里留一行
             boolean readable = Files.isReadable(file);
             if (readable) {
                 entries.add(new Entry(pathInZip, file));
@@ -316,7 +279,7 @@ public class ReceiptExportService {
         return text;
     }
 
-    /** 文件名/目录名里不能出现的字符（跨 Windows/Linux 都安全的那一set） */
+    /** 替换掉 Windows/Linux 都不允许的字符 */
     private static String safeFileName(String name) {
         String cleaned = name == null ? "" : name.trim()
                 .replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]", "_")
@@ -328,11 +291,11 @@ public class ReceiptExportService {
         return cleaned.length() > 30 ? cleaned.substring(0, 30) : cleaned;
     }
 
-    /** zip 内一个文件；写出时只按路径 copy，不缓存字节 */
+    /** zip 内一个文件，写出时只按路径 copy */
     public record Entry(String pathInZip, Path file) {
     }
 
-    /** 导出计划：文件名 + 条目 + manifest 内容（仅账本包有）+ 随包附带的流水 CSV 计划（仅账本包有） */
+    /** manifest / flowPlan 只有账本导出包才有，票据导出为 null */
     public record ExportPlan(String filename, List<Entry> entries, String manifest,
                              TransactionExportService.ExportPlan flowPlan) {
     }

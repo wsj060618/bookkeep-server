@@ -18,38 +18,25 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 票据文件的落盘规则（PLAN §10.9），只有这一处实现：
- *
- * <pre>
- * {receipt.dir}
- *   └── {安全化账本名}_{bookId}/
- *         └── {yyyy-MM}/                 ← 取流水的 trans_date，不是上传时间
- *               └── {uuid}.{jpg|png|webp}
- * </pre>
- *
- * <p>三条硬规则：
- * <ol>
- *   <li>落盘名一律服务端 UUID，**用户起的标题永不进路径**（否则 `../` 就能写到目录外）</li>
- *   <li>扩展名按**魔数识别**出来的类型定，不看用户上传的文件名（`.php` 改成 `.jpg` 也骗不过）</li>
- *   <li>账本改名不搬目录：{@code stored_path} 才是唯一事实来源，目录名只是便于人看</li>
- * </ol>
+ * 票据文件落盘规则：{receipt.dir}/{安全化账本名}_{bookId}/{yyyy-MM}/{uuid}.{ext}。
+ * <p>文件名用 UUID，用户标题不进路径；扩展名按魔数类型定；改名不搬目录（stored_path 是唯一事实来源）。
  */
 @Slf4j
 @Component
 public class ReceiptStorage {
 
-    /** 单张上限 5MB：手机随手拍一张小票通常 1–3MB，够用又不至于把试用机磁盘塞满 */
+    /** 单张 5MB */
     public static final long MAX_FILE_BYTES = 5L * 1024 * 1024;
 
-    /** 单笔最多 9 张：一张小票拆多张拍也就 2–3 张，9 张已经非常宽松 */
+    /** 单笔最多 9 张 */
     public static final int MAX_PER_TRANSACTION = 9;
 
-    /** 单用户总配额 500MB：超了提示清理，避免试用机磁盘被打满 */
+    /** 单账号 500MB */
     public static final long MAX_BYTES_PER_USER = 500L * 1024 * 1024;
 
     private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("yyyy-MM");
 
-    /** 目录名里不能出现的字符（Windows 最严格：\ / : * ? " < > | 与控制字符） */
+    /** Windows 不允许出现在目录名里的字符 */
     private static final String ILLEGAL = "\\\\/:*?\"<>|";
 
     private static final int DIR_NAME_MAX = 30;

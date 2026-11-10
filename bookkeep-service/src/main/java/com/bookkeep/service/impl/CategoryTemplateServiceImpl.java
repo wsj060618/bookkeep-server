@@ -35,20 +35,15 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 分类模板实现。
- * <p>三条规则：
- * <ol>
- *   <li>模板跟**账号**走（{@code SecurityUtil.getUserId()}），不按账本隔离；应用时才落到当前账本</li>
- *   <li>内置模板 id 固定 0、不入库，内容取 {@link CategoryPresets}——注册预置的分类与内置模板必须永远一致</li>
- *   <li>应用模板要求账本**没有任何流水**：换模板会把分类整套换掉，已有流水的分类归属就断了</li>
- * </ol>
+ * 分类模板。模板跟账号走，应用/新建账本时才落到账本；
+ * 应用模板要求账本没有流水（换模板会整套换掉分类）。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class CategoryTemplateServiceImpl implements CategoryTemplateService {
 
-    /** 一套模板最多几条：够用，同时挡住脚本灌垃圾 */
+    /** 一套模板最多 100 条 */
     private static final int MAX_ITEMS = 100;
 
     private final CategoryTemplateMapper templateMapper;

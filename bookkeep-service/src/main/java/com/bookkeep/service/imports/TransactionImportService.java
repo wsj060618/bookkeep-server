@@ -30,24 +30,18 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 流水导入（PLAN §10.3）：CSV / xlsx，列固定为「日期, 类型, 分类, 金额, 备注」。
- * <p>三条原则：
- * <ol>
- *   <li>**行级失败不阻塞其它行**：能入的照常入，失败的行带行号与原因返回给前端</li>
- *   <li>**分类不存在就报错，绝不自动建分类**：一份脏文件不该在账本里长出一堆脏分类</li>
- *   <li>**支出仍受余额约束**：按文件顺序累加余额，入不敷出的那一行失败</li>
- * </ol>
- * <p>整份文件在一个事务里，但失败行是被 catch 掉的业务错误，不会把已成功的行回滚。
+ * 流水导入（CSV / xlsx，列固定为 日期,类型,分类,金额,备注）。
+ * <p>行级失败不阻塞其它行；分类不存在直接报错，不自动建；支出仍受余额约束。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class TransactionImportService {
 
-    /** 一次最多 2000 行：再多就该分批导，也避免一份大文件把请求拖死 */
+    /** 一次最多 2000 行 */
     private static final int MAX_ROWS = 2000;
 
-    /** 文件大小上限，和 application.yml 的 multipart 限制保持一致 */
+    /** 与 application.yml 的 multipart 限制一致 */
     private static final long MAX_BYTES = 5L * 1024 * 1024;
 
     private static final int NOTE_MAX = 255;
@@ -56,8 +50,7 @@ public class TransactionImportService {
     private final TransactionMapper transactionMapper;
     private final CategoryMapper categoryMapper;
 
-    /** 文件里的一行（已解析成字符串，未校验） */
-    /** 文件里的一行（已解析成字符串，未校验）；包级可见：账本包导入要复用它建流水 */
+    /** 文件里的一行（已解析、未校验）；账本包导入也复用它 */
     record RawRow(int line, String date, String type, String category, String amount, String note) {
     }
 

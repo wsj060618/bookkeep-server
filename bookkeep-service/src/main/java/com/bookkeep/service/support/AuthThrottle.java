@@ -12,15 +12,9 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 登录 / 注册的进程内限流（PLAN §9 第 1 条：公网部署的前置条件）。
- * <p>三个维度：
- * <ul>
- *   <li>{@code IP + email} 的连续失败次数：默认 5 次 / 5 分钟，登录成功清零；</li>
- *   <li>单 IP 每分钟登录请求数：默认 30 次（防用户名喷洒）；</li>
- *   <li>单 IP 每小时注册数：默认 5 次（防批量注册）。</li>
- * </ul>
- * <p>默认值在 {@code application.yml} 里放得很宽松（局域网用不到），严格值写在
- * {@code application-prod.yml}；单实例内存计数，多实例部署需要换共享存储。
+ * 登录/注册的进程内限流（单实例，多实例部署要换共享存储）。
+ * <p>prod 严格值在 application-prod.yml：同 IP+email 连续失败 5 次锁 5 分钟、
+ * 单 IP 30 次/分钟登录、5 次/小时注册。
  */
 @Component
 public class AuthThrottle {

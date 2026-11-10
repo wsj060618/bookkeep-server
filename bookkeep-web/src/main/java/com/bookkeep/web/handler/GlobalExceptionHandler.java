@@ -23,17 +23,8 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import java.io.IOException;
 
 /**
- * 全局异常处理：所有响应统一为 {@code {code, message, data}}。
- * <p>HTTP 状态码策略（第 7 天定稿，见 PLAN §5）：
- * <ul>
- *   <li>业务异常 → 仍是 <strong>HTTP 200</strong>，语义放在 body 的 {@code code} 里。
- *       调用方抛 {@code BusinessException} 时不必关心状态码，{@code 400/401/403} 一视同仁；</li>
- *   <li>认证/授权失败 → <strong>真实 401/403</strong>：过滤器链里的由
- *       {@link JwtAuthenticationEntryPoint} / {@link JwtAccessDeniedHandler} 输出，
- *       方法级鉴权（{@code @PreAuthorize}）抛出的 {@link AccessDeniedException} 由本类转交同一个
- *       {@link JwtAccessDeniedHandler}，保证两条路径的 JSON 一模一样。</li>
- * </ul>
- * <p>日志约定：4xx 类（客户端问题）打 warn 不打堆栈；未预期异常打 error 并带完整堆栈。
+ * 全局异常处理：响应统一为 {code, message, data}。
+ * <p>业务异常一律 HTTP 200（语义在 body.code）；只有认证/授权失败用真实 401/403。
  */
 @Slf4j
 @RestControllerAdvice
@@ -50,11 +41,8 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 授权失败（{@code @PreAuthorize}、{@code @Secured} 等方法级鉴权抛出）。
-     * <p>为什么要显式声明：下面的兜底 {@code @ExceptionHandler(Exception.class)} 会把它吞成
-     * {@code 200 + code=500}。它在语义上是「登录了但没权限」，必须是真实 403 + {@code code=403}，
-     * 否则前端拿到 500 只会提示「服务器异常」，排不出是权限问题。
-     * <p>这里直接写响应（不走返回值），并委托给过滤器链用的同一个 403 处理器。
+     * 方法级鉴权抛出的 403。
+     * <p>必须显式声明：否则会被兜底的 Exception 处理吞成 200 + code=500。
      */
     @ExceptionHandler(AccessDeniedException.class)
     public void handleAccessDenied(HttpServletRequest request,
