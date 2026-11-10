@@ -17,7 +17,14 @@ public record CategoryTemplateResp(
         List<Item> items
 ) {
 
+    /**
+     * @param id        条目 id（`category_template_item.id`）；内置模板投影为 null。
+     *                  前端保存模板时**要把它带回来**，后端据此知道「这条是改名还是新增」，
+     *                  从而把改名同步到账本分类而不是删旧建新。
+     * @param sortOrder 展示顺序
+     */
     public record Item(
+            Long id,
             String name,
             String type,
             String icon,

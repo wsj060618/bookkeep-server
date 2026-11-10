@@ -22,6 +22,9 @@ public class Category {
     /** 收支类型：income / expense（常量见 {@code CategoryTemplate}）。 */
     private String type;
 
+    /** 来自哪个模板条目（`category_template_item.id`）；NULL = 用户自建，不参与模板同步。 */
+    private Long templateItemId;
+
     private String icon;
 
     private String color;

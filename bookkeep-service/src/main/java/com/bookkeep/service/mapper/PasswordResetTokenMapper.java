@@ -23,4 +23,12 @@ public interface PasswordResetTokenMapper extends BaseMapper<PasswordResetToken>
     /** 标记单个 token 已使用（配合 condition 里的 used_at IS NULL 做到「只能用一次」） */
     @Update("UPDATE password_reset_token SET used_at = NOW() WHERE id = #{id} AND used_at IS NULL")
     int markUsed(@Param("id") Long id);
+
+    /**
+     * 清掉已过期的 token。
+     * <p>过期后兑换必然失败（查的时候要求 `expires_at > now()`），留着只是垃圾；
+     * 有流水式的定时任务来跑，不在登录/找回路径上做写操作。
+     */
+    @org.apache.ibatis.annotations.Delete("DELETE FROM password_reset_token WHERE expires_at < NOW()")
+    int deleteExpired();
 }

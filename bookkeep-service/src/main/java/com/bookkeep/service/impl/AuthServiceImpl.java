@@ -31,7 +31,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 认证业务实现
@@ -98,6 +100,8 @@ public class AuthServiceImpl implements AuthService {
         template.setUserId(user.getId());
         template.setName(CategoryPresets.BUILTIN_NAME);
         templateMapper.insert(template);
+        // 账本分类要记住「来自哪个模板条目」：以后改模板时才能跟着改名/删除（见 CategoryTemplateSyncService）
+        Map<String, Long> itemIdByKey = new HashMap<>();
         for (CategoryPresets.Seed seed : seeds) {
             CategoryTemplateItem item = new CategoryTemplateItem();
             item.setTemplateId(template.getId());
@@ -107,6 +111,7 @@ public class AuthServiceImpl implements AuthService {
             item.setColor(seed.color());
             item.setSortOrder(seed.sortOrder());
             templateItemMapper.insert(item);
+            itemIdByKey.put(seed.type() + "|" + seed.name(), item.getId());
         }
 
         // 3) 班级账本：注册必建，名字可空（为空用默认「班级账本」）
@@ -128,7 +133,7 @@ public class AuthServiceImpl implements AuthService {
         //    事务快照在第一次读时已固定，另一个连接后提交的行对它是不可见的）。
         //    13 条固定数据，逐条 insert 的性能代价可以忽略，换来事务语义确定、代码更好读。
         List<Category> categories = seeds.stream()
-                .map(seed -> toCategory(book.getId(), seed))
+                .map(seed -> toCategory(book.getId(), seed, itemIdByKey.get(seed.type() + "|" + seed.name())))
                 .toList();
         categories.forEach(categoryMapper::insert);
 
@@ -200,11 +205,12 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /** 模板条目 → 分类实体（只做字段映射，图标/颜色存的是语义 key） */
-    private Category toCategory(Long bookId, CategoryPresets.Seed seed) {
+    private Category toCategory(Long bookId, CategoryPresets.Seed seed, Long templateItemId) {
         Category category = new Category();
         category.setBookId(bookId);
         category.setName(seed.name());
         category.setType(seed.type());
+        category.setTemplateItemId(templateItemId);
         category.setIcon(seed.icon());
         category.setColor(seed.color());
         category.setSortOrder(seed.sortOrder());

@@ -7,6 +7,7 @@ import com.bookkeep.model.entity.CategoryTemplateItem;
 import com.bookkeep.model.entity.User;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.BookMapper;
+import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.CategoryTemplateItemMapper;
 import com.bookkeep.service.mapper.CategoryTemplateMapper;
 import com.bookkeep.service.mapper.UserMapper;
@@ -42,6 +43,7 @@ public class DefaultTemplateInitializer implements ApplicationRunner {
 
     private final UserMapper userMapper;
     private final BookMapper bookMapper;
+    private final CategoryMapper categoryMapper;
     private final CategoryTemplateMapper templateMapper;
     private final CategoryTemplateItemMapper templateItemMapper;
 
@@ -61,6 +63,9 @@ public class DefaultTemplateInitializer implements ApplicationRunner {
                     .eq("user_id", user.getId())
                     .isNull("category_template_id")
                     .set("category_template_id", templateId));
+            // 账本里原本就有的分类（当年按同一套 seeds 建的）挂回上面的条目，
+            // 否则之后保存模板时认不出「这条分类是模板里的哪一条」
+            categoryMapper.linkToTemplateItems(templateId);
             created++;
         }
         if (created > 0) {

@@ -66,7 +66,9 @@ Content-Type: application/json
   "name": "秋季学期（改）"
 }
 
-### 7. 替换条目：带 items = 整体替换（旧的条目全删掉）
+### 7. 更新条目：带 id = 改那条（改名/换图标），不带 id = 新增，没出现的 = 删除
+###    注意：保存会同步到用过这套模板的账本 → 新增补分类、改名改分类名、删除要求该分类没有流水
+###    （真实 id 从第 1 步的响应里拿，这里写 0 只是占位）
 PUT {{host}}/api/category-templates/{{templateId}}
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -74,7 +76,20 @@ Content-Type: application/json
 {
   "name": "秋季学期（改）",
   "items": [
-    { "name": "唯一分类", "type": "income", "icon": "fee", "color": "green" }
+    { "id": 0, "name": "打印费（改）", "type": "expense", "icon": "print", "color": "cyan" },
+    { "name": "班服", "type": "expense", "icon": "cloth", "color": "blue" }
+  ]
+}
+
+### 7b. 删掉已被流水引用的分类 → 400「…下还有 N 笔流水，不能从模板删掉」，整次保存回滚
+PUT {{host}}/api/category-templates/{{templateId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "秋季学期（改）",
+  "items": [
+    { "name": "留一个", "type": "expense" }
   ]
 }
 
@@ -87,7 +102,7 @@ Content-Type: application/json
   "name": "改名试试"
 }
 
-### 9. 删除模板：已套用过它的账本不受影响（分类是复制过去的），只把 categoryTemplateId 清空
+### 9. 删除模板：账本保留现有分类，只是不再跟这套模板同步（categoryTemplateId 清空）
 DELETE {{host}}/api/category-templates/{{templateId}}
 Authorization: Bearer {{token}}
 

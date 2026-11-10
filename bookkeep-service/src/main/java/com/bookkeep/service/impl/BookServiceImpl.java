@@ -107,6 +107,8 @@ public class BookServiceImpl implements BookService {
             category.setBookId(book.getId());
             category.setName(item.name());
             category.setType(item.type());
+            // 记下来源：以后改模板时，这一本账本的分类才能跟着改名/删除
+            category.setTemplateItemId(item.id());
             category.setIcon(item.icon());
             category.setColor(item.color());
             category.setSortOrder(item.sortOrder());

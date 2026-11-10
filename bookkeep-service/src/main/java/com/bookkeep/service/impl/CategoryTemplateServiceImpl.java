@@ -12,6 +12,7 @@ import com.bookkeep.model.entity.CategoryTemplate;
 import com.bookkeep.model.entity.CategoryTemplateItem;
 import com.bookkeep.model.entity.Transaction;
 import com.bookkeep.service.CategoryTemplateService;
+import com.bookkeep.service.CategoryTemplateSyncService;
 import com.bookkeep.service.CurrentBookService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.BookMapper;
@@ -56,6 +57,7 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
     private final BookMapper bookMapper;
     private final TransactionMapper transactionMapper;
     private final CurrentBookService currentBookService;
+    private final CategoryTemplateSyncService templateSyncService;
 
     @Override
     @Transactional(readOnly = true)
@@ -166,15 +168,15 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
 
         List<CategoryTemplateItem> items;
         if (req.items() == null) {
-            // 只改名：条目原样保留
-            items = itemMapper.selectList(Wrappers.<CategoryTemplateItem>query()
-                    .eq("template_id", id)
-                    .orderByAsc("sort_order", "id"));
+            // 只改名：条目原样保留，账本也不用动
+            items = loadItems(id);
         } else {
-            // 传了 items = 整体替换（模板条目不多，省一套增删改接口，也不会出现「改了一半」的状态）
             List<CategoryTemplateReq.Item> wanted = requireItems(req.items());
-            itemMapper.delete(Wrappers.<CategoryTemplateItem>query().eq("template_id", id));
-            items = insertItems(id, wanted);
+            // 增量替换而不是删了重插：id 必须保留，否则「改名」会退化成「删旧建新」，
+            // 一碰到流水就被拦住，用户永远改不动名字
+            items = replaceItems(id, wanted);
+            // 同一事务里推进账本：任何一本账本被流水挡住 → 模板改动也一起回滚
+            templateSyncService.syncBooks(id, userId, items);
         }
 
         log.info("修改模板：userId={}, templateId={}, name={}, items={}", userId, id, name, items.size());
@@ -188,6 +190,8 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
         Long userId = SecurityUtil.getUserId();
         requireOwned(id, userId);
 
+        // 账本侧不再跟这套模板走，先把分类上的来源标记清掉，避免留下指向不存在条目的 id
+        categoryMapper.clearTemplateItemLinks(id);
         itemMapper.delete(Wrappers.<CategoryTemplateItem>query().eq("template_id", id));
         templateMapper.deleteById(id);
         // 引用它的账本指回内置模板；回收站里的账本也要清，否则恢复后会指向一个不存在的模板
@@ -216,6 +220,7 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
             category.setBookId(bookId);
             category.setName(item.name());
             category.setType(item.type());
+            category.setTemplateItemId(item.id());
             category.setIcon(StringUtils.hasText(item.icon()) ? item.icon() : "other");
             category.setColor(StringUtils.hasText(item.color()) ? item.color() : "gray");
             category.setSortOrder(item.sortOrder());
@@ -240,7 +245,7 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
     private CategoryTemplateResp builtinResp() {
         List<CategoryTemplateResp.Item> items = CategoryPresets.classCategories().stream()
                 .map(seed -> new CategoryTemplateResp.Item(
-                        seed.name(), seed.type(), seed.icon(), seed.color(), seed.sortOrder()))
+                        null, seed.name(), seed.type(), seed.icon(), seed.color(), seed.sortOrder()))
                 .toList();
         return new CategoryTemplateResp(CategoryPresets.BUILTIN_ID, CategoryPresets.BUILTIN_NAME, true, items);
     }
@@ -293,6 +298,7 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
             throw new BusinessException(ResultCode.BAD_REQUEST, "一套模板最多 " + MAX_ITEMS + " 个分类");
         }
         Set<String> seen = new HashSet<>();
+        Set<Long> seenIds = new HashSet<>();
         for (CategoryTemplateReq.Item item : items) {
             String type = item.type();
             if (!CategoryPresets.TYPE_INCOME.equals(type) && !CategoryPresets.TYPE_EXPENSE.equals(type)) {
@@ -305,6 +311,9 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
             if (!seen.add(type + "|" + name)) {
                 throw new BusinessException(ResultCode.BAD_REQUEST,
                         "同一方向下分类名不能重复：「" + name + "」");
+            }
+            if (item.id() != null && !seenIds.add(item.id())) {
+                throw new BusinessException(ResultCode.BAD_REQUEST, "同一条分类在请求里出现了两次");
             }
         }
         return items;
@@ -328,8 +337,61 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
         return saved;
     }
 
+    private List<CategoryTemplateItem> loadItems(Long templateId) {
+        return itemMapper.selectList(Wrappers.<CategoryTemplateItem>query()
+                .eq("template_id", templateId)
+                .orderByAsc("sort_order", "id"));
+    }
+
+    /**
+     * 增量替换条目：带 id 的就地改、没 id 的新建、这次没出现的删掉。
+     * <p>**id 必须留住**：账本分类靠 `template_item_id` 认亲，删了重插会让所有分类变成孤儿，
+     * 下一次同步就会重复插入同名分类。
+     */
+    private List<CategoryTemplateItem> replaceItems(Long templateId, List<CategoryTemplateReq.Item> wanted) {
+        Map<Long, CategoryTemplateItem> remaining = new LinkedHashMap<>();
+        for (CategoryTemplateItem existing : loadItems(templateId)) {
+            remaining.put(existing.getId(), existing);
+        }
+
+        List<CategoryTemplateItem> saved = new ArrayList<>(wanted.size());
+        int order = 1;
+        for (CategoryTemplateReq.Item item : wanted) {
+            CategoryTemplateItem entity;
+            if (item.id() == null) {
+                entity = new CategoryTemplateItem();
+                entity.setTemplateId(templateId);
+            } else {
+                entity = remaining.remove(item.id());
+                if (entity == null) {
+                    throw new BusinessException(ResultCode.BAD_REQUEST, "模板条目不存在或不属于这套模板");
+                }
+                if (!Objects.equals(entity.getType(), item.type())) {
+                    throw new BusinessException(ResultCode.BAD_REQUEST,
+                            "分类「" + entity.getName() + "」的收支方向不能改；改方向会让已记的流水对不上");
+                }
+            }
+            entity.setName(item.name().trim());
+            entity.setType(item.type());
+            entity.setIcon(StringUtils.hasText(item.icon()) ? item.icon() : "other");
+            entity.setColor(StringUtils.hasText(item.color()) ? item.color() : "gray");
+            entity.setSortOrder(order++);
+            if (item.id() == null) {
+                itemMapper.insert(entity);
+            } else {
+                itemMapper.updateById(entity);
+            }
+            saved.add(entity);
+        }
+
+        for (CategoryTemplateItem removed : remaining.values()) {
+            itemMapper.deleteById(removed.getId());
+        }
+        return saved;
+    }
+
     private static CategoryTemplateResp.Item toItem(CategoryTemplateItem item) {
         return new CategoryTemplateResp.Item(
-                item.getName(), item.getType(), item.getIcon(), item.getColor(), item.getSortOrder());
+                item.getId(), item.getName(), item.getType(), item.getIcon(), item.getColor(), item.getSortOrder());
     }
 }

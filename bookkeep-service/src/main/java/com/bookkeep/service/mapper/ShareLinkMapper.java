@@ -22,4 +22,13 @@ public interface ShareLinkMapper extends BaseMapper<ShareLink> {
     /** 成员被清空（或只剩回收站里的账本）后，链接本身也没意义了 */
     @Delete("DELETE FROM share_link WHERE id NOT IN (SELECT DISTINCT share_link_id FROM share_link_book)")
     int deleteOrphanLinks();
+
+    /** 过期链接的成员行先删（没有外键，够不到就没法级联） */
+    @Delete("DELETE FROM share_link_book WHERE share_link_id IN "
+            + "(SELECT id FROM share_link WHERE expires_at < NOW())")
+    int deleteExpiredBookships();
+
+    /** 清掉已经过了 3 天有效期的公示链接：过期后打开一律 404，留着只是垃圾 */
+    @Delete("DELETE FROM share_link WHERE expires_at < NOW()")
+    int deleteExpired();
 }

@@ -333,14 +333,15 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | GET | `/api/category-templates` | 模板库：内置「班级班费」排第一（`id=0`、`builtin=true`），之后是自建模板，条目一并返回 |
 | POST | `/api/category-templates` | **从零新建** `{name, items:[{name,type,icon,color}]}`；`sortOrder` 由后端按顺序编号 |
 | POST | `/api/category-templates/from-book` | 把**当前账本**的分类快照成新模板 `{name}`；不接收条目 |
-| PUT | `/api/category-templates/{id}` | 改名；带 `items` 时**整体替换**条目（内置模板 400） |
-| DELETE | `/api/category-templates/{id}` | 物理删除；引用它的账本 `categoryTemplateId` 清空（回落到内置） |
+| PUT | `/api/category-templates/{id}` | 改名；带 `items` 时**按 id 增量替换**条目（内置模板 400），并把差异同步到用过这套模板的账本 |
+| DELETE | `/api/category-templates/{id}` | 物理删除；引用它的账本 `categoryTemplateId` 清空（回落到内置），账本里的分类保留、来源标记清空 |
 | POST | `/api/category-templates/{id}/apply` | 应用到当前账本（`id=0` = 内置）；**账本有流水时 400**。界面已不露出，保留备用 |
 
 - 内置模板**不入库**：内容取自 `CategoryPresets.classCategories()`，与注册时预置的 11 条同源，`book.category_template_id` 为 `NULL` 即表示内置
 - **新建账本就选模板**：`POST /api/books` 的 `templateId`（省略 / 0 = 内置）决定这本账本预置哪套分类，`book.category_template_id` 一并写入。这是唯一的主力入口——建好之后再换模板要满足「没有流水」，所以模板应该在新建时一次选对
-- 模板条目在「新建模板 / 编辑模板」弹窗里维护（支出、收入两张卡片，右上角新增，可改名/换图标颜色/删除），一次提交整批替换
-- 应用 = 逻辑删除旧分类 + 按模板条目逐条新建；分类是**复制**不是引用，删模板不影响已套用的账本
+- 模板条目在「分类」页维护（支出、收入两张卡片，右上角新增，可改名/换图标颜色/删除），**保存时按条目 id 增量比对**（带 id = 改名，不带 id = 新增，没出现 = 删除）
+- **保存模板会同步到账本**（`CategoryTemplateSyncService`）：新增补分类、改名改分类名（分类 id 不变，流水不受影响）、删除要求该分类没有流水（否则整次 400 并回滚）；账本靠 `category.template_item_id` 记住来源，用户自建分类（NULL）和归档账本不参与
+- 整套应用 / 新建账本仍然是**复制**而非引用；删模板不影响已套用的账本（只把 `template_item_id` 清空）
 - **「其他」不是分类也不是模板条目**：它只是「记一笔」下拉末尾的虚拟入口，选中就弹同一个分类表单（可挑图标/颜色），所以内置模板从 13 条减到 11 条
 
 ### 5.5 流水（按当前账本）
@@ -675,7 +676,8 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 6. **公示链接是「单链接 + 3 天」模型**（§5.9）：同时只有一个有效 token，再分享即让旧链接失效，
    适合「发一次、看几天」的班费公示；代价是**无法同时给两个群发不同链接**（第二个群会顶掉第一个）。
    链接泄露时点一次「分享」就能废掉旧的，不用登服务器改库。
-   过期链接仍留在 `book.share_token` 里（只是 `share_token_expires_at` 已过去），不影响唯一索引。
+   过期链接由每天 4:40 的清理任务（`MaintenanceService.cleanupExpired`）连同 `share_link_book` 成员行一起删掉，
+   不清理也不影响功能——公示页只认 `expires_at > now()` 的那一条。
 7. **回收站清理依赖应用在跑**：到期清理靠每天 3:30 的 `@Scheduled`，停机期间不会执行；
    补偿是 `GET /api/books` 时顺手清理一次，所以**长期不打开应用就不会清理**——数据留着比误删好。
    想立刻清理：`SELECT id FROM book WHERE deleted = 1 AND deleted_at < NOW() - INTERVAL 15 DAY;`
@@ -796,7 +798,8 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 > 落地记录：
 > - 数据库：`category_template` + `category_template_item`（都物理删除，无 `deleted` 列）+ `book.category_template_id`（`NULL` = 内置）。迁移脚本 `sql/migration_category_template.sql`
 > - 内置模板**不入库**、id 为 `0`，内容取 `CategoryPresets.classCategories()`（原 `constant/CategoryTemplate` 改名而来，避免与实体 `CategoryTemplate` 撞名）——注册预置的分类与内置模板永远同源
-> - 模板条目接口：`POST /api/category-templates`（从零建，带 items）、`POST /api/category-templates/from-book`（快照当前账本）、`PUT /{id}`（改名，带 items 则整体替换）；`sortOrder` 由后端按数组顺序编号，前端固定先排支出再排收入
+> - 模板条目接口：`POST /api/category-templates`（从零建，带 items）、`POST /api/category-templates/from-book`（快照当前账本）、`PUT /{id}`（改名；带 items 则按条目 id 增量增删改）；`sortOrder` 由后端按数组顺序编号，前端固定先排支出再排收入
+> - **保存模板会同步到账本**（后续加的能力，`CategoryTemplateSyncService` + `category.template_item_id`）：新增补分类、改名改分类名（id 不变、流水不断）、删除要求该分类无流水，否则 400 并整次回滚；归档账本与用户自建分类不参与。迁移脚本 `sql/migration_template_item_link.sql`
 > - 应用模板 = 逻辑删除旧分类 + 按条目逐条新建 + 回写 `book.category_template_id`；分类是**复制**不是引用，所以删模板不影响已套用的账本（删模板时把引用它的账本 id 清空，含回收站里的账本，走手写 SQL `BookMapper.clearTemplateRef`）
 > - 注销账户同步物理删除该用户的模板与条目（`BookMapper.hardDeleteTemplate*ByUser`），否则留下孤儿数据
 > - **新建账本时选模板**：`POST /api/books` 增加 `templateId`（`BookCreateReq`，省略 / 0 = 内置），账本页「＋ 新增账本」弹窗里选，默认沿用当前账本的模板——建好之后再换模板要求「没有流水」，所以模板应该在新建时一次选对

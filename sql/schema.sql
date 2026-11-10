@@ -92,12 +92,14 @@ CREATE TABLE category (
   book_id     BIGINT NOT NULL COMMENT '归属账本 book.id',
   name        VARCHAR(50) NOT NULL COMMENT '分类名，如 餐饮/工资',
   type        VARCHAR(10) NOT NULL COMMENT '收支类型 income收入 expense支出',
+  template_item_id BIGINT NULL COMMENT '来自哪个模板条目 category_template_item.id；NULL = 用户自建（记一笔里新建）',
   icon        VARCHAR(100) COMMENT '图标语义 key（前端映射图标组件）',
   color       VARCHAR(20)  COMMENT '颜色语义 key（前端映射主题色）',
   sort_order  INT DEFAULT 0 COMMENT '排序，越小越靠前',
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删'
+  deleted     TINYINT DEFAULT 0 COMMENT '逻辑删除：0正常 1已删',
+  KEY idx_category_template_item (template_item_id)
 ) COMMENT='分类表（按账本隔离）';
 
 -- ------------------------------------------------------------
