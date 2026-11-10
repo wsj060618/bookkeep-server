@@ -12,14 +12,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.YearMonth;
-import java.time.ZoneId;
-
 import static com.bookkeep.web.support.AuthHelper.categoryId;
 import static com.bookkeep.web.support.AuthHelper.getJson;
 import static com.bookkeep.web.support.AuthHelper.nextUsername;
 import static com.bookkeep.web.support.AuthHelper.registerAndLogin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -27,7 +25,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 统计接口集成测试（/api/statistics）。
- * <p>核心是「口径」：数字要能手算对上、金额必须是两位小数的字符串、本月结余与累计余额不能混。
+ * <p>口径要点：区间两端可空（都不传 = 全部）、结余是「截止结束月份最后一天」的余额、
+ * 金额必须是两位小数的字符串。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -41,56 +40,71 @@ class StatisticApiTest {
     private ObjectMapper objectMapper;
 
     @Test
-    @DisplayName("月度汇总：income/expense/balance 只算本月，totalBalance 是累计余额")
-    void summaryByMonthMatchesHandCalculation() throws Exception {
+    @DisplayName("区间汇总：收入/支出只算区间内，结余是区间末（结束月最后一天）的余额")
+    void summaryByRangeMatchesHandCalculation() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("stat"));
 
         record(token, "收取班费", "income", "1900.00", "2026-09-05");
         record(token, "聚餐", "expense", "620.00", "2026-10-12");
         record(token, "活动经费", "expense", "86.50", "2026-11-08");
 
-        // 10 月：只有一笔支出，本月结余为负；累计余额要把 9 月和 11 月也算进去
+        // 只看 10 月：支出 620，结余 = 9~10 月底的累计 1280
         JsonNode october = getJson(mockMvc, objectMapper,
-                "/api/statistics/summary?month=2026-10", token).path("data");
-        assertEquals("2026-10", october.path("month").asText());
+                "/api/statistics/summary?startMonth=2026-10&endMonth=2026-10", token).path("data");
+        assertEquals("2026-10", october.path("startMonth").asText());
+        assertEquals("2026-10", october.path("endMonth").asText());
         assertEquals("0.00", october.path("income").asText());
         assertEquals("620.00", october.path("expense").asText());
-        assertEquals("-620.00", october.path("balance").asText());
-        assertEquals("1193.50", october.path("totalBalance").asText());
+        assertEquals("1280.00", october.path("balance").asText());
 
-        JsonNode september = getJson(mockMvc, objectMapper,
-                "/api/statistics/summary?month=2026-09", token).path("data");
-        assertEquals("1900.00", september.path("income").asText());
-        assertEquals("0.00", september.path("expense").asText());
-        assertEquals("1900.00", september.path("balance").asText());
-        assertEquals("1193.50", september.path("totalBalance").asText());
+        // 9~11 月：全部三笔
+        JsonNode range = getJson(mockMvc, objectMapper,
+                "/api/statistics/summary?startMonth=2026-09&endMonth=2026-11", token).path("data");
+        assertEquals("1900.00", range.path("income").asText());
+        assertEquals("706.50", range.path("expense").asText());
+        assertEquals("1193.50", range.path("balance").asText());
+
+        // 只给结束月份：结余同样截止 10 月底
+        JsonNode onlyEnd = getJson(mockMvc, objectMapper,
+                "/api/statistics/summary?endMonth=2026-10", token).path("data");
+        assertTrue(onlyEnd.path("startMonth").isNull());
+        assertEquals("620.00", onlyEnd.path("expense").asText());
+        assertEquals("1280.00", onlyEnd.path("balance").asText());
     }
 
     @Test
-    @DisplayName("不传 month 按当月统计；空账本返回 0.00 而不是 null / \"0\"")
-    void summaryDefaultsToCurrentMonth() throws Exception {
+    @DisplayName("不传区间 = 全部时间；空账本返回 0.00 而不是 null / \"0\"")
+    void summaryDefaultsToAllTime() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("stat"));
-        String currentMonth = YearMonth.now(ZoneId.of("Asia/Shanghai")).toString();
 
-        JsonNode data = getJson(mockMvc, objectMapper, "/api/statistics/summary", token).path("data");
-        assertEquals(currentMonth, data.path("month").asText());
-        assertEquals("0.00", data.path("income").asText());
-        assertEquals("0.00", data.path("expense").asText());
-        assertEquals("0.00", data.path("balance").asText());
-        assertEquals("0.00", data.path("totalBalance").asText());
+        JsonNode empty = getJson(mockMvc, objectMapper, "/api/statistics/summary", token).path("data");
+        assertTrue(empty.path("startMonth").isNull());
+        assertTrue(empty.path("endMonth").isNull());
+        assertEquals("0.00", empty.path("income").asText());
+        assertEquals("0.00", empty.path("expense").asText());
+        assertEquals("0.00", empty.path("balance").asText());
+
+        record(token, "收取班费", "income", "1900.00", "2026-09-05");
+        record(token, "聚餐", "expense", "620.00", "2026-10-12");
+        JsonNode all = getJson(mockMvc, objectMapper, "/api/statistics/summary", token).path("data");
+        assertEquals("1900.00", all.path("income").asText());
+        assertEquals("620.00", all.path("expense").asText());
+        assertEquals("1280.00", all.path("balance").asText());
     }
 
     @Test
-    @DisplayName("分类占比：金额降序、percent 两位小数、默认只看支出")
+    @DisplayName("分类占比：金额降序、percent 两位小数、默认只看支出、按区间聚合")
     void categoryPercentages() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("stat"));
 
         record(token, "收取班费", "income", "1900.00", "2026-09-05");
         record(token, "聚餐", "expense", "620.00", "2026-11-08");
         record(token, "活动经费", "expense", "86.50", "2026-11-09");
+        // 区间外的一笔，不能算进去
+        record(token, "聚餐", "expense", "500.00", "2026-08-01");
 
         JsonNode expenses = getJson(mockMvc, objectMapper,
-                "/api/statistics/category?month=2026-11", token).path("data");
+                "/api/statistics/category?startMonth=2026-11&endMonth=2026-11", token).path("data");
         assertEquals(2, expenses.size());
         // 总额 706.50：620 / 706.50 = 87.76%，86.50 / 706.50 = 12.24%
         assertEquals("聚餐", expenses.get(0).path("categoryName").asText());
@@ -99,32 +113,43 @@ class StatisticApiTest {
         assertEquals("活动经费", expenses.get(1).path("categoryName").asText());
         assertEquals("12.24", expenses.get(1).path("percent").asText());
 
+        // 不传区间 = 全部：两笔「聚餐」合并，1120 / 1206.50
+        JsonNode all = getJson(mockMvc, objectMapper,
+                "/api/statistics/category?type=expense", token).path("data");
+        assertEquals(2, all.size());
+        assertEquals("1120.00", all.get(0).path("amount").asText());
+
         JsonNode incomes = getJson(mockMvc, objectMapper,
-                "/api/statistics/category?month=2026-09&type=income", token).path("data");
+                "/api/statistics/category?type=income", token).path("data");
         assertEquals(1, incomes.size());
         assertEquals("收取班费", incomes.get(0).path("categoryName").asText());
         assertEquals("100.00", incomes.get(0).path("percent").asText());
 
         // 没有数据的月份：空数组，不是 400 也不是 null
         JsonNode empty = getJson(mockMvc, objectMapper,
-                "/api/statistics/category?month=2026-01", token).path("data");
+                "/api/statistics/category?startMonth=2026-01&endMonth=2026-01", token).path("data");
         assertEquals(0, empty.size());
     }
 
     @Test
-    @DisplayName("参数校验：月份格式必须是 yyyy-MM，类型只能是 income/expense")
+    @DisplayName("参数校验：月份必须 yyyy-MM、开始不能晚于结束、类型只能是 income/expense")
     void invalidParamsRejected() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("stat"));
 
-        mockMvc.perform(get("/api/statistics/summary?month=2026-8")
+        mockMvc.perform(get("/api/statistics/summary?startMonth=2026-8")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())                    // 业务错误：HTTP 200 + body.code
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("月份格式应为 yyyy-MM，例如 2026-08"));
 
-        mockMvc.perform(get("/api/statistics/summary?month=2026-13")
+        mockMvc.perform(get("/api/statistics/summary?startMonth=2026-13")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(jsonPath("$.code").value(400));
+
+        mockMvc.perform(get("/api/statistics/summary?startMonth=2026-11&endMonth=2026-09")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("开始月份不能晚于结束月份"));
 
         mockMvc.perform(get("/api/statistics/category?type=all")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
@@ -139,19 +164,16 @@ class StatisticApiTest {
         String tokenB = registerAndLogin(mockMvc, objectMapper, nextUsername("stat"));
         record(tokenA, "收取班费", "income", "1000.00", "2026-11-01");
 
-        JsonNode summaryB = getJson(mockMvc, objectMapper,
-                "/api/statistics/summary?month=2026-11", tokenB).path("data");
+        JsonNode summaryB = getJson(mockMvc, objectMapper, "/api/statistics/summary", tokenB).path("data");
         assertEquals("0.00", summaryB.path("income").asText());
-        assertEquals("0.00", summaryB.path("totalBalance").asText());
+        assertEquals("0.00", summaryB.path("balance").asText());
 
         JsonNode categoriesB = getJson(mockMvc, objectMapper,
-                "/api/statistics/category?month=2026-11&type=income", tokenB).path("data");
+                "/api/statistics/category?type=income", tokenB).path("data");
         assertEquals(0, categoriesB.size());
 
-        // A 自己看到的仍然是 1000
-        JsonNode summaryA = getJson(mockMvc, objectMapper,
-                "/api/statistics/summary?month=2026-11", tokenA).path("data");
-        assertEquals("1000.00", summaryA.path("totalBalance").asText());
+        JsonNode summaryA = getJson(mockMvc, objectMapper, "/api/statistics/summary", tokenA).path("data");
+        assertEquals("1000.00", summaryA.path("balance").asText());
     }
 
     @Test

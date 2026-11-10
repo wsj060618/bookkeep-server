@@ -31,13 +31,16 @@ public interface TransactionMapper extends BaseMapper<Transaction> {
     /** 截至某天（含）的累计余额：导出时算「期初结余」和「期末结余」。 */
     BigDecimal sumBalanceUpTo(@Param("bookId") Long bookId, @Param("date") LocalDate date);
 
-    /** 某月收入 / 支出合计（{@code month} 为 yyyy-MM）。 */
-    MonthSumRow sumMonth(@Param("bookId") Long bookId, @Param("month") String month);
+    /** 日期区间收入 / 支出合计，两端可空（null = 不限）。 */
+    MonthSumRow sumRange(@Param("bookId") Long bookId,
+                         @Param("startDate") LocalDate startDate,
+                         @Param("endDate") LocalDate endDate);
 
-    /** 某月某类型的分类占比原料，金额降序。 */
-    List<CategoryAmountRow> selectCategoryAmounts(@Param("bookId") Long bookId,
-                                                  @Param("month") String month,
-                                                  @Param("type") String type);
+    /** 日期区间的分类占比原料，两端可空（null = 不限）。 */
+    List<CategoryAmountRow> selectCategoryAmountsRange(@Param("bookId") Long bookId,
+                                                       @Param("startDate") LocalDate startDate,
+                                                       @Param("endDate") LocalDate endDate,
+                                                       @Param("type") String type);
 
     /**
      * 日期区间内的流水 + 逐行结余，日期升序。

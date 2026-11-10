@@ -403,10 +403,12 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/statistics/summary?month=2026-08` | `{month, income, expense, balance, totalBalance}`（balance = 该月收支差，totalBalance = 全账本累计） |
-| GET | `/api/statistics/category?month=&type=expense` | 分类占比 `[{categoryId, categoryName, categoryIcon, categoryColor, amount, percent}]`；`type` 传 `income` 就是收入占比 |
+| GET | `/api/statistics/summary?startMonth=2026-09&endMonth=2026-11` | `{startMonth, endMonth, income, expense, balance}`（两端口径，`balance` = **区间末那天的账户余额**） |
+| GET | `/api/statistics/category?startMonth=&endMonth=&type=expense` | 分类占比 `[{categoryId, categoryName, categoryIcon, categoryColor, amount, percent}]`；`type` 传 `income` 就是收入占比 |
 
-- `month` 不传取当月（北京时间），格式必须是 `yyyy-MM`，格式错返回 400 而不是空数据（空数据会被误读成「这个月没记账」）
+- 区间两端都可空：都不传 = 全部时间；只传一端 = 该端不限。格式必须是 `yyyy-MM`，格式错 / 开始晚于结束都返回 400
+  （静默返回空数据会被误读成「这段时间没记账」）
+- `balance` 不是「区间收支差」，而是「截至结束月最后一天的余额」，前端卡片标题就叫「结余」
 - `percent` 保留两位小数、四舍五入，**各项相加可能不等于 100.00**（例：三项各 33.33），前端别用它反算金额
 - 分类项带上 `categoryId/icon/color` 是为了饼图图例直接出图标（§5.0 第 5 条），不是允许前端再查分类
 - 统计口径只在 `StatisticCalculator` 实现一次：登录态统计与免登录公示页共用，避免两处数字不一致
@@ -521,9 +523,9 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 ### W2 细化（P3 统计 + 导出 + 公示页，后端已完成）
 
 - `StatisticCalculator`（`service/support`）：**统计口径唯一实现点**，登录态统计与免登录公示页共用；
-  月份参数统一在这里解析（空 → 当月北京时间，格式错 → 400）
-- `GET /api/statistics/summary` + `GET /api/statistics/category`（`StatisticController`）：本月收支/结余 + 累计余额；
-  分类占比两位小数，默认 `type=expense`
+  区间参数统一在这里解析（空 → 该端不限，格式错 / 开始晚于结束 → 400）
+- `GET /api/statistics/summary` + `GET /api/statistics/category`（`StatisticController`）：区间收支 + **区间末余额**；
+  分类占比两位小数，默认 `type=expense`；公示页仍按单月展示（内部复用同一套区间查询）
 - `GET /api/transactions/export`（`TransactionExportService`）：CSV（UTF-8 BOM）+ 抬头汇总 + 明细逐行结余 +
   分类合计；期初/期末结余按区间的边界日计算；成功返回文件流，参数错误仍走 JSON 信封。
   **流式**：`prepare()` 先校验+取数（此时响应未提交，出错还是正常信封），之后 `StreamingResponseBody`

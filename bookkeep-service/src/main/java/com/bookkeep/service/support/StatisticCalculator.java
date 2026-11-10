@@ -3,6 +3,7 @@ package com.bookkeep.service.support;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.model.dto.resp.CategoryStatResp;
+import com.bookkeep.model.dto.resp.RangeSummaryResp;
 import com.bookkeep.model.dto.resp.SummaryResp;
 import com.bookkeep.service.mapper.TransactionMapper;
 import com.bookkeep.service.mapper.row.CategoryAmountRow;
@@ -13,6 +14,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -20,33 +22,56 @@ import java.time.format.DateTimeParseException;
 import java.util.List;
 
 /**
- * 统计口径的唯一实现点。
- * <p>统计接口（需登录）和公示页（免登录）必须给出<strong>同一组数字</strong>——
- * 同学在公示页看到的「本月支出」和生活委员在后台看到的不一致，是最难解释的一类 bug。
- * 所以两边都走这里，只是传进来的 bookId 来源不同（SecurityUtil / shareToken）。
- * <p>入参是 bookId 而不是「当前登录用户」：公示页没有登录态，不能在这里碰 {@code SecurityUtil}。
+ * 统计口径的唯一实现点。统计接口和公示页都走这里，只是 bookId 来源不同。
+ * <p>区间两端都可以为空（不限），月份粒度到 {@code yyyy-MM}。
  */
 @Component
 @RequiredArgsConstructor
 public class StatisticCalculator {
 
-    /** 与 JacksonConfig 的 GMT+8 保持一致：请求不传月份时按北京时间取当月。 */
+    /** 与 JacksonConfig 的 GMT+8 保持一致 */
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("uuuu-MM");
-    // 用 uuuu 而不是 yyyy：yyyy 是 year-of-era，严格解析要靠默认纪元补全；uuuu 是 proleptic year，解析更可靠
 
     private static final BigDecimal ZERO = new BigDecimal("0.00");
 
     private final TransactionMapper transactionMapper;
 
+    /** 月份区间；两端可空，null 表示该端不限。 */
+    public record MonthRange(YearMonth start, YearMonth end) {
+
+        public LocalDate startDate() {
+            return start == null ? null : start.atDay(1);
+        }
+
+        public LocalDate endDate() {
+            return end == null ? null : end.atEndOfMonth();
+        }
+    }
+
     /**
-     * 解析 {@code ?month=yyyy-MM}，空值取当月。
-     * <p>格式错必须 400 而不是静默返回空数据：前端把 2026-8 写错时，空结果会被误读成「这个月没记账」。
+     * 解析 {@code startMonth} / {@code endMonth}（{@code yyyy-MM}，都可空）。
+     * <p>格式错或开始晚于结束都抛 400，绝不静默返回空数据。
      */
+    public static MonthRange resolveRange(String startMonth, String endMonth) {
+        YearMonth start = parseMonth(startMonth);
+        YearMonth end = parseMonth(endMonth);
+        if (start != null && end != null && start.isAfter(end)) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "开始月份不能晚于结束月份");
+        }
+        return new MonthRange(start, end);
+    }
+
+    /** 解析 {@code ?month=yyyy-MM}，空值取当月（公示页按单月展示）。 */
     public static YearMonth resolveMonth(String month) {
+        YearMonth parsed = parseMonth(month);
+        return parsed == null ? YearMonth.now(ZONE) : parsed;
+    }
+
+    private static YearMonth parseMonth(String month) {
         if (!StringUtils.hasText(month)) {
-            return YearMonth.now(ZONE);
+            return null;
         }
         try {
             return YearMonth.parse(month.trim(), MONTH_FORMAT);
@@ -55,9 +80,32 @@ public class StatisticCalculator {
         }
     }
 
-    /** 某月收入 / 支出 / 本月结余 + 全账本累计余额。 */
+    /** 区间收入 / 支出 / 期末结余（结束月份不限时 = 当前余额）。 */
+    public RangeSummaryResp summaryBetween(Long bookId, MonthRange range) {
+        MonthSumRow row = transactionMapper.sumRange(bookId, range.startDate(), range.endDate());
+        BigDecimal income = money(row == null ? null : row.getIncome());
+        BigDecimal expense = money(row == null ? null : row.getExpense());
+        BigDecimal balance = money(range.endDate() == null
+                ? transactionMapper.sumBalance(bookId)
+                : transactionMapper.sumBalanceUpTo(bookId, range.endDate()));
+        return new RangeSummaryResp(
+                range.start() == null ? null : range.start().format(MONTH_FORMAT),
+                range.end() == null ? null : range.end().format(MONTH_FORMAT),
+                income,
+                expense,
+                balance);
+    }
+
+    /** 区间的分类占比，金额降序；总金额为 0 时占比一律 0.00。 */
+    public List<CategoryStatResp> categoriesBetween(Long bookId, MonthRange range, String type) {
+        List<CategoryAmountRow> rows = transactionMapper.selectCategoryAmountsRange(
+                bookId, range.startDate(), range.endDate(), type);
+        return toCategoryStats(rows);
+    }
+
+    /** 单月汇总（公示页用）：income/expense/balance 只算该月，totalBalance 是累计余额。 */
     public SummaryResp summaryOf(Long bookId, YearMonth month) {
-        MonthSumRow row = transactionMapper.sumMonth(bookId, month.format(MONTH_FORMAT));
+        MonthSumRow row = transactionMapper.sumRange(bookId, month.atDay(1), month.atEndOfMonth());
         BigDecimal income = money(row == null ? null : row.getIncome());
         BigDecimal expense = money(row == null ? null : row.getExpense());
         return new SummaryResp(
@@ -68,14 +116,15 @@ public class StatisticCalculator {
                 money(transactionMapper.sumBalance(bookId)));
     }
 
-    /** 某月某类型的分类占比，金额降序；总金额为 0 时占比一律 0.00（不出现除零）。 */
+    /** 单月的分类占比（公示页用）。 */
     public List<CategoryStatResp> categoriesOf(Long bookId, YearMonth month, String type) {
-        List<CategoryAmountRow> rows = transactionMapper.selectCategoryAmounts(
-                bookId, month.format(MONTH_FORMAT), type);
+        return categoriesBetween(bookId, new MonthRange(month, month), type);
+    }
+
+    private static List<CategoryStatResp> toCategoryStats(List<CategoryAmountRow> rows) {
         BigDecimal total = rows.stream()
                 .map(row -> money(row.getAmount()))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-
         return rows.stream()
                 .map(row -> new CategoryStatResp(
                         row.getCategoryId(),
@@ -87,7 +136,7 @@ public class StatisticCalculator {
                 .toList();
     }
 
-    /** 金额统一两位小数：SUM 空集返回的 0 是 scale=0，直接序列化会变成 "0" 而不是 "0.00"。 */
+    /** 金额统一两位小数：SUM 空集返回的 0 是 scale=0，直接序列化会变成 "0"。 */
     public static BigDecimal money(BigDecimal value) {
         return value == null ? ZERO : value.setScale(2, RoundingMode.HALF_UP);
     }

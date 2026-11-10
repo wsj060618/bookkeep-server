@@ -59,37 +59,39 @@
     </select>
 
     <!--
-      某月收入 / 支出合计。
-      按月比较用 DATE_FORMAT 而不是给 trans_date 加减一天：后者遇到月份天数不同容易差一天，
-      而 trans_date 是 DATE 类型，格式化后直接和 'yyyy-MM' 字符串比，语义最直白（PLAN §8 第 7 条）。
+      日期区间收入 / 支出合计。
+      两端可空：用 `#{startDate} IS NULL OR ...` 一条 SQL 覆盖「全部 / 单边 / 双边」，
+      不写 <if> 动态标签（MyBatisX 对多参数 + 动态标签会误报）。
     -->
-    <select id="sumMonth" resultType="com.bookkeep.service.mapper.row.MonthSumRow">
+    <select id="sumRange" resultType="com.bookkeep.service.mapper.row.MonthSumRow">
         SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0)  AS income,
                COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) AS expense
         FROM `transaction`
         WHERE book_id = #{bookId}
           AND deleted = 0
-          AND DATE_FORMAT(trans_date, '%Y-%m') = #{month}
+          AND (#{startDate,jdbcType=DATE} IS NULL OR trans_date &gt;= #{startDate,jdbcType=DATE})
+          AND (#{endDate,jdbcType=DATE} IS NULL OR trans_date &lt;= #{endDate,jdbcType=DATE})
     </select>
 
     <!--
-      分类占比的原料（金额降序）。
+      分类占比的原料（金额降序），日期区间两端可空。
       LEFT JOIN + ON 里带 c.deleted = 0：分类被删掉但流水还在时，金额仍要计入合计，
       名称由 COALESCE 兜成「已删除分类」。若把 c.deleted = 0 写到 WHERE，这些流水会被整段丢掉，
       分类合计就和总支出对不上了。
     -->
-    <select id="selectCategoryAmounts" resultType="com.bookkeep.service.mapper.row.CategoryAmountRow">
-        SELECT t.category_id                    AS category_id,
-               COALESCE(c.name, '已删除分类')    AS category_name,
-               COALESCE(c.icon, 'other')        AS category_icon,
-               COALESCE(c.color, 'gray')        AS category_color,
-               SUM(t.amount)                    AS amount
+    <select id="selectCategoryAmountsRange" resultType="com.bookkeep.service.mapper.row.CategoryAmountRow">
+        SELECT t.category_id                 AS category_id,
+               COALESCE(c.name, '已删除分类') AS category_name,
+               COALESCE(c.icon, 'other')     AS category_icon,
+               COALESCE(c.color, 'gray')     AS category_color,
+               SUM(t.amount)                 AS amount
         FROM `transaction` t
                  LEFT JOIN category c ON c.id = t.category_id AND c.deleted = 0
         WHERE t.book_id = #{bookId}
           AND t.deleted = 0
           AND t.type = #{type}
-          AND DATE_FORMAT(t.trans_date, '%Y-%m') = #{month}
+          AND (#{startDate,jdbcType=DATE} IS NULL OR t.trans_date &gt;= #{startDate,jdbcType=DATE})
+          AND (#{endDate,jdbcType=DATE} IS NULL OR t.trans_date &lt;= #{endDate,jdbcType=DATE})
         GROUP BY t.category_id, c.name, c.icon, c.color
         ORDER BY amount DESC, t.category_id
     </select>

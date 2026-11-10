@@ -3,7 +3,7 @@ package com.bookkeep.service.impl;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.model.dto.resp.CategoryStatResp;
-import com.bookkeep.model.dto.resp.SummaryResp;
+import com.bookkeep.model.dto.resp.RangeSummaryResp;
 import com.bookkeep.service.CurrentBookService;
 import com.bookkeep.service.StatisticService;
 import com.bookkeep.service.constant.CategoryPresets;
@@ -15,7 +15,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.List;
 
-/** 统计业务实现：账本来自当前登录用户，口径全部委托 {@link StatisticCalculator}。 */
+/** 统计业务：账本取当前登录用户，口径全部委托 {@link StatisticCalculator}。 */
 @Service
 @RequiredArgsConstructor
 public class StatisticServiceImpl implements StatisticService {
@@ -25,17 +25,16 @@ public class StatisticServiceImpl implements StatisticService {
 
     @Override
     @Transactional(readOnly = true)
-    public SummaryResp summary(String month) {
-        return calculator.summaryOf(currentBookService.currentBookId(),
-                StatisticCalculator.resolveMonth(month));
+    public RangeSummaryResp summary(String startMonth, String endMonth) {
+        return calculator.summaryBetween(currentBookService.currentBookId(),
+                StatisticCalculator.resolveRange(startMonth, endMonth));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<CategoryStatResp> category(String month, String type) {
-        Long bookId = currentBookService.currentBookId();
-        return calculator.categoriesOf(bookId,
-                StatisticCalculator.resolveMonth(month),
+    public List<CategoryStatResp> category(String startMonth, String endMonth, String type) {
+        return calculator.categoriesBetween(currentBookService.currentBookId(),
+                StatisticCalculator.resolveRange(startMonth, endMonth),
                 resolveType(type));
     }
 
