@@ -91,11 +91,17 @@ public class ReceiptController {
         return Result.success(receiptService.importZip(transactionId, file.getOriginalFilename(), file.getBytes()));
     }
 
-    /** 账本级导出：整个账本（可带日期区间）打成 zip，内含 manifest.csv */
+    /** 账本级导出：整个账本（可带日期区间）打成 zip，内含 manifest.csv + 流水.csv */
     @GetMapping("/receipts/export")
     public ResponseEntity<StreamingResponseBody> exportBook(@RequestParam(required = false) LocalDate startDate,
                                                             @RequestParam(required = false) LocalDate endDate) {
         return zip(receiptExportService.prepareBook(startDate, endDate));
+    }
+
+    /** 单笔导出：这一笔的票据打成 zip，图片统一放一个「图片/」文件夹里 */
+    @GetMapping("/{transactionId}/receipts/export")
+    public ResponseEntity<StreamingResponseBody> exportSingle(@PathVariable Long transactionId) {
+        return zip(receiptExportService.prepareSingle(transactionId));
     }
 
     /* ---------- 内部 ---------- */

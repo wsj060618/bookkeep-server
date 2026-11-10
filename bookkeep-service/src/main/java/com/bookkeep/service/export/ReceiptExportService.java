@@ -107,7 +107,39 @@ public class ReceiptExportService {
         // 包里再带一份完整流水 CSV：manifest 只记「有票据的流水」，
         // 带上它才能做到「一个包 = 完整备份」，导入时也能把没票据的流水一起还原
         TransactionExportService.ExportPlan flowPlan = transactionExportService.prepare(startDate, endDate);
-        return build(safeName + "_" + bookId, filename, transactions, receipts, flowPlan);
+        return build(filename, transactions, receipts, flowPlan,
+                transaction -> safeName + "_" + bookId + "/" + MONTH.format(transaction.getTransDate()) + "/",
+                false);
+    }
+
+    /**
+     * 单笔导出计划：这一笔的票据打成 zip，**图片统一放一个文件夹里**（单笔只有一个月，不必再分层）。
+     * <pre>
+     * {账本名}_{日期}_{分类}_{金额}.zip
+     *   ├── manifest.csv
+     *   └── 图片/2026-09-05_超市小票.png
+     * </pre>
+     */
+    @Transactional(readOnly = true)
+    public ExportPlan prepareSingle(Long transactionId) {
+        Long bookId = currentBookService.currentBookId();
+        Transaction transaction = transactionId == null ? null : transactionMapper.selectById(transactionId);
+        if (transaction == null || !transaction.getBookId().equals(bookId)) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "流水不存在");
+        }
+        List<TransactionReceipt> receipts = receiptMapper.selectByTransaction(transactionId);
+        if (receipts.isEmpty()) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "这笔流水还没有上传票据");
+        }
+        guardLimits(receipts);
+
+        Book book = bookMapper.selectById(bookId);
+        String bookName = book == null ? "账本" : book.getName();
+        Category category = categoryMapper.selectById(transaction.getCategoryId());
+        String categoryName = category == null ? "已删除分类" : category.getName();
+        String filename = safeFileName(bookName) + "_" + COMPACT.format(transaction.getTransDate())
+                + "_" + safeFileName(categoryName) + "_" + transaction.getAmount().toPlainString() + ".zip";
+        return build(filename, List.of(transaction), receipts, null, one -> "图片/", true);
     }
 
     /** 流式写 zip：逐个文件 copy，不把图片读进内存 */
@@ -150,9 +182,10 @@ public class ReceiptExportService {
         }
     }
 
-    private ExportPlan build(String bookDir, String filename,
+    private ExportPlan build(String filename,
                              List<Transaction> transactions, List<TransactionReceipt> receipts,
-                             TransactionExportService.ExportPlan flowPlan) {
+                             TransactionExportService.ExportPlan flowPlan,
+                             Function<Transaction, String> dirOf, boolean dateInName) {
         Map<Long, Transaction> byId = transactions.stream()
                 .collect(Collectors.toMap(Transaction::getId, Function.identity()));
         Map<Long, String> categoryNames = loadCategoryNames(transactions);
@@ -167,10 +200,13 @@ public class ReceiptExportService {
             if (transaction == null) {
                 continue;
             }
-            String month = MONTH.format(transaction.getTransDate());
-            String dir = bookDir + "/" + month + "/";
+            String dir = dirOf.apply(transaction);
             String ext = extOf(receipt.getContentType());
-            String base = DATE.format(transaction.getTransDate()) + "_" + safeFileName(receipt.getTitle());
+            // 账本级：目录已经是「账本/年月」，文件名直接用票据标题，不再重复日期；
+            // 单笔：图片都在一个「图片/」文件夹里，没有日期信息，文件名保留日期前缀。
+            String base = dateInName
+                    ? DATE.format(transaction.getTransDate()) + "_" + safeFileName(receipt.getTitle())
+                    : safeFileName(receipt.getTitle());
             String key = dir + base;
             int seq = seen.merge(key, 1, Integer::sum);
             String name = seq == 1 ? base + "." + ext : base + "_" + seq + "." + ext;

@@ -83,9 +83,9 @@ class ReceiptExportApiTest {
         Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
         String bookDir = "3班班费_" + f.bookId;
         assertTrue(entries.containsKey("manifest.csv"), entries.keySet().toString());
-        assertTrue(entries.containsKey(bookDir + "/2026-09/2026-09-05_超市小票.png"), entries.keySet().toString());
-        assertTrue(entries.containsKey(bookDir + "/2026-10/2026-10-08_聚餐小票.png"), entries.keySet().toString());
-        assertTrue(entries.containsKey(bookDir + "/2026-10/2026-10-08_聚餐小票_2.png"), entries.keySet().toString());
+        assertTrue(entries.containsKey(bookDir + "/2026-09/超市小票.png"), entries.keySet().toString());
+        assertTrue(entries.containsKey(bookDir + "/2026-10/聚餐小票.png"), entries.keySet().toString());
+        assertTrue(entries.containsKey(bookDir + "/2026-10/聚餐小票_2.png"), entries.keySet().toString());
         // 包里还要带一份完整流水 CSV（manifest 只记有票据的流水，带上它才是完整备份）
         assertTrue(entries.containsKey("流水.csv"), entries.keySet().toString());
         String flowCsv = new String(entries.get("流水.csv"), StandardCharsets.UTF_8);
@@ -96,7 +96,7 @@ class ReceiptExportApiTest {
         String[] lines = manifest.replace("\uFEFF", "").split("\n");
         assertEquals(4, lines.length, "1 行表头 + 3 行票据，实际：\n" + manifest);
         assertTrue(lines[1].contains("收入") && lines[1].contains("1900.00"), lines[1]);
-        assertTrue(lines[1].contains(bookDir + "/2026-09/2026-09-05_超市小票.png"), lines[1]);
+        assertTrue(lines[1].contains(bookDir + "/2026-09/超市小票.png"), lines[1]);
     }
 
     @Test
@@ -143,6 +143,34 @@ class ReceiptExportApiTest {
         assertTrue(manifest.contains("文件缺失"), "manifest 要标出缺了哪个：" + manifest);
         assertEquals(2, manifest.replace("\uFEFF", "").trim().split("\n").length - 1,
                 "缺文件的那行也要留在 manifest 里，方便人工核对");
+    }
+
+    @Test
+    @DisplayName("单笔导出：图片统一放在「图片/」文件夹里，manifest 一行一票据")
+    void exportSingleTransactionZip() throws Exception {
+        Fixture f = new Fixture("3班班费");
+        long sep = f.create("income", "收取班费", "1900.00", "2026-09-05");
+        long oct = f.create("expense", "聚餐", "62.00", "2026-10-08");
+        f.upload(sep, "九月小票.png");
+        f.upload(sep, "班服收据.png");
+        f.upload(oct, "十月小票.png");
+
+        MvcResult result = download("/api/transactions/" + sep + "/receipts/export", f.token);
+        String filename = dispositionFilename(result);
+        assertTrue(filename.contains("20260905") && filename.contains("1900.00") && filename.endsWith(".zip"),
+                filename);
+
+        Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
+        // manifest + 两张图，且都在「图片/」这一个文件夹里（不按月份再分层）
+        assertEquals(3, entries.size(), "单笔导出 = manifest + 2 张图：" + entries.keySet());
+        assertTrue(entries.containsKey("manifest.csv"), entries.keySet().toString());
+        assertTrue(entries.containsKey("图片/2026-09-05_九月小票.png"), entries.keySet().toString());
+        assertTrue(entries.containsKey("图片/2026-09-05_班服收据.png"), entries.keySet().toString());
+        assertFalse(entries.keySet().stream().anyMatch(n -> n.endsWith("十月小票.png")), entries.keySet().toString());
+
+        String manifest = new String(entries.get("manifest.csv"), StandardCharsets.UTF_8);
+        assertEquals(2, manifest.replace("\uFEFF", "").trim().split("\n").length - 1);
+        assertTrue(manifest.contains("图片/2026-09-05_九月小票.png"), manifest);
     }
 
     @Test
