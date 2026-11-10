@@ -5,9 +5,12 @@ import com.bookkeep.common.result.Result;
 import com.bookkeep.model.dto.req.BatchIdsReq;
 import com.bookkeep.model.dto.req.TransactionQuery;
 import com.bookkeep.model.dto.req.TransactionReq;
+import com.bookkeep.model.dto.resp.ImportResultResp;
 import com.bookkeep.model.dto.resp.TransactionResp;
 import com.bookkeep.service.TransactionService;
+import com.bookkeep.service.export.TransactionExcelExportService;
 import com.bookkeep.service.export.TransactionExportService;
+import com.bookkeep.service.imports.TransactionImportService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ContentDisposition;
@@ -23,10 +26,12 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.BufferedWriter;
+import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.math.BigDecimal;
@@ -47,6 +52,8 @@ public class TransactionController {
 
     private final TransactionService transactionService;
     private final TransactionExportService transactionExportService;
+    private final TransactionExcelExportService transactionExcelExportService;
+    private final TransactionImportService transactionImportService;
 
     /**
      * 分页查询。
@@ -86,7 +93,9 @@ public class TransactionController {
     }
 
     /**
-     * 导出班费收支表（CSV，UTF-8 BOM，含逐行结余）。
+     * 导出班费收支表（CSV 或 xlsx，含逐行结余）。
+     * <p>{@code format=xlsx} 时返回真正的 Excel：顶部汇总 + 两张分类柱状图 + 明细；
+     * 默认 csv。
      * <p>成功时返回文件流而不是 JSON 信封——下载类接口只能这样，前端用 blob 接收。
      * <p>参数错误（开始晚于结束）仍走业务异常：HTTP 200 + JSON {@code code=400}，由前端统一拦截器提示。
      * <p>响应体是 {@link StreamingResponseBody}：校验/取数在 {@code prepare} 里先做完（此时响应还没提交，
@@ -94,22 +103,43 @@ public class TransactionController {
      */
     @GetMapping("/export")
     public ResponseEntity<StreamingResponseBody> export(@RequestParam(required = false) LocalDate startDate,
-                                                        @RequestParam(required = false) LocalDate endDate) {
+                                                        @RequestParam(required = false) LocalDate endDate,
+                                                        @RequestParam(required = false) String format) {
         TransactionExportService.ExportPlan plan = transactionExportService.prepare(startDate, endDate);
+        boolean xlsx = "xlsx".equalsIgnoreCase(format);
+        String filename = xlsx
+                ? plan.filename().replaceAll("\\.csv$", "") + ".xlsx"
+                : plan.filename();
 
         StreamingResponseBody body = outputStream -> {
-            Writer writer = new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
-            transactionExportService.writeCsv(plan, writer);
+            if (xlsx) {
+                transactionExcelExportService.write(plan, outputStream);
+            } else {
+                Writer writer = new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
+                transactionExportService.writeCsv(plan, writer);
+            }
         };
         return ResponseEntity.ok()
-                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .contentType(xlsx
+                        ? new MediaType("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        : new MediaType("text", "csv", StandardCharsets.UTF_8))
                 // 文件名含中文，必须交给 ContentDisposition 生成 filename*=UTF-8''... 形式，
                 // 手写 header 会在部分浏览器上变成乱码或直接把附件名截断
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment()
-                                .filename(plan.filename(), StandardCharsets.UTF_8)
+                                .filename(filename, StandardCharsets.UTF_8)
                                 .build()
                                 .toString())
                 .body(body);
+    }
+
+    /**
+     * 导入流水（CSV / xlsx，multipart）。
+     * <p>行级失败不阻塞其它行：返回 {@code {success, failed:[{line, reason}]}}，
+     * 前端把失败行列出来让用户改完重传；分类不存在**不会**自动创建。
+     */
+    @PostMapping("/import")
+    public Result<ImportResultResp> importFile(@RequestParam("file") MultipartFile file) throws IOException {
+        return Result.success(transactionImportService.importFile(file.getOriginalFilename(), file.getBytes()));
     }
 }

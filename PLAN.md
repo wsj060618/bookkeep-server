@@ -742,24 +742,26 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 测试（`PasswordResetApiTest`，`@MockBean` 掉 mailer，不真发信）：
 未知账号信息不发信、正常发信、token 用过即废、过期失效、限流第 4 次不发信、重置后旧 token 401。
 
-### 10.3 导出 / 导入 Excel 与导入 CSV（明日事项）
+### 10.3 导出 / 导入 Excel 与导入 CSV ✅ 已完成（2026-11-10）
 
-现状只有导出 CSV（`GET /api/transactions/export`）。要补三件事：
+**导出**：`GET /api/transactions/export?format=csv|xlsx`（默认 csv）。
+`format=xlsx` 是真正的 Excel（Apache POI 5.4.1）：`收支表` sheet 顶部是汇总与**两张分类柱状图**
+（支出 / 收入，和统计页一个思路），第 21 行起是明细；`分类合计` sheet 是图表的数据源。
+两种格式共用 `TransactionExportService.prepare()` 取数，口径不会分叉。仍是**流式**输出
+（`StreamingResponseBody`，校验在写响应之前完成，失败仍返回 JSON 信封）。
 
-| 方向 | 格式 | 说明 |
-|---|---|---|
-| 导出 | `.xlsx` | 列与 CSV 一致：日期 / 类型 / 分类 / 金额 / 备注 / 逐行结余；金额仍是两位小数字符串，日期 `yyyy-MM-dd` |
-| 导入 | `.csv` | 列：`日期,类型,分类,金额,备注`；类型用 `income/expense`（或「收入/支出」二选一先在服务端兼容） |
-| 导入 | `.xlsx` | 与 CSV 同一套解析规则，只是读取方式不同 |
+**导入**：`POST /api/transactions/import`（multipart，`.csv` / `.xlsx`）→ `{success, failed:[{line, reason}]}`。
 
-实现要点（动手前先定）：
+- 列固定：`日期, 类型, 分类, 金额, 备注`；类型认「收入/支出」与 `income/expense`；UTF-8（含 BOM 也认）
+- **行级失败不阻塞其它行**：成功行入库，失败行带**文件行号**（1 基，含表头，和 Excel 左侧一致）与原因
+- **分类不存在直接报错，不自动建分类**；支出仍受余额约束（按文件顺序累加余额）
+- 限制：≤5MB（`spring.servlet.multipart.max-file-size`）、≤2000 行；空文件 / 只有表头 / 超限整份 400
+- 归档账本只读：导入前先拦，返回与记账相同的 400
+- 前端：导出改成下拉（CSV / Excel）、导入弹窗（选文件 + 下载模板 + 失败明细表），
+  导入有成功行时 `notifyTxChanged()` 让列表与统计页一起刷新
 
-- 后端加 POI 或 EasyExcel（二选一，注意依赖体积）；CSV 解析别手写引号，用 commons-csv
-- 接口 `POST /api/transactions/import`（multipart）：先**全部校验**再写库，返回 `{success: n, failed: [{line, reason}]}`；
-  部分成功 vs 全量回滚要明确——建议「行级失败不阻塞其它行」，但**同一次请求仍在事务里**，失败行只返回原因
-- 分类不存在怎么办：先报错（引导用户先建分类），不做「自动建分类」，否则导入一份脏文件会长出一堆脏分类
-- 文件限制：≤5MB、UTF-8（含 BOM）并兼容 GBK；空行跳过
-- 前端：导出加「Excel」选项；导入给模板下载 + 失败明细表
+> 遗留：CSV 只按 UTF-8 解析；Excel 另存的 **GBK 编码 CSV** 会乱码（需要时再加编码探测）。
+> 导入是「全有或全无」的近似——常见错行不影响其它行，但整个请求仍在一个事务里。
 
 ### 10.4 自定义分类模板 ✅ 已完成（2026-11-10）
 
