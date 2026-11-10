@@ -6,6 +6,7 @@ import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.model.dto.resp.ImportResultResp;
 import com.bookkeep.model.entity.Category;
 import com.bookkeep.model.entity.Transaction;
+import com.bookkeep.model.validation.MoneyRules;
 import com.bookkeep.service.CurrentBookService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
@@ -165,8 +166,12 @@ public class TransactionImportService {
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "金额必须大于 0");
         }
-        if (amount.scale() > 2) {
+        if (amount.scale() > MoneyRules.FRACTION_DIGITS) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "金额最多两位小数");
+        }
+        // 与记一笔同一个上限：超了会把 DECIMAL(12,2) 的累加结余顶出列宽
+        if (amount.compareTo(MoneyRules.MAX) > 0) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, MoneyRules.RANGE_MESSAGE);
         }
         return amount.setScale(2, java.math.RoundingMode.HALF_UP);
     }

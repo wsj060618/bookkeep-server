@@ -1,5 +1,7 @@
 package com.bookkeep.model.dto.req;
 
+import com.bookkeep.model.validation.MoneyRules;
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
@@ -18,7 +20,7 @@ import java.time.LocalDate;
  *
  * @param categoryId 分类 id，必须属于当前账本
  * @param type       income / expense
- * @param amount     金额，>0 且最多两位小数
+ * @param amount     金额，0.01 ~ 999,999.99，最多两位小数（{@link MoneyRules}）
  * @param transDate  业务日期 yyyy-MM-dd（可以补录过去的日子，不能选未来？—— 允许，不做限制）
  * @param note       备注，≤255
  */
@@ -32,8 +34,10 @@ public record TransactionReq(
         String type,
 
         @NotNull(message = "金额不能为空")
-        @DecimalMin(value = "0.01", message = "金额必须大于 0")
-        @Digits(integer = 10, fraction = 2, message = "金额最多两位小数")
+        @DecimalMin(value = "0.01", message = MoneyRules.RANGE_MESSAGE)
+        @DecimalMax(value = "999999.99", message = MoneyRules.RANGE_MESSAGE)
+        @Digits(integer = MoneyRules.INTEGER_DIGITS, fraction = MoneyRules.FRACTION_DIGITS,
+                message = MoneyRules.RANGE_MESSAGE)
         BigDecimal amount,
 
         @NotNull(message = "日期不能为空")

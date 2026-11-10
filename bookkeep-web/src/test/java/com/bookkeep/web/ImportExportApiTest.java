@@ -172,6 +172,24 @@ class ImportExportApiTest {
     }
 
     @Test
+    @DisplayName("导入也守金额上限：超 999,999.99 的那一行失败并提示范围")
+    void importEnforcesAmountRange() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("imp"));
+
+        String csv = "日期,类型,分类,金额,备注\n"
+                + "2026-09-05,收入,收取班费,999999.99,刚好到上限\n"
+                + "2026-09-06,收入,收取班费,1000000.00,超一分钱\n";
+
+        JsonNode data = upload(token, "流水.csv", csv).path("data");
+        assertEquals(1, data.path("success").asInt());
+        JsonNode failed = data.path("failed");
+        assertEquals(1, failed.size());
+        assertEquals(3, failed.get(0).path("line").asInt());
+        assertTrue(failed.get(0).path("reason").asText().contains("999,999.99"),
+                "提示要给出范围，实际：" + failed.get(0).path("reason").asText());
+    }
+
+    @Test
     @DisplayName("导入的支出受余额约束：余额不够的那一行失败，前面的照常入库")
     void importRespectsBalance() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("imp"));

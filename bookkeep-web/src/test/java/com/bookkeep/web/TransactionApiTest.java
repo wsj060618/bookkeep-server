@@ -77,6 +77,30 @@ class TransactionApiTest {
     }
 
     @Test
+    @DisplayName("金额有上下限：超过 999,999.99 或超两位小数 → 400 且提示范围；边界值可用")
+    void amountRangeIsEnforced() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("txn"));
+        long feeId = categoryId(mockMvc, objectMapper, token, "收取班费");
+
+        // 上限正好可用（DECIMAL(12,2) 不会被顶爆）
+        createTransaction(token, feeId, "income", "999999.99", "2026-09-01", null)
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.amount").value("999999.99"));
+
+        // 超一分钱就拒绝，并且提示里要给出范围（而不是含糊的「最多两位小数」）
+        createTransaction(token, feeId, "income", "1000000.00", "2026-09-02", null)
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("999,999.99")));
+
+        // 以前能过校验、但会把累加结余顶出列宽的天文数字
+        createTransaction(token, feeId, "income", "99999999999.00", "2026-09-03", null)
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("999,999.99")));
+    }
+
+    @Test
     @DisplayName("支出超过余额：400 且提示当前余额；余额内正常")
     void expenseOverBalanceRejected() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("txn"));
