@@ -32,10 +32,12 @@ import org.apache.poi.xssf.usermodel.XSSFFont;
 import org.apache.poi.xssf.usermodel.XSSFRow;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.openxmlformats.schemas.drawingml.x2006.chart.CTBarChart;
 import org.openxmlformats.schemas.drawingml.x2006.chart.CTBarSer;
 import org.openxmlformats.schemas.drawingml.x2006.chart.CTDPt;
 import org.openxmlformats.schemas.drawingml.x2006.chart.CTPieSer;
 import org.openxmlformats.schemas.drawingml.x2006.chart.CTPlotArea;
+import org.openxmlformats.schemas.drawingml.x2006.chart.STBarGrouping;
 import org.openxmlformats.schemas.drawingml.x2006.main.CTSRgbColor;
 import org.openxmlformats.schemas.drawingml.x2006.main.CTShapeProperties;
 import org.openxmlformats.schemas.drawingml.x2006.main.CTSolidColorFillProperties;
@@ -64,9 +66,9 @@ import java.math.BigDecimal;
 @Service
 public class TransactionExcelExportService {
 
-    /** 表头行（0 基）：第 8 行 */
-    private static final int HEADER_ROW = 7;
-    private static final int FIRST_DATA_ROW = 8;
+    /** 明细表头所在行（0 基）：图表按表格列宽竖排在 D..G，表头在第 17 行 */
+    private static final int HEADER_ROW = 16;
+    private static final int FIRST_DATA_ROW = 17;
 
     // 从 A 列开始（贴左），表头与顶部汇总用同一组列，宽度自然对齐
     private static final int COL_SEQ = 0;        // A
@@ -197,8 +199,9 @@ public class TransactionExcelExportService {
     /* ---------- 柱状图：收入 / 支出 / 结余，一根一种颜色 ---------- */
 
     private void drawBarChart(XSSFSheet target, XSSFSheet dataSheet, int lastDataRow) {
+        // 图表只占 D..G 四列（宽度和表格对齐），竖着排：柱状图在上、环形图在下
         XSSFDrawing drawing = target.createDrawingPatriarch();
-        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, 3, 1, 9, 7);
+        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, COL_INCOME, 1, COL_NOTE + 1, 8);
         XSSFChart chart = drawing.createChart(anchor);
         chart.setTitleText("收支对比");
         chart.setTitleOverlay(false);
@@ -215,11 +218,14 @@ public class TransactionExcelExportService {
                 dataSheet, new CellRangeAddress(1, lastDataRow, 1, 1));
 
         XDDFBarChartData data = (XDDFBarChartData) chart.createData(ChartTypes.BAR, bottomAxis, leftAxis);
-        data.addSeries(cats, vals);
+        XDDFBarChartData.Series series = (XDDFBarChartData.Series) data.addSeries(cats, vals);
+        // 序列必须有名字：留空的 <c:tx/> 会让 Excel 判定序列无效，只画坐标轴不画柱子
+        series.setTitle("金额", null);
         data.setBarDirection(BarDirection.COL);
+        data.setVaryColors(true); // 每个点一种颜色（下面再精确指定）
         chart.plot(data);
 
-        // 每个数据点单独上色（三个柱子三种颜色）
+        ensureClusteredGrouping(chart);
         paintPoints(chart, new byte[][]{BLUE, GREEN, GRAY});
     }
 
@@ -227,11 +233,12 @@ public class TransactionExcelExportService {
 
     private void drawDoughnutChart(XSSFSheet target, XSSFSheet dataSheet, int lastDataRow) {
         XSSFDrawing drawing = target.createDrawingPatriarch();
-        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, 9, 1, 15, 7);
+        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, COL_INCOME, 8, COL_NOTE + 1, 16);
         XSSFChart chart = drawing.createChart(anchor);
         chart.setTitleText("收支占比");
         chart.setTitleOverlay(false);
-        chart.getOrAddLegend().setPosition(LegendPosition.RIGHT);
+        chart.getOrAddLegend().setPosition(LegendPosition.BOTTOM);
+        chart.getOrAddLegend().setOverlay(false);
 
         XDDFDataSource<String> cats = XDDFDataSourcesFactory.fromStringCellRange(
                 dataSheet, new CellRangeAddress(1, 2, 0, 0));   // 只要 收入 / 支出
@@ -239,11 +246,24 @@ public class TransactionExcelExportService {
                 dataSheet, new CellRangeAddress(1, 2, 1, 1));
 
         XDDFChartData data = chart.createData(ChartTypes.DOUGHNUT, null, null);
-        data.setVaryColors(true); // 每个扇区不同颜色
-        data.addSeries(cats, vals);
+        XDDFChartData.Series series = data.addSeries(cats, vals);
+        series.setTitle("金额", null); // 同上：空 <c:tx/> 会让序列失效
+        data.setVaryColors(true);
         chart.plot(data);
 
         paintPiePoints(chart, new byte[][]{BLUE, GREEN});
+    }
+
+    /** 补上 c:grouping（POI 的 XDDF 工厂不写，缺了 Excel 可能整张图不渲染） */
+    private void ensureClusteredGrouping(XSSFChart chart) {
+        try {
+            CTBarChart bar = chart.getCTChart().getPlotArea().getBarChartArray(0);
+            if (!bar.isSetGrouping()) {
+                bar.addNewGrouping().setVal(STBarGrouping.CLUSTERED);
+            }
+        } catch (RuntimeException e) {
+            log.debug("补充柱状图 grouping 失败：{}", e.getMessage());
+        }
     }
 
     /** 给柱状图的每个数据点单独上色；形状 API 因 POI 版本而异，失败就退回默认配色 */
