@@ -9,6 +9,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,8 +31,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 分类模板接口集成测试（/api/category-templates）。
- * <p>重点验证五件事：内置模板 id=0 不入库（11 条，无「其他」）、从零新建模板/快照模板、
- * 修改模板时整体替换条目、有流水时禁止换模板、模板跟账号走（别人碰不到）。
+ * <p>重点验证这几件事：注册时即落一套真实默认模板（11 条，无「其他」）、从零新建模板/快照模板、
+ * 修改模板时整体替换条目、删除模板不留孤儿条目、有流水时禁止换模板、模板跟账号走（别人碰不到）。
  * 用真实 token，不用 {@code @WithMockUser}（原因见 AGENTS.md）。
  */
 @SpringBootTest
@@ -44,6 +45,9 @@ class CategoryTemplateApiTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private static final String BUILTIN_ITEMS = "$.data[0].items";
 
@@ -328,6 +332,13 @@ class CategoryTemplateApiTest {
         mockMvc.perform(delete("/api/category-templates/" + templateId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(jsonPath("$.code").value(200));
+
+        // 删模板必须连条目一起删：留下 template_id 指向已删模板的孤儿行是数据垃圾，
+        // 也会让人误以为「条目表里一堆重复」
+        Integer orphanItems = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM category_template_item WHERE template_id = ?",
+                Integer.class, templateId);
+        assertEquals(0, orphanItems);
 
         JsonNode books = getJson(mockMvc, objectMapper, "/api/books", token).path("data");
         assertTrue(books.get(0).path("categoryTemplateId").isNull());

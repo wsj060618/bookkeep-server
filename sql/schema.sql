@@ -137,6 +137,9 @@ CREATE TABLE category_template (
 -- ------------------------------------------------------------
 -- 8) category_template_item 模板条目：字段与 category 一一对应，应用模板时按此逐条复制
 --    没有 deleted 列：改模板 = 整体删掉重插（PLAN §10.4）
+--    **一行 = 某套模板里的一个条目**：`template_id` 就是关联，条目属于模板、不跨模板共用。
+--    所以不同模板之间出现同名同图标的行是正常的（各自的副本，可独立改）；
+--    真正该为 0 的是「template_id 指向已不存在的模板」的孤儿行。
 -- ------------------------------------------------------------
 CREATE TABLE category_template_item (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
