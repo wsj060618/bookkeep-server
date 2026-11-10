@@ -88,10 +88,16 @@ public class TransactionExcelExportService {
     private static final int COL_DATA_LABEL = 9;
     private static final int COL_DATA_VALUE = 10;
 
-    /** 与截图一致的三色：收入蓝 / 支出绿 / 结余灰 */
-    private static final byte[] BLUE = {0x5B, (byte) 0x9B, (byte) 0xD5};
-    private static final byte[] GREEN = {0x70, (byte) 0xAD, 0x47};
-    private static final byte[] GRAY = {0x7F, 0x7F, 0x7F};
+    /**
+     * 与网页端同一套语义色：收入绿 / 支出红 / 结余蓝。
+     * <p>以前这里是 Excel 参考表的「蓝/绿/灰」，后来网页端统一改成绿/红/蓝，
+     * 导出表跟着改，免得同一笔钱在屏幕和 Excel 里是两个颜色。
+     */
+    private static final byte[] INCOME = {0x10, (byte) 0xB9, (byte) 0x81};
+    private static final byte[] EXPENSE = {(byte) 0xEF, 0x44, 0x44};
+    private static final byte[] BALANCE = {0x40, (byte) 0x9E, (byte) 0xFF};
+    /** 表头与汇总标签的底色：用 Element 主色蓝，和网页按钮同色系 */
+    private static final byte[] HEADER = {0x40, (byte) 0x9E, (byte) 0xFF};
 
     public void write(ExportPlan plan, OutputStream out) throws IOException {
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
@@ -202,7 +208,7 @@ public class TransactionExcelExportService {
 
         ensureClusteredGrouping(chart);
         shrinkTitle(chart, "收支对比");
-        paintPoints(chart, new byte[][]{BLUE, GREEN, GRAY});
+        paintPoints(chart, new byte[][]{INCOME, EXPENSE, BALANCE});
     }
 
     /* ---------- 环形图：收入 vs 支出 ---------- */
@@ -233,7 +239,7 @@ public class TransactionExcelExportService {
 
         shrinkTitle(chart, "收支占比");
         ensureHoleSize(chart);
-        paintPiePoints(chart, new byte[][]{BLUE, GREEN});
+        paintPiePoints(chart, new byte[][]{INCOME, EXPENSE});
     }
 
     /**
@@ -398,7 +404,7 @@ public class TransactionExcelExportService {
             head.setFont(headFont);
             head.setAlignment(HorizontalAlignment.CENTER);
             head.setVerticalAlignment(VerticalAlignment.CENTER);
-            head.setFillForegroundColor(new XSSFColor(BLUE, null));
+            head.setFillForegroundColor(new XSSFColor(HEADER, null));
             head.setFillPattern(FillPatternType.SOLID_FOREGROUND);
             thinBorder(head);
 
@@ -409,7 +415,7 @@ public class TransactionExcelExportService {
             summaryLabel.setFont(whiteBold);
             summaryLabel.setAlignment(HorizontalAlignment.CENTER);
             summaryLabel.setVerticalAlignment(VerticalAlignment.CENTER);
-            summaryLabel.setFillForegroundColor(new XSSFColor(BLUE, null));
+            summaryLabel.setFillForegroundColor(new XSSFColor(HEADER, null));
             summaryLabel.setFillPattern(FillPatternType.SOLID_FOREGROUND);
             thinBorder(summaryLabel);
 

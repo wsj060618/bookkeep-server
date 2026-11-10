@@ -115,6 +115,15 @@ class ImportExportApiTest {
             var doughnut = drawing.getCharts().get(1).getCTChart().getPlotArea().getDoughnutChartArray(0);
             assertEquals(1, doughnut.sizeOfSerArray());
             assertEquals(50, (short) doughnut.getHoleSize().getVal());
+
+            // 三根柱子/扇区的配色必须和网页端一致：收入绿 #10B981、支出红 #EF4444、结余蓝 #409EFF
+            var barSeries = barChart.getPlotArea().getBarChartArray(0).getSerArray(0);
+            assertEquals("10B981", hex(barSeries.getDPtArray(0)));
+            assertEquals("EF4444", hex(barSeries.getDPtArray(1)));
+            assertEquals("409EFF", hex(barSeries.getDPtArray(2)));
+            var pieSeries = doughnut.getSerArray(0);
+            assertEquals("10B981", hex(pieSeries.getDPtArray(0)));
+            assertEquals("EF4444", hex(pieSeries.getDPtArray(1)));
         }
     }
 
@@ -320,5 +329,15 @@ class ImportExportApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(jsonPath("$.code").value(200));
+    }
+
+    /** 把 dPt 的 srgbClr 转成 6 位十六进制，便于断言配色 */
+    private static String hex(org.openxmlformats.schemas.drawingml.x2006.chart.CTDPt point) {
+        byte[] rgb = point.getSpPr().getSolidFill().getSrgbClr().getVal();
+        StringBuilder sb = new StringBuilder();
+        for (byte b : rgb) {
+            sb.append(String.format("%02X", b));
+        }
+        return sb.toString();
     }
 }
