@@ -1,9 +1,14 @@
 # bookkeep
+![Java 17](https://img.shields.io/badge/Java-17-ED8B00?logo=openjdk&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5-6DB33F?logo=springboot&logoColor=white)
+![MyBatis-Plus](https://img.shields.io/badge/MyBatis--Plus-3.5-1F6FEB)
+![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
+![Maven](https://img.shields.io/badge/Maven-3.9-C71A36?logo=apachemaven&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![Nginx](https://img.shields.io/badge/Nginx-1.27-009639?logo=nginx&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-班级/社团的账本系统：记流水、管分类、传票据、出统计，学期结束时把账本归档成只读，再生成一条免登录的公示链接发给同学看。
-
-单机自用为主，够一台服务器就能跑（`docker compose` 三个容器）。
-
+前端仓库: [bookkeep-web](https://github.com/wsj060618/bookkeep-web)
 ## 功能
 
 - **账号**：邮箱登录（用户名只是显示名）、注册即建账本、找回密码走邮件一次性 token
@@ -18,19 +23,8 @@
 
 ## 技术栈
 
-![Java 17](https://img.shields.io/badge/Java-17-ED8B00?logo=openjdk&logoColor=white)
-![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5-6DB33F?logo=springboot&logoColor=white)
-![MyBatis-Plus](https://img.shields.io/badge/MyBatis--Plus-3.5-1F6FEB)
-![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
-![Maven](https://img.shields.io/badge/Maven-3.9-C71A36?logo=apachemaven&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
-![Nginx](https://img.shields.io/badge/Nginx-1.27-009639?logo=nginx&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green)
 
-前端（另一个仓库）：![Vue 3](https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
-![Element Plus](https://img.shields.io/badge/Element_Plus-2-409EFF)
+
 
 ## 项目结构
 
@@ -159,4 +153,4 @@ npm run build
 
 ## License
 
-MIT © 2026 wsj — 见 [LICENSE](LICENSE)。
+MIT © 2026 wsj060618 — 见 [LICENSE](LICENSE)。
