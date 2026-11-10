@@ -658,6 +658,11 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
     把当前事务标成 rollback-only，**本事务内后续查询仍能看到已执行的那部分改动**。所以「模板保存失败后
     模板条目没少」这种断言不能直接写在 `@Transactional` 测试里（会假失败），要断言业务可见的部分
     （分类还在、流水还在、响应 code=400 + 提示文案），回滚本身交给 Spring 的契约。
+43. **Maven 增量编译会把「源码根本编不过」藏起来**：`mvn test` / `package` 只重编**改动过的**文件，
+    没改过的类直接用 `target/classes` 里的旧 `.class`。2026-11-10 真踩过：`CurrentBookServiceImpl`
+    少了 `import com.bookkeep.service.CurrentBookService`（两个包同名类），`mvn test` 连跑 178 例全绿，
+    IDE 一直报红，直到 `mvn clean` 才炸。**发布前的门槛必须是 `mvn clean test`（`deploy/build.ps1`
+    也因此改成 `clean package`）**，单跑 `mvn test` 只能证明「改过的那几个文件没问题」。
 
 ## 9. 已知缺口（P1 有意不做，上线前必须回看）
 
