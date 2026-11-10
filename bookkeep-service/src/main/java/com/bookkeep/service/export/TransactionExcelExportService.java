@@ -7,7 +7,9 @@ import org.apache.poi.ss.usermodel.BorderStyle;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.FillPatternType;
 import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
 import org.apache.poi.ss.usermodel.IndexedColors;
+import org.apache.poi.ss.usermodel.VerticalAlignment;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.xddf.usermodel.chart.AxisCrosses;
 import org.apache.poi.xddf.usermodel.chart.AxisPosition;
@@ -35,34 +37,55 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * 流水导出成 xlsx（PLAN §10.3）。
- * <p>比 CSV 多的就是「一眼能看懂」：**顶部一张汇总 + 两张分类柱状图**（跟统计页一个思路），
- * 下面才是明细与分类合计，班会上直接投屏/发群都不用再加工。
- * <p>复用 {@link TransactionExportService#prepare} 取数：CSV 与 xlsx 是同一份口径，
- * 不允许两边各算一遍（否则「导出的数和页面上的数对不上」）。
+ * 流水导出成 xlsx（PLAN §10.3），版式对齐真实班费表：
+ *
+ * <pre>
+ * B1:L1              班级账本 班费收支明细表（合并居中）
+ * B2 收入  D2 合计      （右侧放两张分类图）
+ * B4 支出  D4 合计
+ * B6 结余  D6 合计
+ * 第 8-9 行 两行表头：
+ *   序号 | 日期 | 摘要 | 收入(数量|人均数量|总价) | 支出(数量|单价|金额) | 结余 | 备注
+ * 第 10 行起 明细
+ * </pre>
+ *
+ * <p>数量 / 单价 / 人均数量 属于「纸质表上的算账过程」，系统里只存金额，所以只填总价与金额，
+ * 其余留空——强行编造数量反而会误导看表的人。
+ * <p>数据来自 {@link TransactionExportService#prepare}，与 CSV 导出同一份口径。
  */
 @Slf4j
 @Service
 public class TransactionExcelExportService {
 
-    /** 明细表从第几行开始（0 基），上面留给汇总与图表 */
-    private static final int DETAIL_HEADER_ROW = 20;
+    /** 明细表头所在行（0 基）：第 8、9 行是两行表头 */
+    private static final int HEADER_ROW = 7;
+    private static final int FIRST_DATA_ROW = 9;
+
+    /** 列下标（0 基）：B=1 序号、C=2 日期、D=3 摘要、E..H 收入、I..K 支出、L=11 结余、M=12 备注 */
+    private static final int COL_SEQ = 1;
+    private static final int COL_DATE = 2;
+    private static final int COL_SUMMARY = 3;
+    private static final int COL_INCOME_QTY = 4;
+    private static final int COL_INCOME_AVG = 5;
+    private static final int COL_INCOME_TOTAL = 6;
+    private static final int COL_EXPENSE_QTY = 7;
+    private static final int COL_EXPENSE_PRICE = 8;
+    private static final int COL_EXPENSE_AMOUNT = 9;
+    private static final int COL_BALANCE = 10;
+    private static final int COL_NOTE = 11;
 
     public void write(ExportPlan plan, OutputStream out) throws IOException {
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
-            CellStyle money = moneyStyle(workbook);
-            CellStyle head = headStyle(workbook);
+            Styles styles = new Styles(workbook);
+            XSSFSheet sheet = workbook.createSheet("收支明细");
+            writeSummary(sheet, plan, styles);
+            writeHeader(sheet, styles);
+            writeRows(sheet, plan, styles);
 
-            XSSFSheet summarySheet = workbook.createSheet("收支表");
-            int categoryChartStartRow = writeSummary(summarySheet, plan, head, money);
-
-            XSSFSheet categorySheet = workbook.createSheet("分类合计");
-            CategoryRanges ranges = writeCategoryTotals(categorySheet, plan, head, money);
-
-            drawBarChart(summarySheet, categorySheet, ranges.expense(), "支出分类", 3);
-            drawBarChart(summarySheet, categorySheet, ranges.income(), "收入分类", 10);
-
-            writeDetail(summarySheet, plan, head, money, categoryChartStartRow);
+            XSSFSheet chartSheet = workbook.createSheet("分类合计");
+            CategoryRanges ranges = writeCategoryTotals(chartSheet, plan, styles);
+            drawBarChart(sheet, chartSheet, ranges.expense(), "支出分类", 13, 1);
+            drawBarChart(sheet, chartSheet, ranges.income(), "收入分类", 13, 20);
 
             workbook.write(out);
             out.flush();
@@ -70,39 +93,105 @@ public class TransactionExcelExportService {
         log.info("导出 xlsx：{}，明细 {} 条", plan.filename(), plan.rows().size());
     }
 
-    /* ---------- 汇总区（顶部） ---------- */
+    /* ---------- 顶部汇总：收入 / 支出 / 结余 ---------- */
 
-    private int writeSummary(XSSFSheet sheet, ExportPlan plan, CellStyle head, CellStyle money) {
+    private void writeSummary(XSSFSheet sheet, ExportPlan plan, Styles styles) {
         XSSFRow title = sheet.createRow(0);
-        title.createCell(0).setCellValue(plan.title());
-        title.getCell(0).setCellStyle(head);
-        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 5));
+        cell(title, COL_SEQ, plan.title(), styles.title);
+        // 合并区里其余单元格只上样式：createCell 会**替换**已有单元格，不能从 COL_SEQ 重新 create
+        for (int c = COL_SEQ + 1; c <= COL_NOTE; c++) {
+            title.createCell(c).setCellStyle(styles.title);
+        }
+        sheet.addMergedRegion(new CellRangeAddress(0, 0, COL_SEQ, COL_NOTE));
 
-        XSSFRow row = sheet.createRow(1);
-        cell(row, 0, "账本名", head);
-        cell(row, 1, plan.bookName());
-        row = sheet.createRow(2);
-        cell(row, 0, "导出时间", head);
-        cell(row, 1, plan.generatedAt());
-        row = sheet.createRow(3);
-        cell(row, 0, "统计区间", head);
-        cell(row, 1, plan.rangeText());
-        row = sheet.createRow(4);
-        cell(row, 0, "期间收入", head);
-        moneyCell(row, 1, plan.totalIncome(), money);
-        row = sheet.createRow(5);
-        cell(row, 0, "期间支出", head);
-        moneyCell(row, 1, plan.totalExpense(), money);
-        row = sheet.createRow(6);
-        cell(row, 0, "期初结余", head);
-        moneyCell(row, 1, plan.opening(), money);
-        row = sheet.createRow(7);
-        cell(row, 0, "期末结余", head);
-        moneyCell(row, 1, plan.closing(), money);
+        summaryRow(sheet, 1, "收入", plan.totalIncome(), styles);
+        summaryRow(sheet, 3, "支出", plan.totalExpense(), styles);
+        summaryRow(sheet, 5, "结余", plan.closing(), styles);
 
-        sheet.setColumnWidth(0, 12 * 256);
-        sheet.setColumnWidth(1, 20 * 256);
-        return DETAIL_HEADER_ROW;
+        // 右上角补一行导出信息，打印/发群时能看出是哪一段数据
+        XSSFRow meta = sheet.getRow(5);
+        cell(meta, COL_BALANCE, "统计区间：" + plan.rangeText() + "　导出时间：" + plan.generatedAt(), styles.hint);
+        sheet.addMergedRegion(new CellRangeAddress(5, 5, COL_BALANCE, COL_NOTE));
+
+        sheet.setColumnWidth(COL_SEQ, 6 * 256);
+        sheet.setColumnWidth(COL_DATE, 12 * 256);
+        sheet.setColumnWidth(COL_SUMMARY, 30 * 256);
+        for (int c = COL_INCOME_QTY; c <= COL_EXPENSE_AMOUNT; c++) {
+            sheet.setColumnWidth(c, 10 * 256);
+        }
+        sheet.setColumnWidth(COL_BALANCE, 11 * 256);
+        sheet.setColumnWidth(COL_NOTE, 28 * 256);
+    }
+
+    private void summaryRow(XSSFSheet sheet, int rowIndex, String label, BigDecimal value, Styles styles) {
+        XSSFRow row = sheet.createRow(rowIndex);
+        cell(row, COL_SEQ, label, styles.bold);
+        cell(row, COL_SEQ + 1, null, styles.bold);
+        sheet.addMergedRegion(new CellRangeAddress(rowIndex, rowIndex, COL_SEQ, COL_SEQ + 1));
+        moneyCell(row, COL_DATE + 1, value, styles.money);
+    }
+
+    /* ---------- 两行表头 ---------- */
+
+    private void writeHeader(XSSFSheet sheet, Styles styles) {
+        XSSFRow top = sheet.createRow(HEADER_ROW);
+        XSSFRow bottom = sheet.createRow(HEADER_ROW + 1);
+
+        verticalPair(sheet, COL_SEQ, "序号", top, bottom, styles);
+        verticalPair(sheet, COL_DATE, "日期", top, bottom, styles);
+        verticalPair(sheet, COL_SUMMARY, "摘要", top, bottom, styles);
+
+        groupHeader(sheet, top, COL_INCOME_QTY, COL_INCOME_TOTAL, "收入", styles);
+        cell(bottom, COL_INCOME_QTY, "数量", styles.head);
+        cell(bottom, COL_INCOME_AVG, "人均数量", styles.head);
+        cell(bottom, COL_INCOME_TOTAL, "总价", styles.head);
+
+        groupHeader(sheet, top, COL_EXPENSE_QTY, COL_EXPENSE_AMOUNT, "支出", styles);
+        cell(bottom, COL_EXPENSE_QTY, "数量", styles.head);
+        cell(bottom, COL_EXPENSE_PRICE, "单价", styles.head);
+        cell(bottom, COL_EXPENSE_AMOUNT, "金额", styles.head);
+
+        verticalPair(sheet, COL_BALANCE, "结余", top, bottom, styles);
+        verticalPair(sheet, COL_NOTE, "备注", top, bottom, styles);
+    }
+
+    /** 跨两行合并的单列表头（序号 / 日期 / 摘要 …） */
+    private void verticalPair(XSSFSheet sheet, int col, String text, XSSFRow top, XSSFRow bottom, Styles styles) {
+        cell(top, col, text, styles.head);
+        cell(bottom, col, null, styles.head);
+        sheet.addMergedRegion(new CellRangeAddress(HEADER_ROW, HEADER_ROW + 1, col, col));
+    }
+
+    /** 横向合并的分组表头（收入 / 支出） */
+    private void groupHeader(XSSFSheet sheet, XSSFRow top, int from, int to, String text, Styles styles) {
+        cell(top, from, text, styles.head);
+        // from 那格已经有文字，从 from+1 开始补样式（createCell 会替换已有单元格）
+        for (int c = from + 1; c <= to; c++) {
+            top.createCell(c).setCellStyle(styles.head);
+        }
+        sheet.addMergedRegion(new CellRangeAddress(HEADER_ROW, HEADER_ROW, from, to));
+    }
+
+    /* ---------- 明细 ---------- */
+
+    private void writeRows(XSSFSheet sheet, ExportPlan plan, Styles styles) {
+        int rowIndex = FIRST_DATA_ROW;
+        int seq = 1;
+        for (var row : plan.rows()) {
+            XSSFRow excel = sheet.createRow(rowIndex++);
+            excel.createCell(COL_SEQ).setCellValue(seq++);
+            dateCell(excel, COL_DATE, row.getTransDate(), styles);
+            // 摘要放分类名（和纸质表一致），补充说明进备注列
+            excel.createCell(COL_SUMMARY).setCellValue(row.getCategoryName());
+            boolean income = "income".equals(row.getType());
+            if (income) {
+                moneyCell(excel, COL_INCOME_TOTAL, row.getAmount(), styles.money);
+            } else {
+                moneyCell(excel, COL_EXPENSE_AMOUNT, row.getAmount(), styles.money);
+            }
+            moneyCell(excel, COL_BALANCE, row.getBalanceAfter(), styles.money);
+            excel.createCell(COL_NOTE).setCellValue(row.getNote() == null ? "" : row.getNote());
+        }
     }
 
     /* ---------- 分类合计（图表数据源） ---------- */
@@ -116,11 +205,11 @@ public class TransactionExcelExportService {
     private record CategoryRanges(Range expense, Range income) {
     }
 
-    private CategoryRanges writeCategoryTotals(XSSFSheet sheet, ExportPlan plan, CellStyle head, CellStyle money) {
+    private CategoryRanges writeCategoryTotals(XSSFSheet sheet, ExportPlan plan, Styles styles) {
         XSSFRow header = sheet.createRow(0);
-        cell(header, 0, "分类", head);
-        cell(header, 1, "金额", head);
-        cell(header, 2, "类型", head);
+        cell(header, 0, "分类", styles.head);
+        cell(header, 1, "金额", styles.head);
+        cell(header, 2, "类型", styles.head);
 
         List<CategoryTotal> expense = plan.categoryTotals().stream()
                 .filter(t -> !"income".equals(t.type()))
@@ -129,10 +218,8 @@ public class TransactionExcelExportService {
                 .filter(t -> "income".equals(t.type()))
                 .toList();
 
-        int rowIndex = 1;
-        Range expenseRange = writeBlock(sheet, expense, rowIndex, money);
-        rowIndex = expenseRange.hasData() ? expenseRange.lastRow() + 2 : rowIndex + 1;
-        Range incomeRange = writeBlock(sheet, income, rowIndex, money);
+        Range expenseRange = writeBlock(sheet, expense, 1, styles);
+        Range incomeRange = writeBlock(sheet, income, expenseRange.hasData() ? expenseRange.lastRow() + 2 : 2, styles);
 
         sheet.setColumnWidth(0, 18 * 256);
         sheet.setColumnWidth(1, 14 * 256);
@@ -140,7 +227,7 @@ public class TransactionExcelExportService {
         return new CategoryRanges(expenseRange, incomeRange);
     }
 
-    private Range writeBlock(XSSFSheet sheet, List<CategoryTotal> totals, int startRow, CellStyle money) {
+    private Range writeBlock(XSSFSheet sheet, List<CategoryTotal> totals, int startRow, Styles styles) {
         if (totals.isEmpty()) {
             return new Range(startRow, startRow - 1);
         }
@@ -148,21 +235,21 @@ public class TransactionExcelExportService {
         for (CategoryTotal total : totals) {
             XSSFRow row = sheet.createRow(rowIndex++);
             row.createCell(0).setCellValue(total.categoryName());
-            moneyCell(row, 1, total.amount(), money);
+            moneyCell(row, 1, total.amount(), styles.money);
             row.createCell(2).setCellValue("income".equals(total.type()) ? "收入" : "支出");
         }
         return new Range(startRow, rowIndex - 1);
     }
 
-    /* ---------- 图表：与统计页同样的「分类 → 金额」柱状图 ---------- */
+    /* ---------- 图表（放在表格右侧，不压数据） ---------- */
 
-    private void drawBarChart(XSSFSheet target, XSSFSheet dataSheet, Range range, String title, int anchorCol) {
+    private void drawBarChart(XSSFSheet target, XSSFSheet dataSheet, Range range,
+                              String title, int anchorCol, int anchorRow) {
         if (!range.hasData()) {
-            // 这个方向没有数据就不画空图（Excel 里空图比没有图更难看）
             return;
         }
         XSSFDrawing drawing = target.createDrawingPatriarch();
-        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, anchorCol, 1, anchorCol + 6, 18);
+        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, anchorCol, anchorRow, anchorCol + 7, anchorRow + 18);
         XSSFChart chart = drawing.createChart(anchor);
 
         chart.setTitleText(title);
@@ -183,69 +270,59 @@ public class TransactionExcelExportService {
         XDDFBarChartData data = (XDDFBarChartData) chart.createData(ChartTypes.BAR, bottomAxis, leftAxis);
         XDDFBarChartData.Series series = (XDDFBarChartData.Series) data.addSeries(categories, values);
         series.setTitle("金额（元）", null);
-        // COL = 竖直柱子，和统计页的柱状图一致
         data.setBarDirection(BarDirection.COL);
         chart.plot(data);
     }
 
-    /* ---------- 明细 ---------- */
+    /* ---------- 样式与单元格 ---------- */
 
-    private void writeDetail(XSSFSheet sheet, ExportPlan plan, CellStyle head, CellStyle money, int headerRow) {
-        XSSFRow header = sheet.createRow(headerRow);
-        String[] titles = {"日期", "分类", "摘要", "收入", "支出", "结余"};
-        for (int i = 0; i < titles.length; i++) {
-            cell(header, i, titles[i], head);
+    /** 一套样式在同一个 workbook 里复用：POI 的 CellStyle 数量有上限，逐格新建会爆 */
+    private static final class Styles {
+        private final CellStyle title;
+        private final CellStyle head;
+        private final CellStyle bold;
+        private final CellStyle money;
+        private final CellStyle date;
+        private final CellStyle hint;
+
+        private Styles(XSSFWorkbook workbook) {
+            Font titleFont = workbook.createFont();
+            titleFont.setBold(true);
+            titleFont.setFontHeightInPoints((short) 16);
+            title = workbook.createCellStyle();
+            title.setFont(titleFont);
+            title.setAlignment(HorizontalAlignment.CENTER);
+            title.setVerticalAlignment(VerticalAlignment.CENTER);
+
+            Font boldFont = workbook.createFont();
+            boldFont.setBold(true);
+            bold = workbook.createCellStyle();
+            bold.setFont(boldFont);
+
+            head = workbook.createCellStyle();
+            head.setFont(boldFont);
+            head.setAlignment(HorizontalAlignment.CENTER);
+            head.setVerticalAlignment(VerticalAlignment.CENTER);
+            head.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+            head.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            head.setBorderBottom(BorderStyle.THIN);
+            head.setBorderTop(BorderStyle.THIN);
+            head.setBorderLeft(BorderStyle.THIN);
+            head.setBorderRight(BorderStyle.THIN);
+
+            money = workbook.createCellStyle();
+            money.setDataFormat(workbook.createDataFormat().getFormat("0.00"));
+
+            date = workbook.createCellStyle();
+            date.setDataFormat(workbook.createDataFormat().getFormat("yyyy-mm-dd"));
+
+            hint = workbook.createCellStyle();
+            Font hintFont = workbook.createFont();
+            hintFont.setFontHeightInPoints((short) 9);
+            hintFont.setColor(IndexedColors.GREY_50_PERCENT.getIndex());
+            hint.setFont(hintFont);
+            hint.setAlignment(HorizontalAlignment.RIGHT);
         }
-
-        int rowIndex = headerRow + 1;
-        for (var row : plan.rows()) {
-            XSSFRow excelRow = sheet.createRow(rowIndex++);
-            excelRow.createCell(0).setCellValue(row.getTransDate().toString());
-            excelRow.createCell(1).setCellValue(row.getCategoryName());
-            excelRow.createCell(2).setCellValue(row.getNote() == null ? "" : row.getNote());
-            boolean income = "income".equals(row.getType());
-            if (income) {
-                moneyCell(excelRow, 3, row.getAmount(), money);
-            } else {
-                moneyCell(excelRow, 4, row.getAmount(), money);
-            }
-            moneyCell(excelRow, 5, row.getBalanceAfter(), money);
-        }
-
-        XSSFRow total = sheet.createRow(rowIndex);
-        cell(total, 0, "合计", head);
-        moneyCell(total, 3, plan.totalIncome(), money);
-        moneyCell(total, 4, plan.totalExpense(), money);
-        moneyCell(total, 5, plan.closing(), money);
-
-        sheet.setColumnWidth(2, 32 * 256);
-        for (int i = 3; i <= 5; i++) {
-            sheet.setColumnWidth(i, 14 * 256);
-        }
-    }
-
-    /* ---------- 样式 ---------- */
-
-    private static CellStyle headStyle(XSSFWorkbook workbook) {
-        CellStyle style = workbook.createCellStyle();
-        Font font = workbook.createFont();
-        font.setBold(true);
-        style.setFont(font);
-        style.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
-        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        style.setBorderBottom(BorderStyle.THIN);
-        return style;
-    }
-
-    private static CellStyle moneyStyle(XSSFWorkbook workbook) {
-        CellStyle style = workbook.createCellStyle();
-        // 两位小数：和页面上的金额格式一致，Excel 里再算也不会出现浮点尾巴
-        style.setDataFormat(workbook.createDataFormat().getFormat("0.00"));
-        return style;
-    }
-
-    private static void cell(XSSFRow row, int col, String value) {
-        row.createCell(col).setCellValue(value == null ? "" : value);
     }
 
     private static void cell(XSSFRow row, int col, String value, CellStyle style) {
@@ -258,5 +335,11 @@ public class TransactionExcelExportService {
         var cell = row.createCell(col);
         cell.setCellValue(value == null ? 0 : value.doubleValue());
         cell.setCellStyle(style);
+    }
+
+    private static void dateCell(XSSFRow row, int col, java.time.LocalDate value, Styles styles) {
+        var cell = row.createCell(col);
+        cell.setCellValue(value);
+        cell.setCellStyle(styles.date);
     }
 }

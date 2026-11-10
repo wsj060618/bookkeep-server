@@ -13,16 +13,10 @@ import com.bookkeep.service.mapper.TransactionMapper;
 import com.bookkeep.service.support.StatisticCalculator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.poi.ss.usermodel.DataFormatter;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -204,17 +198,20 @@ public class TransactionImportService {
 
     private List<RawRow> parse(String filename, byte[] content) {
         String lower = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
-        List<CellRow> table = lower.endsWith(".xlsx") || lower.endsWith(".xls")
-                ? parseWorkbook(content)
-                : parseCsv(content);
-        return extractDataRows(table);
+        // 导入只支持 CSV：Excel 的版式千人千面（合并单元格、数量/单价分组表头…），
+        // 强行解析只会给出满屏的「日期格式不对」。要导 Excel 就先进 Excel 另存为 CSV。
+        if (!lower.endsWith(".csv")) {
+            throw new BusinessException(ResultCode.BAD_REQUEST,
+                    "导入只支持 CSV 文件；请在 Excel 里「另存为 → CSV UTF-8（逗号分隔）」后再上传");
+        }
+        return extractDataRows(parseCsv(content));
     }
 
     /**
      * 从整张表里**找到表头**再取数据。
-     * <p>为什么不能假设表头在第一行：导出的 xlsx 第一行是标题，下面还有汇总和图表，
-     * 真正的明细表头在第 21 行。所以这里扫前几十行找表头，并同时认两种列结构，
-     * 让「导出 → 再导入」能原样转回去。
+     * <p>为什么不能假设表头在第一行：导出的 CSV 第一行是标题，下面还有汇总，
+     * 真正的明细表头在后面。所以这里扫前几十行找表头，并同时认两种列结构，
+     * 让「导出 CSV → 再导入」能原样转回去。
      */
     private List<RawRow> extractDataRows(List<CellRow> table) {
         int headerIndex = -1;
@@ -300,27 +297,9 @@ public class TransactionImportService {
         return fallback;
     }
 
-    private List<CellRow> parseWorkbook(byte[] content) {
-        List<CellRow> rows = new ArrayList<>();
-        DataFormatter formatter = new DataFormatter();
-        try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(content))) {
-            Sheet sheet = workbook.getSheetAt(0);
-            for (int i = 0; i <= sheet.getLastRowNum(); i++) {
-                Row row = sheet.getRow(i);
-                if (row == null) {
-                    continue;
-                }
-                int width = Math.max(row.getLastCellNum(), 6);
-                String[] cells = new String[width];
-                for (int c = 0; c < width; c++) {
-                    cells[c] = formatter.formatCellValue(row.getCell(c));
-                }
-                rows.add(new CellRow(i + 1, cells)); // Excel 行号从 1 开始，和用户看到的一致
-            }
-        } catch (IOException | RuntimeException e) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "Excel 解析失败，请确认文件没损坏");
-        }
-        return rows;
+    private static boolean isBlank(RawRow row) {
+        return !StringUtils.hasText(row.date()) && !StringUtils.hasText(row.amount())
+                && !StringUtils.hasText(row.category());
     }
 
     private List<CellRow> parseCsv(byte[] content) {
@@ -339,11 +318,6 @@ public class TransactionImportService {
             rows.add(new CellRow(i + 1, cells.toArray(new String[0])));
         }
         return rows;
-    }
-
-    private static boolean isBlank(RawRow row) {
-        return !StringUtils.hasText(row.date()) && !StringUtils.hasText(row.amount())
-                && !StringUtils.hasText(row.category());
     }
 
     /** 手写 CSV 拆列：只处理双引号与转义的双引号，够用且不引入 commons-csv 依赖 */

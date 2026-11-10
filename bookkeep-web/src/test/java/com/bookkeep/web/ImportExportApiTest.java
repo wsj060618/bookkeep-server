@@ -54,7 +54,7 @@ class ImportExportApiTest {
     private ObjectMapper objectMapper;
 
     @Test
-    @DisplayName("xlsx 导出：POI 能打开，含「收支表 / 分类合计」两个 sheet 与明细行")
+    @DisplayName("xlsx 导出：版式对齐班费表（顶部收入/支出/结余、两行表头、明细从第 10 行开始）")
     void exportXlsxIsRealWorkbook() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("xls"));
         long feeId = categoryIdOf(token, "收取班费");
@@ -79,19 +79,30 @@ class ImportExportApiTest {
         assertTrue(bytes.length > 0);
         try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(bytes))) {
             assertEquals(2, workbook.getNumberOfSheets());
-            var summary = workbook.getSheet("收支表");
-            assertNotNull(summary, "应有「收支表」sheet");
-            assertEquals("班级账本 班费收支明细", summary.getRow(0).getCell(0).getStringCellValue());
-            assertEquals("期间收入", summary.getRow(4).getCell(0).getStringCellValue());
-            assertEquals(1900.00, summary.getRow(4).getCell(1).getNumericCellValue(), 0.001);
-            // 明细从第 21 行（0 基 20）开始，两天各一行 + 合计
-            assertEquals("日期", summary.getRow(20).getCell(0).getStringCellValue());
-            assertEquals(LocalDate.of(2026, 9, 5).toString(), summary.getRow(21).getCell(0).getStringCellValue());
-            assertEquals("合计", summary.getRow(23).getCell(0).getStringCellValue());
+            var sheet = workbook.getSheet("收支明细");
+            assertNotNull(sheet, "应有「收支明细」sheet");
+            assertEquals("班级账本 班费收支明细", sheet.getRow(0).getCell(1).getStringCellValue());
+            // 顶部三行汇总：收入 / 支出 / 结余
+            assertEquals("收入", sheet.getRow(1).getCell(1).getStringCellValue());
+            assertEquals(1900.00, sheet.getRow(1).getCell(3).getNumericCellValue(), 0.001);
+            assertEquals("支出", sheet.getRow(3).getCell(1).getStringCellValue());
+            assertEquals(620.00, sheet.getRow(3).getCell(3).getNumericCellValue(), 0.001);
+            assertEquals("结余", sheet.getRow(5).getCell(1).getStringCellValue());
+            assertEquals(1280.00, sheet.getRow(5).getCell(3).getNumericCellValue(), 0.001);
+            // 两行表头：收入 / 支出 分组
+            assertEquals("序号", sheet.getRow(7).getCell(1).getStringCellValue());
+            assertEquals("收入", sheet.getRow(7).getCell(4).getStringCellValue());
+            assertEquals("支出", sheet.getRow(7).getCell(7).getStringCellValue());
+            assertEquals("总价", sheet.getRow(8).getCell(6).getStringCellValue());
+            assertEquals("金额", sheet.getRow(8).getCell(9).getStringCellValue());
+            // 明细从第 10 行（0 基 9）开始：序号 1 是那笔收入
+            assertEquals(1, (int) sheet.getRow(9).getCell(1).getNumericCellValue());
+            assertEquals("收取班费", sheet.getRow(9).getCell(3).getStringCellValue());
+            assertEquals(1900.00, sheet.getRow(9).getCell(6).getNumericCellValue(), 0.001);
+            assertEquals(1900.00, sheet.getRow(9).getCell(10).getNumericCellValue(), 0.001);
+            assertEquals(620.00, sheet.getRow(10).getCell(9).getNumericCellValue(), 0.001);
 
-            var chartSheet = workbook.getSheet("分类合计");
-            assertNotNull(chartSheet, "应有「分类合计」sheet");
-            assertEquals("分类", chartSheet.getRow(0).getCell(0).getStringCellValue());
+            assertNotNull(workbook.getSheet("分类合计"), "图表数据源 sheet 应在");
         }
     }
 
@@ -178,17 +189,20 @@ class ImportExportApiTest {
     }
 
     @Test
-    @DisplayName("导出的 xlsx 能原样导入回来：导入会自动找表头（跳过标题/汇总/图表区）")
-    void exportedXlsxCanBeImportedBack() throws Exception {
+    @DisplayName("导入只收 CSV：上传 .xlsx 直接 400，并提示先另存为 CSV")
+    void importRejectsXlsx() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("xls"));
-        record(token, categoryIdOf(token, "收取班费"), "income", "1900.00", "2026-09-05", "全班 38 人");
-        record(token, categoryIdOf(token, "聚餐"), "expense", "620.00", "2026-09-20", "中秋聚餐");
+        record(token, categoryIdOf(token, "收取班费"), "income", "100.00", "2026-09-05", null);
 
         byte[] xlsx = downloadXlsx(token);
-        JsonNode data = uploadBytes(token, "班费流水_全部.xlsx", xlsx).path("data");
-        assertEquals(0, data.path("failed").size(),
-                "导出的文件自己都导不回来就说明列结构不匹配：" + data);
-        assertEquals(2, data.path("success").asInt());
+        mockMvc.perform(multipart("/api/transactions/import")
+                        .file(new MockMultipartFile("file", "班费.xlsx",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsx))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value(
+                        "导入只支持 CSV 文件；请在 Excel 里「另存为 → CSV UTF-8（逗号分隔）」后再上传"));
     }
 
     @Test
