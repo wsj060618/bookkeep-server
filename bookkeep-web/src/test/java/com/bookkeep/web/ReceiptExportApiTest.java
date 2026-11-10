@@ -44,7 +44,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 票据 zip 导出集成测试（PLAN §10.9）。
- * <p>两种入口共用同一套目录规则：**账本级**（可带日期区间）与**单笔**。
+ * <p>只测**账本级**导出（可带日期区间）：单笔在网页端是「逐张下载图片」，不再打包 zip。
  * <p>白盒关注：zip 内目录层级（账本/月份）、文件名规则（日期_标题）、同目录重名自动 _2、
  * manifest.csv 的行数与相对路径、以及「没票据 / 越权 / 区间反了」仍返回正常的 200+JSON 信封。
  */
@@ -115,25 +115,6 @@ class ReceiptExportApiTest {
     }
 
     @Test
-    @DisplayName("单笔导出：只打这一笔，文件名带日期/分类/金额")
-    void exportSingleTransactionZip() throws Exception {
-        Fixture f = new Fixture("3班班费");
-        long sep = f.create("income", "收取班费", "1900.00", "2026-09-05");
-        long oct = f.create("expense", "聚餐", "62.00", "2026-10-08");
-        f.upload(sep, "九月小票.png");
-        f.upload(oct, "十月小票.png");
-
-        MvcResult result = download("/api/transactions/" + sep + "/receipts/export", f.token);
-        String filename = dispositionFilename(result);
-        assertTrue(filename.contains("20260905") && filename.contains("1900.00") && filename.endsWith(".zip"),
-                filename);
-
-        Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
-        assertEquals(2, entries.size(), "单笔导出 = manifest + 这一笔的 1 张图：" + entries.keySet());
-        assertFalse(entries.keySet().stream().anyMatch(n -> n.endsWith("十月小票.png")), entries.keySet().toString());
-    }
-
-    @Test
     @DisplayName("磁盘上缺了图片：跳过该文件，manifest 里标「文件缺失」，其余照常打包")
     void missingFileIsSkippedAndMarked() throws Exception {
         Fixture f = new Fixture("3班班费");
@@ -178,9 +159,16 @@ class ReceiptExportApiTest {
         assertTrue(badRange.path("message").asText().contains("不能晚于"), badRange.path("message").asText());
 
         String other = registerAndLogin(mockMvc, objectMapper, nextUsername("rcpz"));
-        JsonNode foreign = json(mockMvc.perform(get("/api/transactions/" + txId + "/receipts/export")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + other)).andReturn(), objectMapper);
-        assertEquals(404, foreign.path("code").asInt());
+        // 单笔 zip 接口已下线（网页端改成逐张下载图片），越权检查改为盯「看图」接口
+        f.upload(txId, "别人的图.png");
+        long receiptId = jdbcTemplate.queryForObject(
+                "SELECT r.id FROM transaction_receipt r JOIN `transaction` t ON t.id = r.transaction_id "
+                        + "WHERE t.book_id = ? LIMIT 1", Long.class, f.bookId);
+        JsonNode foreignImage = json(mockMvc.perform(
+                        get("/api/transactions/" + txId + "/receipts/" + receiptId)
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + other))
+                .andReturn(), objectMapper);
+        assertEquals(404, foreignImage.path("code").asInt());
     }
 
     /* ---------- 工具 ---------- */

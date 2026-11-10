@@ -90,12 +90,6 @@ public class ReceiptController {
         return zip(receiptExportService.prepareBook(startDate, endDate));
     }
 
-    /** 单笔导出：这一笔挂的票据打成 zip */
-    @GetMapping("/{transactionId}/receipts/export")
-    public ResponseEntity<StreamingResponseBody> exportSingle(@PathVariable Long transactionId) {
-        return zip(receiptExportService.prepareSingle(transactionId));
-    }
-
     /* ---------- 内部 ---------- */
 
     private ResponseEntity<StreamingResponseBody> zip(ReceiptExportService.ExportPlan plan) {

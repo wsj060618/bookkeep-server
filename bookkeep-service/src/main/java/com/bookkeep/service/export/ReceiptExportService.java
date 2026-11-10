@@ -35,10 +35,11 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * 票据打包导出（PLAN §10.9）：**账本级**（可带日期区间）与**单笔**两种，共用同一套目录规则。
+ * 票据打包导出（PLAN §10.9）：**账本级**（可带日期区间）。
+ * <p>单笔不打包：网页端在票据弹窗里把这一笔的图**逐张下载**（通常 1–3 张，zip 反而多一步）。
  *
  * <pre>
- * {账本名}_{bookId}.zip
+ * {账本名}_票据_全部.zip
  *   ├── {账本名}_{bookId}/{yyyy-MM}/{日期}_{票据标题}.{ext}
  *   └── manifest.csv   (日期/类型/分类/金额/备注/票据标题/相对路径)
  * </pre>
@@ -103,29 +104,6 @@ public class ReceiptExportService {
                   + "-" + (endDate == null ? "今" : COMPACT.format(endDate));
         String filename = safeName + "_票据_" + suffix + ".zip";
         return build(safeName + "_" + bookId, filename, transactions, receipts);
-    }
-
-    /** 单笔导出：文件名带日期/分类/金额，方便发给别人时一眼看出是哪笔 */
-    @Transactional(readOnly = true)
-    public ExportPlan prepareSingle(Long transactionId) {
-        Long bookId = currentBookService.currentBookId();
-        Transaction transaction = transactionId == null ? null : transactionMapper.selectById(transactionId);
-        if (transaction == null || !transaction.getBookId().equals(bookId)) {
-            throw new BusinessException(ResultCode.NOT_FOUND, "流水不存在");
-        }
-        List<TransactionReceipt> receipts = receiptMapper.selectByTransaction(transactionId);
-        if (receipts.isEmpty()) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "这笔流水还没有上传票据");
-        }
-        guardLimits(receipts);
-
-        Book book = bookMapper.selectById(bookId);
-        String bookName = book == null ? "账本" : book.getName();
-        Category category = categoryMapper.selectById(transaction.getCategoryId());
-        String categoryName = category == null ? "已删除分类" : category.getName();
-        String filename = safeFileName(bookName) + "_" + COMPACT.format(transaction.getTransDate())
-                + "_" + safeFileName(categoryName) + "_" + transaction.getAmount().toPlainString() + ".zip";
-        return build(safeFileName(bookName) + "_" + bookId, filename, List.of(transaction), receipts);
     }
 
     /** 流式写 zip：逐个文件 copy，不把图片读进内存 */
