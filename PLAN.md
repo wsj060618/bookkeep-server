@@ -349,8 +349,8 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/transactions?page=1&size=10&type=&categoryId=&startDate=&endDate=&keyword=` | 分页查询 → PageResult |
-| POST | `/api/transactions` | 新增 `{categoryId, type, amount, transDate, note?}`；**支出不能超过当前余额** |
-| PUT | `/api/transactions/{id}` | 修改（仅自己账本，同样校验余额） |
+| POST | `/api/transactions` | 新增 `{categoryId, type, amount, transDate, note?}`；**不校验余额**（余额可为负） |
+| PUT | `/api/transactions/{id}` | 修改（仅自己账本，同样不校验余额） |
 | DELETE | `/api/transactions/{id}` | 删除（仅自己账本） |
 | GET | `/api/transactions/export?startDate=&endDate=` | 导出 CSV（**流式**，含逐行结余），换届与公示用；参数错误仍是 JSON 信封 |
 
@@ -383,7 +383,8 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 - **窗口函数必须在外层过滤之前算**：`WITH running` 里只按 `book_id` 过滤，月份/日期条件写在外层 `WHERE`。
   先按月过滤再累计，每月第一行都会从 0 开始，数字全错（W2 的 `selectMonthWithRunningBalance` 就是这么写的）
 - **取舍**：普通明细列表**不返回**结余列（只返回金额）；**导出与公示页才带** `balanceAfter`（它们是全量查询，语义清晰）
-- 余额校验：`当前余额 = Σ收入 − Σ支出`，新增/修改**支出**时超过余额 → `400「班费余额不足，当前余额 X」`
+- 余额：`当前余额 = Σ收入 − Σ支出`，**可以为负**。曾经在新增/修改支出时校验「支出不能超过余额」，
+  2026-11 删掉了：删错一笔收入就能把余额打成负数，拦支出只会让人连修数据都做不到
 - 统计口径：本月收入/支出/结余；累计结余 = 全账本 `sumBalance`（不等于本月结余）；分类占比按 `GROUP BY category_id`，
   **`type` 可选 `expense` / `income`**（默认 expense）——支出、收入各看各的占比
 
@@ -472,7 +473,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 | 档 | 内容 | 状态 |
 |---|---|---|
-| **A 档（必须，否则项目失去意义）** | P2 分类 + 流水后端（隔离/分页筛选/余额校验）+ 记一笔 + 明细列表 + CSV/Excel 导出 + 单机跑起来 + 每日备份 | 第 1–3 周 |
+| **A 档（必须，否则项目失去意义）** | P2 分类 + 流水后端（隔离/分页筛选）+ 记一笔 + 明细列表 + CSV/Excel 导出 + 单机跑起来 + 每日备份 | 第 1–3 周 |
 | **B 档（争取）** | 本月收支/结余 + 分类占比、只读公示页 | 第 2–4 周 |
 | **C 档（有余力）** | Docker Compose 云端取证、HTTPS、登录限流、demo 视频、简历精修 | 第 4–5 周 |
 | **不做** | 多账本、预算、AI 分析、头像、多用户共享、手机离线、邮件找回密码 | — |
@@ -481,7 +482,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 | 周 | 后端 | 前端（AI 写，本人验收） | 周末验收 |
 |---|---|---|---|
-| **W1** | P2 分类 + 流水（book 隔离、分页筛选、余额校验）+ 单测 + `http/*.http` | 记一笔 + 明细列表（移动优先卡片） | `localhost` 能登录、能记一笔、列表能看到；**当天开始记真实班费** |
+| **W1** | P2 分类 + 流水（book 隔离、分页筛选）+ 单测 + `http/*.http` | 记一笔 + 明细列表（移动优先卡片） | `localhost` 能登录、能记一笔、列表能看到；**当天开始记真实班费** |
 | **W2** | `class` 收敛已提前完成；导出（CSV、UTF-8 BOM、逐行结余）+ 统计 summary/category + 公示页接口 ✅ 代码完成 | 统计卡片 + 导出按钮 + 公示页 | 导出的 CSV 发班群不丢人；公示链接免登录能看 |
 | **W3** | 单机打包：`repackage` fat jar + `deploy/nginx/nginx.conf` + 启停/备份脚本 ✅ | 生产构建（`dist` 交给 Nginx，history 路由 + `try_files`）✅ | 双击 `start-all.bat` 能用；重启电脑数据还在；备份能恢复；手机同 WiFi 能开 |
 | **W4** | Dockerfile + compose（本机跑通）→ 试用期上云：HTTPS、密钥外部化、登录限流（含 `X-Real-IP`）、导入真实数据、**备份恢复演练** | 无（前端产物复用） | 手机 4G 打开 `https://` 地址能记一笔；七项取证材料齐全 |
@@ -546,7 +547,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 - **P1 ✅**：注册 → 登录 → 带 token 访问 `/api/auth/me` 成功；无 token 返回真实 401 JSON；错参 400；401/403 都是 JSON 信封而不是 HTML 错误页。脚本：`http/auth.http`
 - **P1 收敛 ✅**：注册请求不含 `bookType`；账本 `type='class'`；预置 13 条班级分类（8 支出 + 5 收入）；`bookName` 不填默认「班级账本」
-- **P2（W1 周末）✅**：能记一笔、列表能看到；按日期/类型/分类/关键字分页筛选正常；A 用户看不到 B 用户数据（逐接口验证）；支出超过余额返回 400
+- **P2（W1 周末）✅**：能记一笔、列表能看到；按日期/类型/分类/关键字分页筛选正常；A 用户看不到 B 用户数据（逐接口验证）
 - **注册向导 + 账本管理 ✅**：`/register` 两步（账号 → 账本名）→ 自动登录进首页，首页标题是刚起的名字；
   新建第二本后用切换器切回来，分类和流水都跟着换（数据隔离）；删除进回收站、15 天内可恢复；
   只剩一本时删除返回 400；把 `deleted_at` 改到 16 天前再刷新列表，账本连同分类与流水被物理删除
@@ -785,7 +786,7 @@ APP_BASE_URL=http://你的访问地址（拼重置链接用）
 
 - 列固定：`日期, 类型, 分类, 金额, 备注`；类型认「收入/支出」与 `income/expense`；UTF-8（含 BOM 也认）
 - **行级失败不阻塞其它行**：成功行入库，失败行带**文件行号**（1 基，含表头，和 Excel 左侧一致）与原因
-- **分类不存在直接报错，不自动建分类**；支出仍受余额约束（按文件顺序累加余额）
+- **分类不存在直接报错，不自动建分类**；不校验余额（收支不平的历史数据也能导进来，余额会变负）
 - 限制：≤5MB（`spring.servlet.multipart.max-file-size`）、≤2000 行；空文件 / 只有表头 / 超限整份 400
 - 归档账本只读：导入前先拦，返回与记账相同的 400
 - **只收 CSV**：`.xlsx` 直接 400（提示先另存为 CSV UTF-8）——Excel 版式千人千面，强行解析只会满屏报错

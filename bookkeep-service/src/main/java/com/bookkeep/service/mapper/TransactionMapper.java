@@ -19,11 +19,8 @@ import java.util.List;
 @Mapper
 public interface TransactionMapper extends BaseMapper<Transaction> {
 
-    /** 当前账本余额 = Σ收入 − Σ支出 */
+    /** 当前账本余额 = Σ收入 − Σ支出（可以为负） */
     BigDecimal sumBalance(@Param("bookId") Long bookId);
-
-    /** 同上，排除某一条（改流水时用） */
-    BigDecimal sumBalanceExcluding(@Param("bookId") Long bookId, @Param("excludeId") Long excludeId);
 
     /** 某个分类下还有多少笔未删除的流水（删除分类前检查引用）。 */
     long countByCategoryId(@Param("categoryId") Long categoryId);

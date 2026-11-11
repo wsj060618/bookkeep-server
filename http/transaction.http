@@ -50,7 +50,7 @@ Authorization: Bearer {{token}}
 GET {{host}}/api/transactions/balance
 Authorization: Bearer {{token}}
 
-### 7. 余额校验：支出超过余额（预期 code=400「班费余额不足，当前余额 ...」）
+### 7. 余额可以为负：支出超过余额也照常成功（预期 code=200，余额变成负数）
 POST {{host}}/api/transactions
 Authorization: Bearer {{token}}
 Content-Type: application/json

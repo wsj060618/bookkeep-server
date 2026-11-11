@@ -29,19 +29,8 @@
     </select>
 
     <!--
-      同上，但先排除某一条流水：修改流水时用。
-      例：原来支出 100、余额 200，要改成 210 —— 若把这条也计入余额（200），会被误判超支；
-      排除后余额是 300，判断才正确。
+      某个分类下还有多少笔未删除的流水（删除分类前的引用检查）
     -->
-    <select id="sumBalanceExcluding" resultType="java.math.BigDecimal">
-        SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0)
-        FROM `transaction`
-        WHERE book_id = #{bookId}
-          AND deleted = 0
-          AND id != #{excludeId}
-    </select>
-
-    <!-- 某个分类下还有多少笔未删除的流水（删除分类前的引用检查） -->
     <select id="countByCategoryId" resultType="long">
         SELECT COUNT(*)
         FROM `transaction`

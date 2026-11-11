@@ -199,8 +199,8 @@ class ImportExportApiTest {
     }
 
     @Test
-    @DisplayName("导入的支出受余额约束：余额不够的那一行失败，前面的照常入库")
-    void importRespectsBalance() throws Exception {
+    @DisplayName("导入的支出不受余额约束：余额不够也照常入库，余额变负")
+    void importDoesNotCheckBalance() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("imp"));
 
         String csv = "日期,类型,分类,金额,备注\n"
@@ -209,9 +209,12 @@ class ImportExportApiTest {
                 + "2026-09-07,支出,聚餐,80.00,余额只剩 40\n";
 
         JsonNode data = upload(token, "流水.csv", csv).path("data");
-        assertEquals(2, data.path("success").asInt());
-        assertEquals(1, data.path("failed").size());
-        assertTrue(data.path("failed").get(0).path("reason").asText().contains("余额不足"));
+        assertEquals(3, data.path("success").asInt());
+        assertEquals(0, data.path("failed").size());
+
+        // 100 − 60 − 80 = −40.00
+        assertEquals("-40.00", getJson(mockMvc, objectMapper, "/api/transactions/balance", token)
+                .path("data").asText());
     }
 
     @Test

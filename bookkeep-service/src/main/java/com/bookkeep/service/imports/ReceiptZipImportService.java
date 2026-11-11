@@ -14,7 +14,6 @@ import com.bookkeep.service.ReceiptService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
-import com.bookkeep.service.support.StatisticCalculator;
 import com.bookkeep.service.support.ZipExtractor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -77,7 +76,6 @@ public class ReceiptZipImportService {
             Path flowCsv = findFlowCsv(files, dir);
 
             Map<String, Long> categoryIds = loadCategoryIds(bookId);
-            BigDecimal balance = StatisticCalculator.money(transactionMapper.sumBalance(bookId));
 
             int success = 0;
             List<ImportResultResp.FailedRow> failed = new ArrayList<>();
@@ -97,8 +95,7 @@ public class ReceiptZipImportService {
                 for (var row : rawRows) {
                     try {
                         Transaction transaction = transactionImportService.toTransaction(
-                                row, bookId, categoryIds, balance);
-                        balance = applyBalance(balance, transaction);
+                                row, bookId, categoryIds);
                         transactionMapper.insert(transaction);
                         success++;
                         candidates.computeIfAbsent(keyOf(transaction), k -> new ArrayDeque<>()).add(transaction);
@@ -115,13 +112,12 @@ public class ReceiptZipImportService {
             for (ManifestRow row : parseManifest(manifest)) {
                 Transaction target;
                 try {
-                    target = pickTarget(row, categoryIds, candidates, balance);
+                    target = pickTarget(row, categoryIds, candidates);
                     if (target == null) {
                         target = transactionImportService.toTransaction(
                                 new TransactionImportService.RawRow(row.line(), row.date(), row.type(),
                                         row.category(), row.amount(), row.note()),
-                                bookId, categoryIds, balance);
-                        balance = applyBalance(balance, target);
+                                bookId, categoryIds);
                         transactionMapper.insert(target);
                         success++;
                         candidates.computeIfAbsent(keyOf(target), k -> new ArrayDeque<>()).add(target);
@@ -167,7 +163,7 @@ public class ReceiptZipImportService {
 
     /** 找与 manifest 同键、且还没挂满的流水；没有就返回 null（由调用方补建） */
     private Transaction pickTarget(ManifestRow row, Map<String, Long> categoryIds,
-                                   Map<String, Deque<Transaction>> candidates, BigDecimal balance) {
+                                   Map<String, Deque<Transaction>> candidates) {
         Long categoryId = categoryIds.get(normalizeType(row.type()) + "|" + row.category().trim());
         if (categoryId == null) {
             return null; // 让 buildTransaction 去抛「分类不存在」的清晰错误
@@ -177,12 +173,6 @@ public class ReceiptZipImportService {
                 categoryId, amount, row.note());
         Deque<Transaction> queue = candidates.get(key);
         return queue == null || queue.isEmpty() ? null : queue.peek();
-    }
-
-    private static BigDecimal applyBalance(BigDecimal balance, Transaction transaction) {
-        return CategoryPresets.TYPE_INCOME.equals(transaction.getType())
-                ? balance.add(transaction.getAmount())
-                : balance.subtract(transaction.getAmount());
     }
 
     private static String keyOf(Transaction transaction) {

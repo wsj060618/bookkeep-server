@@ -11,7 +11,6 @@ import com.bookkeep.service.CurrentBookService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
-import com.bookkeep.service.support.StatisticCalculator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,7 +30,7 @@ import java.util.Map;
 
 /**
  * 流水导入（CSV / xlsx，列固定为 日期,类型,分类,金额,备注）。
- * <p>行级失败不阻塞其它行；分类不存在直接报错，不自动建；支出仍受余额约束。
+ * <p>行级失败不阻塞其它行；分类不存在直接报错，不自动建。
  */
 @Slf4j
 @Service
@@ -78,16 +77,12 @@ public class TransactionImportService {
         }
 
         Map<String, Long> categoryIds = loadCategoryIds(bookId);
-        BigDecimal balance = StatisticCalculator.money(transactionMapper.sumBalance(bookId));
 
         int success = 0;
         List<ImportResultResp.FailedRow> failed = new ArrayList<>();
         for (RawRow row : rows) {
             try {
-                Transaction transaction = toTransaction(row, bookId, categoryIds, balance);
-                balance = "income".equals(transaction.getType())
-                        ? balance.add(transaction.getAmount())
-                        : balance.subtract(transaction.getAmount());
+                Transaction transaction = toTransaction(row, bookId, categoryIds);
                 transactionMapper.insert(transaction);
                 success++;
             } catch (BusinessException e) {
@@ -102,7 +97,7 @@ public class TransactionImportService {
     /* ---------- 校验 + 落库 ---------- */
 
     /** 包级可见：账本包（zip）导入按 manifest 补建流水时复用同一套校验 */
-    Transaction toTransaction(RawRow row, Long bookId, Map<String, Long> categoryIds, BigDecimal balance) {
+    Transaction toTransaction(RawRow row, Long bookId, Map<String, Long> categoryIds) {
         LocalDate transDate;
         try {
             transDate = LocalDate.parse(row.date().trim());
@@ -123,11 +118,6 @@ public class TransactionImportService {
         String note = StringUtils.hasText(row.note()) ? row.note().trim() : null;
         if (note != null && note.length() > NOTE_MAX) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "备注不能超过 " + NOTE_MAX + " 字");
-        }
-
-        if (CategoryPresets.TYPE_EXPENSE.equals(type) && balance.subtract(amount).compareTo(BigDecimal.ZERO) < 0) {
-            throw new BusinessException(ResultCode.BAD_REQUEST,
-                    "余额不足：当前余额 " + StatisticCalculator.money(balance).toPlainString() + "，这笔要支出 " + amount);
         }
 
         Transaction transaction = new Transaction();

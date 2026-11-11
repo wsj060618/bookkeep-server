@@ -25,14 +25,15 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 流水业务。三条不变量：不越权（查询必带 book_id）、方向与分类一致、支出不超余额。
+ * 流水业务。两条不变量：不越权（查询必带 book_id）、方向与分类一致。
+ * <p>余额可以为负，不做「支出不能超过余额」的拦截——删错一笔收入就能把余额打成负数，
+ * 拦支出只会让人连修数据都做不到。
  */
 @Slf4j
 @Service
@@ -86,10 +87,6 @@ public class TransactionServiceImpl implements TransactionService {
         Category category = requireOwnedCategory(req.categoryId(), bookId);
         checkTypeMatchesCategory(req.type(), category);
 
-        if (isExpense(category)) {
-            checkBalance(bookId, req.amount(), null); // 新增：按当前余额判断
-        }
-
         Transaction transaction = new Transaction();
         transaction.setBookId(bookId);
         transaction.setCategoryId(category.getId());
@@ -112,11 +109,6 @@ public class TransactionServiceImpl implements TransactionService {
         requireOwnedTransaction(id, bookId);
         Category category = requireOwnedCategory(req.categoryId(), bookId);
         checkTypeMatchesCategory(req.type(), category);
-
-        if (isExpense(category)) {
-            // 排除自己再算余额：否则「把 100 改成 90」会因为原 100 还在余额里而误判超支
-            checkBalance(bookId, req.amount(), id);
-        }
 
         // 显式列更新：note 传空要真的清空（updateById 会忽略 null，清不掉）
         transactionMapper.update(null, Wrappers.<Transaction>update()
@@ -175,23 +167,6 @@ public class TransactionServiceImpl implements TransactionService {
 
     // ---------- 内部方法 ----------
 
-    /**
-     * 支出不能超过「改完之后」的余额。
-     * <p>excludeTransactionId 是修改场景：设 R = 除本条外的净额，要求 新金额 ≤ R。
-     * 不排除会把旧金额算两次——收入 1000、旧支出 900（余额 100）时，改成 950 会被误判超支，
-     * 连只改备注都会被拦。
-     */
-    private void checkBalance(Long bookId, BigDecimal amount, Long excludeTransactionId) {
-        // 三元只执行命中的分支，只有一个分支会真的发 SQL
-        BigDecimal balance = excludeTransactionId == null
-                ? nonNull(transactionMapper.sumBalance(bookId))
-                : nonNull(transactionMapper.sumBalanceExcluding(bookId, excludeTransactionId));
-        if (amount.compareTo(balance) > 0) {
-            throw new BusinessException(ResultCode.BAD_REQUEST,
-                    "班费余额不足，当前余额 " + balance.setScale(2, RoundingMode.HALF_UP).toPlainString());
-        }
-    }
-
     /** SUM 在空账本上返回 NULL，统一兜成 0，避免到处判空。 */
     private BigDecimal nonNull(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
@@ -210,10 +185,6 @@ public class TransactionServiceImpl implements TransactionService {
                 && !CategoryPresets.TYPE_EXPENSE.equals(type)) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "收支类型只能是 income 或 expense");
         }
-    }
-
-    private boolean isExpense(Category category) {
-        return CategoryPresets.TYPE_EXPENSE.equals(category.getType());
     }
 
     /** 取当前账本里的分类；不存在或属于别人，一律 404（不暴露存在性）。 */

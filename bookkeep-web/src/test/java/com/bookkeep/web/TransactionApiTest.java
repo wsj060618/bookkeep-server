@@ -101,8 +101,8 @@ class TransactionApiTest {
     }
 
     @Test
-    @DisplayName("支出超过余额：400 且提示当前余额；余额内正常")
-    void expenseOverBalanceRejected() throws Exception {
+    @DisplayName("支出可以超过余额：余额允许为负，不再拦截")
+    void expenseOverBalanceAllowed() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("txn"));
         long feeId = categoryId(mockMvc, objectMapper, token, "收取班费");
         long activityId = categoryId(mockMvc, objectMapper, token, "活动经费");
@@ -111,20 +111,16 @@ class TransactionApiTest {
                 .andExpect(jsonPath("$.code").value(200));
 
         createTransaction(token, activityId, "expense", "150.00", "2026-11-02", null)
-                .andExpect(status().isOk())                        // 业务错误仍是 HTTP 200
-                .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("班费余额不足，当前余额 100.00"));
+                .andExpect(jsonPath("$.code").value(200));
 
-        createTransaction(token, activityId, "expense", "100.00", "2026-11-02", null)
-                .andExpect(jsonPath("$.code").value(200));         // 刚好花完可以
-
-        assertEquals("0.00", getJson(mockMvc, objectMapper, "/api/transactions/balance", token)
+        // 100 − 150 = −50.00：负余额照实返回，不做非负裁剪
+        assertEquals("-50.00", getJson(mockMvc, objectMapper, "/api/transactions/balance", token)
                 .path("data").asText());
     }
 
     @Test
-    @DisplayName("修改流水：按「排除自身的余额」判断，改小可以、改超不行")
-    void updateRecalculatesBalance() throws Exception {
+    @DisplayName("修改流水：改成超过余额也允许，余额跟着变负")
+    void updateCanExceedBalance() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("txn"));
         long feeId = categoryId(mockMvc, objectMapper, token, "收取班费");
         long activityId = categoryId(mockMvc, objectMapper, token, "活动经费");
@@ -134,15 +130,17 @@ class TransactionApiTest {
                 .andReturn();
         long txId = json(created, objectMapper).path("data").path("id").asLong();
 
-        // 排除自己后余额是 100 → 改成 120 超支
         mockMvc.perform(put("/api/transactions/" + txId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(activityId, "expense", "120.00", "2026-11-02", null)))
-                .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("班费余额不足，当前余额 100.00"));
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.amount").value("120.00"));
 
-        // 改成 50 没问题；余额 = 100 - 50
+        assertEquals("-20.00", getJson(mockMvc, objectMapper, "/api/transactions/balance", token)
+                .path("data").asText());
+
+        // 改成 50：余额 = 100 - 50
         mockMvc.perform(put("/api/transactions/" + txId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
