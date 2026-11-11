@@ -175,6 +175,53 @@ class ReceiptZipImportApiTest {
         assertTrue(result.path("message").asText().contains("非法路径"), result.path("message").asText());
     }
 
+    @Test
+    @DisplayName("包里用到账本没有的分类：整包不写，返回待新建分类；确认后自动建分类再导")
+    void missingCategoriesAskBeforeImporting() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("zip"));
+
+        // 自带 manifest + 流水，分类「打印复印」在默认模板里存在，「班级物品购买」不存在
+        String flow = "日期,类型,分类,金额,备注\n"
+                + "2024-12-12,支出,打印复印,16.00,英语听力资料打印\n"
+                + "2025-02-24,支出,班级物品购买,114.03,物理本子\n";
+        String manifest = "日期,类型,分类,金额,备注,票据标题,相对路径\n"
+                + "2025-02-24,支出,班级物品购买,114.03,物理本子,本子小票,img/本子.png\n";
+        byte[] zip = zipOf(Map.of(
+                "流水.csv", flow.getBytes(StandardCharsets.UTF_8),
+                "manifest.csv", manifest.getBytes(StandardCharsets.UTF_8),
+                "img/本子.png", ReceiptApiTest.png(32)));
+
+        // 1) 不确认：一行都不写，只回「缺哪个分类」
+        JsonNode first = json(mockMvc.perform(multipart("/api/transactions/import/zip")
+                        .file(new MockMultipartFile("file", "包.zip", "application/zip", zip))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andReturn(), objectMapper).path("data");
+        assertEquals(0, first.path("success").asInt());
+        JsonNode missing = first.path("missingCategories");
+        assertEquals(1, missing.size(), first.toString());
+        assertEquals("班级物品购买", missing.get(0).path("name").asText());
+        assertEquals("expense", missing.get(0).path("type").asText());
+        assertEquals(0, com.bookkeep.web.support.AuthHelper
+                .getJson(mockMvc, objectMapper, "/api/transactions", token).path("data").path("total").asInt(),
+                "问用户之前不能先导一半");
+
+        // 2) 确认：带上 createMissing，分类自动建好，两笔流水 + 一张票据全进来
+        JsonNode second = json(mockMvc.perform(multipart("/api/transactions/import/zip")
+                        .file(new MockMultipartFile("file", "包.zip", "application/zip", zip))
+                        .param("createMissing", "true")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andReturn(), objectMapper).path("data");
+        assertEquals(0, second.path("missingCategories").size(), second.toString());
+        assertEquals(0, second.path("failed").size(), second.toString());
+        assertEquals(2, second.path("success").asInt());
+        assertEquals(1, second.path("receipts").path("success").asInt());
+
+        // 新建的分类进了分类列表（也补进了模板，所以以后新账本也有它）
+        JsonNode categories = com.bookkeep.web.support.AuthHelper
+                .getJson(mockMvc, objectMapper, "/api/categories?type=expense", token).path("data");
+        assertTrue(categories.toString().contains("班级物品购买"), categories.toString());
+    }
+
     /* ---------- 工具 ---------- */
 
     private long create(String token, String type, String category, String amount, String date, String note)

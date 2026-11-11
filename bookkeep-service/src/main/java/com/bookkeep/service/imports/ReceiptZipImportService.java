@@ -63,7 +63,7 @@ public class ReceiptZipImportService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public ZipImportResp importZip(String filename, byte[] content) {
+    public ZipImportResp importZip(String filename, byte[] content, boolean createMissing) {
         if (content == null || content.length == 0) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "压缩包是空的，请检查后重传");
         }
@@ -77,8 +77,26 @@ public class ReceiptZipImportService {
                         "包内缺少 manifest.csv：请用本系统「流水 → 导出 → 账本导出（zip）」生成的压缩包");
             }
             Path flowCsv = findFlowCsv(files, dir);
+            List<ManifestRow> manifestRows = parseManifest(manifest);
+            List<TransactionImportService.RawRow> flowRows = readFlowRows(dir, flowCsv);
 
             Map<String, Long> categoryIds = loadCategoryIds(bookId);
+
+            // 分类预检要覆盖「流水.csv」和「manifest.csv」两边：只在 manifest 里出现的流水也会建分类
+            List<TransactionImportService.RawRow> allRows = new ArrayList<>(flowRows);
+            for (ManifestRow row : manifestRows) {
+                allRows.add(new TransactionImportService.RawRow(row.line(), row.date(), row.type(),
+                        row.category(), row.amount(), row.note()));
+            }
+            List<ImportResultResp.MissingCategory> missing =
+                    transactionImportService.missingCategories(allRows, categoryIds);
+            if (!missing.isEmpty()) {
+                // 缺分类时**整包都不写**：让前端先问「要不要新建」，否则会导一半、补的那半又重复
+                if (!createMissing) {
+                    return new ZipImportResp(0, List.of(), new ReceiptImportResp(0, List.of()), missing);
+                }
+                transactionImportService.createCategories(missing, categoryIds, bookId);
+            }
 
             int success = 0;
             List<ImportResultResp.FailedRow> failed = new ArrayList<>();
@@ -88,26 +106,16 @@ public class ReceiptZipImportService {
             Map<String, Deque<Transaction>> candidates = new HashMap<>();
 
             // 1) 先导流水（CSV 里有全部流水，余额顺序也正确）
-            if (flowCsv != null) {
-                byte[] flowBytes;
+            for (var row : flowRows) {
                 try {
-                    flowBytes = Files.readAllBytes(flowCsv);
-                } catch (IOException e) {
-                    throw new BusinessException(ResultCode.BAD_REQUEST, "读不到包内的流水 CSV");
-                }
-                var rawRows = transactionImportService.parse(
-                        ZipExtractor.relative(dir, flowCsv), flowBytes);
-                for (var row : rawRows) {
-                    try {
-                        Transaction transaction = transactionImportService.toTransaction(
-                                row, bookId, categoryIds);
-                        transactionMapper.insert(transaction);
-                        success++;
-                        candidates.computeIfAbsent(keyOf(transaction), k -> new ArrayDeque<>()).add(transaction);
-                    } catch (BusinessException e) {
-                        failed.add(new ImportResultResp.FailedRow(row.line(), e.getMessage()));
-                        failedKeys.add(rawKey(row.date(), row.type(), row.category(), row.amount(), row.note()));
-                    }
+                    Transaction transaction = transactionImportService.toTransaction(
+                            row, bookId, categoryIds);
+                    transactionMapper.insert(transaction);
+                    success++;
+                    candidates.computeIfAbsent(keyOf(transaction), k -> new ArrayDeque<>()).add(transaction);
+                } catch (BusinessException e) {
+                    failed.add(new ImportResultResp.FailedRow(row.line(), e.getMessage()));
+                    failedKeys.add(rawKey(row.date(), row.type(), row.category(), row.amount(), row.note()));
                 }
             }
 
@@ -115,7 +123,7 @@ public class ReceiptZipImportService {
             int receiptsOk = 0;
             List<ReceiptImportResp.FailedFile> receiptFailed = new ArrayList<>();
             Map<Long, Integer> used = new HashMap<>();
-            for (ManifestRow row : parseManifest(manifest)) {
+            for (ManifestRow row : manifestRows) {
                 // 这笔流水在上面已经因为同样原因失败过（比如分类不存在）：不再重复报一次
                 if (failedKeys.contains(rawKey(row.date(), row.type(), row.category(), row.amount(), row.note()))) {
                     continue;
@@ -170,6 +178,20 @@ public class ReceiptZipImportService {
     }
 
     /* ---------- 内部 ---------- */
+
+    /** 读包内的「流水.csv」；没有就返回空列表（兼容只有票据的包） */
+    private List<TransactionImportService.RawRow> readFlowRows(Path dir, Path flowCsv) {
+        if (flowCsv == null) {
+            return List.of();
+        }
+        byte[] flowBytes;
+        try {
+            flowBytes = Files.readAllBytes(flowCsv);
+        } catch (IOException e) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "读不到包内的流水 CSV");
+        }
+        return transactionImportService.parse(ZipExtractor.relative(dir, flowCsv), flowBytes);
+    }
 
     /** 找与 manifest 同键、且还没挂满的流水；没有就返回 null（由调用方补建） */
     private Transaction pickTarget(ManifestRow row, Map<String, Long> categoryIds,

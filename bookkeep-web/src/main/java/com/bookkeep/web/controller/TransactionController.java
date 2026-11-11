@@ -154,20 +154,28 @@ public class TransactionController {
 
     /**
      * 导入流水（CSV，multipart）。
-     * <p>行级失败不阻塞其它行：返回 {@code {success, failed:[{line, reason}]}}，
-     * 前端把失败行列出来让用户改完重传；分类不存在**不会**自动创建。
+     * <p>行级失败不阻塞其它行：返回 {@code {success, failed:[{line, reason}]}}。
+     * <p>文件里用到账本没有的分类时**一行都不写**，返回 {@code missingCategories}，
+     * 让前端先问「要不要新建这些分类」；确认后带 {@code createMissing=true} 再导一次。
      */
     @PostMapping("/import")
-    public Result<ImportResultResp> importFile(@RequestParam("file") MultipartFile file) throws IOException {
-        return Result.success(transactionImportService.importFile(file.getOriginalFilename(), file.getBytes()));
+    public Result<ImportResultResp> importFile(@RequestParam("file") MultipartFile file,
+                                               @RequestParam(defaultValue = "false") boolean createMissing)
+            throws IOException {
+        return Result.success(transactionImportService.importFile(
+                file.getOriginalFilename(), file.getBytes(), createMissing));
     }
 
     /**
      * 导入压缩包：本系统「导出票据」生成的 zip（manifest.csv + 流水.csv + 图片）。
      * <p>先导流水再挂图；失败分成「流水行」和「票据文件」两栏返回。
+     * <p>缺分类时同样整包不写，返回 {@code missingCategories} 等前端确认。
      */
     @PostMapping(value = "/import/zip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Result<ZipImportResp> importZip(@RequestParam("file") MultipartFile file) throws IOException {
-        return Result.success(receiptZipImportService.importZip(file.getOriginalFilename(), file.getBytes()));
+    public Result<ZipImportResp> importZip(@RequestParam("file") MultipartFile file,
+                                           @RequestParam(defaultValue = "false") boolean createMissing)
+            throws IOException {
+        return Result.success(receiptZipImportService.importZip(
+                file.getOriginalFilename(), file.getBytes(), createMissing));
     }
 }

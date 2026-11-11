@@ -189,21 +189,18 @@ class ImportExportApiTest {
         String csv = "\uFEFF日期,类型,分类,金额,备注\n"
                 + "2026-09-05,收入,收取班费,1900.00,全班 38 人\n"
                 + "2026-09-06,支出,聚餐,620.00,中秋聚餐\n"
-                + "2026-09-07,支出,不存在的分类,10.00,\n"
                 + "2026-9-8,收入,收取班费,50.00,日期格式错\n"
                 + "2026-09-09,收入,收取班费,-5.00,金额为负\n";
 
         JsonNode data = upload(token, "流水.csv", csv).path("data");
         assertEquals(2, data.path("success").asInt(), "只有前两行能入");
         JsonNode failed = data.path("failed");
-        assertEquals(3, failed.size());
+        assertEquals(2, failed.size());
         // 行号是文件行号（含表头那行），和 Excel 左侧一致
         assertEquals(4, failed.get(0).path("line").asInt());
-        assertTrue(failed.get(0).path("reason").asText().contains("不存在"));
+        assertTrue(failed.get(0).path("reason").asText().contains("yyyy-MM-dd"));
         assertEquals(5, failed.get(1).path("line").asInt());
-        assertTrue(failed.get(1).path("reason").asText().contains("yyyy-MM-dd"));
-        assertEquals(6, failed.get(2).path("line").asInt());
-        assertTrue(failed.get(2).path("reason").asText().contains("大于 0"));
+        assertTrue(failed.get(1).path("reason").asText().contains("大于 0"));
 
         // 失败行确实没入库，分类也没被凭空创建
         assertEquals(2, getJson(mockMvc, objectMapper, "/api/transactions", token).path("data").path("total").asInt());
@@ -348,6 +345,39 @@ class ImportExportApiTest {
         assertEquals(1, data.path("success").asInt());
     }
 
+    @Test
+    @DisplayName("文件里有账本没有的分类：一行都不导，返回待新建分类；确认后自动建分类再导")
+    void importOffersToCreateMissingCategories() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("imp"));
+
+        String csv = "日期,类型,分类,金额,备注\n"
+                + "2026-09-05,收入,收取班费,1900.00,全班 38 人\n"
+                + "2026-09-06,支出,班级物品购买,114.03,物理本子\n"
+                + "2026-09-07,支出,班级物品购买,12.00,白板笔\n";
+
+        // 1) 不确认：什么都不写，只回「缺哪个分类」（同名同方向只报一次）
+        JsonNode first = upload(token, "流水.csv", csv).path("data");
+        assertEquals(0, first.path("success").asInt());
+        assertEquals(0, first.path("failed").size());
+        JsonNode missing = first.path("missingCategories");
+        assertEquals(1, missing.size(), first.toString());
+        assertEquals("班级物品购买", missing.get(0).path("name").asText());
+        assertEquals("expense", missing.get(0).path("type").asText());
+        assertEquals(0, getJson(mockMvc, objectMapper, "/api/transactions", token)
+                .path("data").path("total").asInt(), "问用户之前不能先导一半");
+
+        // 2) 确认：带上 createMissing，分类自动建好，三笔全部进来
+        JsonNode second = upload(token, "流水.csv", csv, true).path("data");
+        assertEquals(0, second.path("missingCategories").size());
+        assertEquals(0, second.path("failed").size(), second.toString());
+        assertEquals(3, second.path("success").asInt());
+
+        assertEquals(3, getJson(mockMvc, objectMapper, "/api/transactions", token)
+                .path("data").path("total").asInt());
+        // 默认模板 11 个 + 新建 1 个
+        assertEquals(12, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
+    }
+
     // ---------- 辅助方法 ----------
 
     private byte[] downloadXlsx(String token) throws Exception {
@@ -369,10 +399,19 @@ class ImportExportApiTest {
     }
 
     private JsonNode upload(String token, String filename, String content) throws Exception {
-        MvcResult result = mockMvc.perform(multipart("/api/transactions/import")
-                        .file(new MockMultipartFile("file", filename, "text/csv",
-                                content.getBytes(StandardCharsets.UTF_8)))
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+        return upload(token, filename, content, false);
+    }
+
+    private JsonNode upload(String token, String filename, String content, boolean createMissing)
+            throws Exception {
+        var builder = multipart("/api/transactions/import")
+                .file(new MockMultipartFile("file", filename, "text/csv",
+                        content.getBytes(StandardCharsets.UTF_8)))
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+        if (createMissing) {
+            builder.param("createMissing", "true");
+        }
+        MvcResult result = mockMvc.perform(builder)
                 .andExpect(status().isOk())
                 .andReturn();
         return json(result, objectMapper);

@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.model.dto.resp.ImportResultResp;
+import com.bookkeep.model.dto.req.CategoryReq;
 import com.bookkeep.model.entity.Category;
 import com.bookkeep.model.entity.Transaction;
 import com.bookkeep.model.validation.MoneyRules;
+import com.bookkeep.service.CategoryService;
 import com.bookkeep.service.CurrentBookService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
@@ -25,6 +27,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -49,35 +52,31 @@ public class TransactionImportService {
     private final CurrentBookService currentBookService;
     private final TransactionMapper transactionMapper;
     private final CategoryMapper categoryMapper;
+    private final CategoryService categoryService;
 
     /** 文件里的一行（已解析、未校验）；账本包导入也复用它 */
     record RawRow(int line, String date, String type, String category, String amount, String note) {
     }
 
     /**
-     * @param filename 原始文件名（用来判断 csv / xlsx）
-     * @param content  文件字节
+     * @param filename      原始文件名（用来判断 csv / xlsx）
+     * @param content       文件字节
+     * @param createMissing 文件里用到、账本里还没有的分类要不要顺手建掉（默认不建）
      */
     @Transactional(rollbackFor = Exception.class)
-    public ImportResultResp importFile(String filename, byte[] content) {
-        if (content == null || content.length == 0) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "文件是空的，请检查后重传");
-        }
-        if (content.length > MAX_BYTES) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "文件不能超过 5MB");
-        }
-        // 归档账本只读：先拦，别解析完才发现不能写
+    public ImportResultResp importFile(String filename, byte[] content, boolean createMissing) {
         Long bookId = currentBookService.writableBookId();
-
-        List<RawRow> rows = parse(filename, content);
-        if (rows.isEmpty()) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "文件里没有可导入的数据行");
-        }
-        if (rows.size() > MAX_ROWS) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "一次最多导入 " + MAX_ROWS + " 行，请拆成多个文件");
-        }
+        List<RawRow> rows = parseChecked(filename, content);
 
         Map<String, Long> categoryIds = loadCategoryIds(bookId);
+        List<ImportResultResp.MissingCategory> missing = missingCategories(rows, categoryIds);
+        if (!missing.isEmpty()) {
+            // 有缺的分类时**一行都不写**：让前端先问「要不要新建」，避免导一半再补一半（补的那半会重复）
+            if (!createMissing) {
+                return new ImportResultResp(0, List.of(), missing);
+            }
+            createCategories(missing, categoryIds, bookId);
+        }
 
         int success = 0;
         List<ImportResultResp.FailedRow> failed = new ArrayList<>();
@@ -91,8 +90,65 @@ public class TransactionImportService {
             }
         }
 
-        log.info("导入流水：bookId={}, 文件={}, 成功 {} 行，失败 {} 行", bookId, filename, success, failed.size());
+        log.info("导入流水：bookId={}, 文件={}, 成功 {} 行，失败 {} 行，新建分类 {} 个",
+                bookId, filename, success, failed.size(), missing.size());
         return new ImportResultResp(success, failed);
+    }
+
+    /* ---------- 分类预检 ---------- */
+
+    /** 文件里用到、账本还没有的分类（保持首次出现顺序，同一个不重复） */
+    List<ImportResultResp.MissingCategory> missingCategories(List<RawRow> rows, Map<String, Long> categoryIds) {
+        Map<String, ImportResultResp.MissingCategory> missing = new LinkedHashMap<>();
+        for (RawRow row : rows) {
+            String name = row.category() == null ? "" : row.category().trim();
+            if (name.isEmpty()) {
+                continue;
+            }
+            String type;
+            try {
+                type = normalizeType(row.type());
+            } catch (BusinessException e) {
+                continue; // 类型写错的行会在正式导入时报错，这里不算「缺分类」
+            }
+            if (categoryIds.containsKey(type + "|" + name)) {
+                continue;
+            }
+            missing.putIfAbsent(type + "|" + name, new ImportResultResp.MissingCategory(name, type));
+        }
+        return new ArrayList<>(missing.values());
+    }
+
+    /** 走 CategoryService 建：和「分类」页新建一样，会同步补进这个账本用的分类模板 */
+    void createCategories(List<ImportResultResp.MissingCategory> missing, Map<String, Long> categoryIds,
+                          Long bookId) {
+        for (ImportResultResp.MissingCategory item : missing) {
+            categoryService.create(new CategoryReq(item.name(), item.type(), null, null));
+            log.info("导入时新建分类：{}（{}）", item.name(), item.type());
+        }
+        // 重建映射：新建的分类要能被后面的行认出来
+        categoryIds.clear();
+        categoryIds.putAll(loadCategoryIds(bookId));
+    }
+
+    private List<RawRow> parseChecked(String filename, byte[] content) {
+        if (content == null || content.length == 0) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "文件是空的，请检查后重传");
+        }
+        if (content.length > MAX_BYTES) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "文件不能超过 5MB");
+        }
+        // 归档账本只读：先拦，别解析完才发现不能写
+        currentBookService.writableBookId();
+
+        List<RawRow> rows = parse(filename, content);
+        if (rows.isEmpty()) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "文件里没有可导入的数据行");
+        }
+        if (rows.size() > MAX_ROWS) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "一次最多导入 " + MAX_ROWS + " 行，请拆成多个文件");
+        }
+        return rows;
     }
 
     /* ---------- 校验 + 落库 ---------- */
