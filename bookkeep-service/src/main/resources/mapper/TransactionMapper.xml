@@ -143,21 +143,4 @@
         ORDER BY trans_date ASC, id ASC
     </select>
 
-    <!-- 某月 + 逐行结余（公示页用） -->
-    <select id="selectMonthWithRunningBalance" resultType="com.bookkeep.service.mapper.row.TransactionBalanceRow">
-        <include refid="runningBalanceSource"/>
-        SELECT id,
-               trans_date,
-               type,
-               amount,
-               note,
-               category_name,
-               category_icon,
-               category_color,
-               balance_after
-        FROM running
-        WHERE DATE_FORMAT(trans_date, '%Y-%m') = #{month}
-        ORDER BY trans_date ASC, id ASC
-    </select>
-
 </mapper>

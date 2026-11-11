@@ -49,8 +49,4 @@ public interface TransactionMapper extends BaseMapper<Transaction> {
     List<TransactionBalanceRow> selectRangeWithRunningBalance(@Param("bookId") Long bookId,
                                                               @Param("startDate") LocalDate startDate,
                                                               @Param("endDate") LocalDate endDate);
-
-    /** 某月的流水 + 逐行结余（公示页用），日期升序。 */
-    List<TransactionBalanceRow> selectMonthWithRunningBalance(@Param("bookId") Long bookId,
-                                                              @Param("month") String month);
 }

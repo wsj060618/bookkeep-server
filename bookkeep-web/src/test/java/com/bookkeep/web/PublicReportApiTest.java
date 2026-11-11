@@ -33,6 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>这个接口是唯一免登录的数据出口，测试重点不是「能查到」而是三件事：
  * 不带 token 也能看（否则同学还是要账号）、看不到别人的账（token 就是唯一凭证）、
  * 不泄露任何个人信息（username / email 一律不出现在响应里）。
+ * <p>口径与统计页一致：区间两端可空（都不传 = 全部时间），balance 是区间末账户余额。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -46,7 +47,7 @@ class PublicReportApiTest {
     private ObjectMapper objectMapper;
 
     @Test
-    @DisplayName("免登录可读：账本名 + 本月收支 + 分类占比 + 逐行结余，且不含个人信息")
+    @DisplayName("免登录可读：不传区间 = 全部时间，含分类占比与逐行结余，且不含个人信息")
     void publicReportReadableWithoutLogin() throws Exception {
         String username = nextUsername("pub");
         String token = registerAndLogin(mockMvc, objectMapper, username);
@@ -57,7 +58,7 @@ class PublicReportApiTest {
         record(token, "班会物资", "expense", "86.50", "2026-09-20", "横幅+气球");
 
         // 关键：不带 Authorization，公共接口必须放行
-        MvcResult result = mockMvc.perform(get("/api/public/report/" + shareToken + "?month=2026-09"))
+        MvcResult result = mockMvc.perform(get("/api/public/report/" + shareToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn();
@@ -66,11 +67,12 @@ class PublicReportApiTest {
         JsonNode data = objectMapper.readTree(
                 result.getResponse().getContentAsString(StandardCharsets.UTF_8)).path("data").path("books").get(0);
         assertEquals("班级账本", data.path("bookName").asText());
-        assertEquals("2026-09", data.path("month").asText());
+        assertTrue(data.path("startMonth").isNull(), "不传区间时 startMonth 为 null");
+        assertTrue(data.path("endMonth").isNull(), "不传区间时 endMonth 为 null");
         assertEquals("1900.00", data.path("income").asText());
         assertEquals("86.50", data.path("expense").asText());
+        // 期末结余 = 全账本余额（全部时间时就是当前余额），不是收支差
         assertEquals("1813.50", data.path("balance").asText());
-        assertEquals("1813.50", data.path("totalBalance").asText());
 
         JsonNode expenseCategories = data.path("expenseCategories");
         assertEquals(1, expenseCategories.size());
@@ -99,24 +101,44 @@ class PublicReportApiTest {
     }
 
     @Test
-    @DisplayName("跨月流水：只出本月明细，但结余仍是全账本累计（不从 0 重算）")
-    void runningBalanceSpansMonths() throws Exception {
+    @DisplayName("区间筛选：只出区间内明细，结余是区间末余额；逐行结余仍按全账本累计")
+    void rangeFiltersTransactionsAndTakesEndBalance() throws Exception {
         String username = nextUsername("pub");
         String token = registerAndLogin(mockMvc, objectMapper, username);
         record(token, "收取班费", "income", "1900.00", "2026-09-05", null);
         record(token, "聚餐", "expense", "620.00", "2026-10-12", null);
+        record(token, "活动经费", "expense", "86.50", "2026-11-08", null);
 
-        JsonNode data = getJson(mockMvc, objectMapper,
-                "/api/public/report/" + shareToken(mockMvc, objectMapper, username) + "?month=2026-10", token)
+        JsonNode onlyOctober = getJson(mockMvc, objectMapper,
+                "/api/public/report/" + shareToken(mockMvc, objectMapper, username)
+                        + "?startMonth=2026-10&endMonth=2026-10", token)
                 .path("data").path("books").get(0);
 
-        assertEquals("0.00", data.path("income").asText());
-        assertEquals("620.00", data.path("expense").asText());
-        assertEquals("-620.00", data.path("balance").asText());
-        assertEquals("1280.00", data.path("totalBalance").asText());
-        assertEquals(1, data.path("transactions").size());
-        // 若窗口函数先按月过滤再累计，这里会是 -620.00
-        assertEquals("1280.00", data.path("transactions").get(0).path("balanceAfter").asText());
+        assertEquals("2026-10", onlyOctober.path("startMonth").asText());
+        assertEquals("2026-10", onlyOctober.path("endMonth").asText());
+        assertEquals("0.00", onlyOctober.path("income").asText());
+        assertEquals("620.00", onlyOctober.path("expense").asText());
+        // 区间末（10-31）的余额：1900 − 620
+        assertEquals("1280.00", onlyOctober.path("balance").asText());
+        assertEquals(1, onlyOctober.path("transactions").size());
+        // 若窗口函数先按区间过滤再累计，这里会是 -620.00
+        assertEquals("1280.00", onlyOctober.path("transactions").get(0).path("balanceAfter").asText());
+
+        // 只给结束月份：从最早算到 10 月底
+        JsonNode onlyEnd = getJson(mockMvc, objectMapper,
+                "/api/public/report/" + shareToken(mockMvc, objectMapper, username) + "?endMonth=2026-10", token)
+                .path("data").path("books").get(0);
+        assertTrue(onlyEnd.path("startMonth").isNull());
+        assertEquals("1900.00", onlyEnd.path("income").asText());
+        assertEquals("620.00", onlyEnd.path("expense").asText());
+        assertEquals(2, onlyEnd.path("transactions").size());
+
+        // 结束月份不限：结余取当前余额（三笔都算）
+        JsonNode openEnd = getJson(mockMvc, objectMapper,
+                "/api/public/report/" + shareToken(mockMvc, objectMapper, username) + "?startMonth=2026-10", token)
+                .path("data").path("books").get(0);
+        assertEquals("1193.50", openEnd.path("balance").asText());
+        assertEquals(2, openEnd.path("transactions").size());
     }
 
     @Test
@@ -141,27 +163,30 @@ class PublicReportApiTest {
                 "/api/public/report/" + shareToken(mockMvc, objectMapper, userB), tokenA)
                 .path("data").path("books").get(0);
 
-        assertEquals("0.00", reportB.path("totalBalance").asText());
+        assertEquals("0.00", reportB.path("balance").asText());
         assertEquals(0, reportB.path("transactions").size());
         assertFalse(reportB.toString().contains("A 的班费"));
     }
 
     @Test
-    @DisplayName("公示页不传 month 时按当月，月份格式错误返回 400")
-    void monthDefaultsAndValidation() throws Exception {
+    @DisplayName("区间参数：格式错 / 开始晚于结束都返回 400")
+    void rangeValidation() throws Exception {
         String username = nextUsername("pub");
         registerAndLogin(mockMvc, objectMapper, username);
         String token = shareToken(mockMvc, objectMapper, username);
 
         mockMvc.perform(get("/api/public/report/" + token))
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.books[0].month").isNotEmpty())
                 .andExpect(jsonPath("$.data.books[0].income").value("0.00"))
                 .andExpect(jsonPath("$.data.expiresAt").isNotEmpty());
 
-        mockMvc.perform(get("/api/public/report/" + token + "?month=2026-9"))
+        mockMvc.perform(get("/api/public/report/" + token + "?startMonth=2026-9"))
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("月份格式应为 yyyy-MM，例如 2026-08"));
+
+        mockMvc.perform(get("/api/public/report/" + token + "?startMonth=2026-11&endMonth=2026-09"))
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("开始月份不能晚于结束月份"));
     }
 
     @Test

@@ -4,7 +4,6 @@ import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.model.dto.resp.CategoryStatResp;
 import com.bookkeep.model.dto.resp.RangeSummaryResp;
-import com.bookkeep.model.dto.resp.SummaryResp;
 import com.bookkeep.service.mapper.TransactionMapper;
 import com.bookkeep.service.mapper.row.CategoryAmountRow;
 import com.bookkeep.service.mapper.row.MonthSumRow;
@@ -16,7 +15,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.YearMonth;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
@@ -28,9 +26,6 @@ import java.util.List;
 @Component
 @RequiredArgsConstructor
 public class StatisticCalculator {
-
-    /** 与 JacksonConfig 的 GMT+8 保持一致 */
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("uuuu-MM");
 
@@ -61,12 +56,6 @@ public class StatisticCalculator {
             throw new BusinessException(ResultCode.BAD_REQUEST, "开始月份不能晚于结束月份");
         }
         return new MonthRange(start, end);
-    }
-
-    /** 解析 {@code ?month=yyyy-MM}，空值取当月（公示页按单月展示）。 */
-    public static YearMonth resolveMonth(String month) {
-        YearMonth parsed = parseMonth(month);
-        return parsed == null ? YearMonth.now(ZONE) : parsed;
     }
 
     private static YearMonth parseMonth(String month) {
@@ -101,24 +90,6 @@ public class StatisticCalculator {
         List<CategoryAmountRow> rows = transactionMapper.selectCategoryAmountsRange(
                 bookId, range.startDate(), range.endDate(), type);
         return toCategoryStats(rows);
-    }
-
-    /** 单月汇总（公示页用）：income/expense/balance 只算该月，totalBalance 是累计余额。 */
-    public SummaryResp summaryOf(Long bookId, YearMonth month) {
-        MonthSumRow row = transactionMapper.sumRange(bookId, month.atDay(1), month.atEndOfMonth());
-        BigDecimal income = money(row == null ? null : row.getIncome());
-        BigDecimal expense = money(row == null ? null : row.getExpense());
-        return new SummaryResp(
-                month.format(MONTH_FORMAT),
-                income,
-                expense,
-                income.subtract(expense),
-                money(transactionMapper.sumBalance(bookId)));
-    }
-
-    /** 单月的分类占比（公示页用）。 */
-    public List<CategoryStatResp> categoriesOf(Long bookId, YearMonth month, String type) {
-        return categoriesBetween(bookId, new MonthRange(month, month), type);
     }
 
     private static List<CategoryStatResp> toCategoryStats(List<CategoryAmountRow> rows) {

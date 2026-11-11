@@ -15,12 +15,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 只读公示页（免登录，PLAN §5.9 / §10.9）。
- * <p>{@code SecurityConfig} 只对 {@code /api/public/report/**} 放行：公网暴露面就这一小块。
- * <p>token 查不到账本 → 404「公示页不存在或已失效」。不要在这里加「回落到当前登录用户账本」的分支，
- * 那会让匿名请求意外看到别人的账本。
- * <p>票据图片也挂在这条路径下（{@code .../receipts/{id}}），所以不用改安全白名单；
- * 校验（token 有效 + 账本未删 + 流水未删 + 票据归属）在 {@link ReceiptService#loadPublic} 里，
- * 任一不满足一律 404，不暴露「存在但无权」。
+ * <p>{@code SecurityConfig} 只放 {@code /api/public/report/**}，这是唯一匿名数据出口。
+ * <p>token 查不到账本 → 404「公示页不存在或已失效」，绝不能回落到「当前登录用户的账本」的分支上
+ * （否则有人就能借着这个口看到别人的账本）。
+ * <p>票据图片也挂在这条路径下（{@code .../receipts/{id}}），所以不用改安全配置；四重校验
+ * （token 有效 + 账本未删 + 流水未删 + 票据归属）在 {@link ReceiptService#loadPublic} 里，
+ * 任一条不满足都是 404，不泄露存在性。
  */
 @RestController
 @RequestMapping("/api/public")
@@ -30,10 +30,12 @@ public class PublicController {
     private final PublicReportService publicReportService;
     private final ReceiptService receiptService;
 
+    /** 区间两端可空（都不传 = 全部时间）：{@code ?startMonth=2026-09&endMonth=2026-11} */
     @GetMapping("/report/{shareToken}")
     public Result<PublicReportResp> report(@PathVariable String shareToken,
-                                          @RequestParam(required = false) String month) {
-        return Result.success(publicReportService.report(shareToken, month));
+                                          @RequestParam(required = false) String startMonth,
+                                          @RequestParam(required = false) String endMonth) {
+        return Result.success(publicReportService.report(shareToken, startMonth, endMonth));
     }
 
     @GetMapping("/report/{shareToken}/receipts/{receiptId}")

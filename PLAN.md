@@ -435,13 +435,14 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 |---|---|---|
 | POST | `/api/books/share` | 生成**一条**公示链接 `{ids:[1,2]}` → `{token, expiresAt, books:[{id,name}]}`；一条链接可含多本账本 |
 | POST | `/api/books/{id}/share` | 单本分享（等价于只选一本），返回 `{token, expiresAt}` |
-| GET | `/api/public/report/{shareToken}?month=2026-08` | 免登录只读：链接里**每本账本**的收入/支出/结余 + 支出与收入两份分类占比 + 明细（含逐行结余） |
+| GET | `/api/public/report/{shareToken}?startMonth=2026-09&endMonth=2026-11` | 免登录只读：链接里**每本账本**在区间内的收入/支出/区间末余额 + 支出与收入两份分类占比 + 明细（含逐行结余）；两端都可空 = 全部时间 |
 
-响应体：`{expiresAt, books:[{bookId, bookName, month, income, expense, balance, totalBalance, expenseCategories:[…], incomeCategories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}]}`
+响应体：`{expiresAt, books:[{bookId, bookName, startMonth, endMonth, income, expense, balance, expenseCategories:[…], incomeCategories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}]}`
 
-> 分类占比给**两个方向**：`expenseCategories`（钱花哪了）与 `incomeCategories`（钱从哪来），
-> 两边的口径都走 `StatisticCalculator`，与登录态统计接口同一份。公示页**收入在左、支出在右并排**，
-> 图形可切柱状图 / 饼图 / 环形图（与统计页同一个组件）。
+> 口径与统计页**完全一致**（同一份 `StatisticCalculator`）：收入/支出只算区间内，`balance` 是结束月最后一天的账户余额，
+> 不存在「累计结余」这个字段（两个结余并排只会让人对不上数）。
+> 分类占比给**两个方向**：`expenseCategories`（钱花哪了）与 `incomeCategories`（钱从哪来）。
+> 公示页**收入在左、支出在右并排**，图形可切柱状图 / 饼图 / 环形图（与统计页同一个组件）。
 
 > `receiptCount` / `receipts` 是 §10.9 公示票据的预留字段，票据功能落地前不返回（或恒为空）；图片本身不在 JSON 里，见 §10.9「公示页票据」。
 
@@ -525,13 +526,14 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 - `StatisticCalculator`（`service/support`）：**统计口径唯一实现点**，登录态统计与免登录公示页共用；
   区间参数统一在这里解析（空 → 该端不限，格式错 / 开始晚于结束 → 400）
 - `GET /api/statistics/summary` + `GET /api/statistics/category`（`StatisticController`）：区间收支 + **区间末余额**；
-  分类占比两位小数，默认 `type=expense`；公示页仍按单月展示（内部复用同一套区间查询）
+  分类占比两位小数，默认 `type=expense`；公示页复用同一套区间查询与同一份口径
 - `GET /api/transactions/export`（`TransactionExportService`）：CSV（UTF-8 BOM）+ 抬头汇总 + 明细逐行结余 +
   分类合计；期初/期末结余按区间的边界日计算；成功返回文件流，参数错误仍走 JSON 信封。
   **流式**：`prepare()` 先校验+取数（此时响应未提交，出错还是正常信封），之后 `StreamingResponseBody`
   逐行写出去，不再把整份 CSV 拼成 `byte[]`
 - `GET /api/public/report/{shareToken}`（`PublicController` + `PublicReportService`）：免登录只读，
-  `SecurityConfig` 只放行这一条路径；账本从 token 反查，**且必须未过期**，查不到 404
+  区间与统计页同参（`startMonth`/`endMonth`，都可空），`SecurityConfig` 只放行这一条路径；
+  账本从 token 反查，**且必须未过期**，查不到 404
 - 契约补充：`POST /api/books/{id}/share` → `{token, expiresAt}`（3 天有效，每次分享重新生成），
   登录响应里的 `books[].shareToken` 只是「当前链接」的快照，可能为 null
 - 测试：`StatisticApiTest`（6 例，含手算口径/越权/参数校验）、`ExportApiTest`（7 例，含 BOM、CSV 转义、

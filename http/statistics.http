@@ -1,47 +1,56 @@
-### P3 统计 + 导出接口 · 手工验收脚本
-### 前置：auth.http 的 1、2（拿 token），transaction.http 的 1、2（至少有一收一支）
-### 关键约定：month 是 yyyy-MM；金额一律是两位小数字符串；导出是文件流，不是 JSON 信封
+### P3 统计 + 导出接口 —— 手工验收脚本
+### 前置：auth.http 的 1、2 拿 token；transaction.http 的 1、2 至少有一条一收一支
+### 关键约定：startMonth / endMonth 都是 yyyy-MM，两端都可空（都不传 = 全部时间）
+###          金额一律两位小数字符串；参数错误仍走 200 + code=400 的 JSON 信封
 
 @host = http://localhost:8080
 
-### 1. 本月汇总（不传 month 取当月，响应的 month 字段是回显的实际月份）
+### 1. 全部时间汇总（不传区间）：startMonth / endMonth 都是 null
 GET {{host}}/api/statistics/summary
 Authorization: Bearer {{token}}
 
-### 2. 指定月份汇总（换成年月；income/expense/balance 只算本月，totalBalance 是累计）
-GET {{host}}/api/statistics/summary?month=2026-09
+### 2. 指定区间：income/expense 只算区间内，balance 是结束月最后一天的账户余额
+GET {{host}}/api/statistics/summary?startMonth=2026-09&endMonth=2026-11
 Authorization: Bearer {{token}}
 
-### 3. 分类占比（不传 type 默认 expense；percent 两位小数，各项相加未必等于 100）
-GET {{host}}/api/statistics/category?month=2026-09
+### 3. 只给结束月份（开始不限）
+GET {{host}}/api/statistics/summary?endMonth=2026-09
 Authorization: Bearer {{token}}
 
-### 4. 收入分类占比
-GET {{host}}/api/statistics/category?month=2026-09&type=income
+### 4. 分类占比（不传 type 默认 expense；percent 两位小数，各项相加可能不是 100）
+GET {{host}}/api/statistics/category?startMonth=2026-09&endMonth=2026-11
 Authorization: Bearer {{token}}
 
-### 5. 月份格式错误（预期 code=400「月份格式应为 yyyy-MM，例如 2026-08」）
-GET {{host}}/api/statistics/summary?month=2026-9
+### 5. 收入分类占比
+GET {{host}}/api/statistics/category?startMonth=2026-09&endMonth=2026-11&type=income
 Authorization: Bearer {{token}}
 
-### 6. 导出全部流水（CSV，UTF-8 BOM，含逐行结余与分类合计）
-### IDEA：点请求左侧的「Response Handler」→ Save to file，否则二进制内容会乱码
+### 6. 区间格式错：预期 code=400「月份格式应为 yyyy-MM，例如 2026-08」
+GET {{host}}/api/statistics/summary?startMonth=2026-9
+Authorization: Bearer {{token}}
+
+### 7. 开始晚于结束：预期 code=400「开始月份不能晚于结束月份」
+GET {{host}}/api/statistics/summary?startMonth=2026-11&endMonth=2026-09
+Authorization: Bearer {{token}}
+
+### 8. 导出全部流水（CSV，UTF-8 BOM，带逐行结余与分类合计）
+### IDEA：右键「Response Handler」→ Save to file，否则响应会被当文本打开
 GET {{host}}/api/transactions/export
 Authorization: Bearer {{token}}
 
-### 7. 按日期区间导出（期初结余取区间之前，明细只含区间内）
+### 9. 按区间导出：期初结余取开始日之前，明细只含区间内
 GET {{host}}/api/transactions/export?startDate=2026-09-01&endDate=2026-09-30
 Authorization: Bearer {{token}}
 
-### 8. 区间颠倒（预期 code=400「开始日期不能晚于结束日期」）
+### 10. 区间反了：预期 code=400「开始日期不能晚于结束日期」
 GET {{host}}/api/transactions/export?startDate=2026-12-01&endDate=2026-11-01
 Authorization: Bearer {{token}}
 
-### 9. 账本导出（zip：流水.csv + manifest.csv + 票据图片，可再导入）
-###    和「票据导出」不同：票据导出（/api/transactions/receipts/export）只有图片，不能导入
+### 11. 账本导出包（zip：流水.csv + manifest.csv + 票据图片，唯一可导入）
+###     和「票据导出」不同：票据导出是 /api/transactions/receipts/export，只含图片、不能导入
 GET {{host}}/api/transactions/export?format=zip
 Authorization: Bearer {{token}}
 
-### 10. 票据导出（zip，只有图片；带区间时文件名是「_票据_部分_起-止.zip」）
+### 12. 票据导出（zip，只含图片；有票据时文件名形如「_票据_2026-09-01-至2026-09-30.zip」）
 GET {{host}}/api/transactions/receipts/export
 Authorization: Bearer {{token}}
