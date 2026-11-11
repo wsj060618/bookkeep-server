@@ -19,15 +19,15 @@ import java.util.zip.ZipInputStream;
 
 /**
  * 用户上传的 zip 解包，按恶意输入处理：
- * 条目 ≤1000、单条目 ≤20MB、总量 ≤100MB（边读边计数）、路径必须在临时目录内。
+ * 条目 ≤1000、单条目 ≤10MB、总量 ≤200MB（边读边计数）、路径必须在临时目录内。
  * <p>macOS 打包残留（__MACOSX/、.DS_Store）跳过。
  */
 @Slf4j
 public final class ZipExtractor {
 
     public static final int MAX_ENTRIES = 1000;
-    public static final long MAX_TOTAL_BYTES = 100L * 1024 * 1024;
-    private static final long MAX_ENTRY_BYTES = 20L * 1024 * 1024;
+    public static final long MAX_TOTAL_BYTES = 200L * 1024 * 1024;
+    private static final long MAX_ENTRY_BYTES = 10L * 1024 * 1024;
 
     private ZipExtractor() {
     }
@@ -66,7 +66,7 @@ public final class ZipExtractor {
                 byte[] data = readBounded(in);
                 total += data.length;
                 if (total > MAX_TOTAL_BYTES) {
-                    throw new BusinessException(ResultCode.BAD_REQUEST, "压缩包解压后超过 100MB，请分批导入");
+                    throw new BusinessException(ResultCode.BAD_REQUEST, "压缩包解压后超过 200MB，请分批导入");
                 }
                 Path out = dir.resolve(name).normalize();
                 if (!out.startsWith(dir)) {
@@ -130,7 +130,7 @@ public final class ZipExtractor {
             size += read;
             if (size > MAX_ENTRY_BYTES) {
                 throw new BusinessException(ResultCode.BAD_REQUEST,
-                        "压缩包里有单个文件超过 20MB，请检查");
+                        "压缩包里有单个文件超过 10MB，请检查");
             }
             out.write(buffer, 0, read);
         }

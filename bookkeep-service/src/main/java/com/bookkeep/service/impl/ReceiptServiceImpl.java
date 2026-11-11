@@ -107,7 +107,7 @@ public class ReceiptServiceImpl implements ReceiptService {
         // 类型按魔数识别（不看扩展名），顺便把 SVG 这类能带脚本的挡在门外
         ReceiptStorage.ImageType type = ReceiptStorage.detect(bytes);
         if (bytes.length > ReceiptStorage.MAX_FILE_BYTES) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "单张票据不能超过 5MB");
+            throw new BusinessException(ResultCode.BAD_REQUEST, "单张票据不能超过 10MB");
         }
         if (receiptMapper.countByTransaction(transactionId) >= ReceiptStorage.MAX_PER_TRANSACTION) {
             throw new BusinessException(ResultCode.BAD_REQUEST,

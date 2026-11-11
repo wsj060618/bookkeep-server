@@ -25,8 +25,8 @@ import java.util.UUID;
 @Component
 public class ReceiptStorage {
 
-    /** 单张 5MB */
-    public static final long MAX_FILE_BYTES = 5L * 1024 * 1024;
+    /** 单张 10MB */
+    public static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
 
     /** 单笔最多 9 张 */
     public static final int MAX_PER_TRANSACTION = 9;

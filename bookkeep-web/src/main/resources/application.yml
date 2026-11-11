@@ -7,11 +7,11 @@ server:
 spring:
   application:
     name: bookkeep-server
-  # 流水导入是 multipart：默认上限只有 1MB，导入 5MB 以内的文件会被拦
+  # 导入都是 multipart：账本/票据压缩包上限 200MB（单张图片另有 10MB 的应用层校验）
   servlet:
     multipart:
-      max-file-size: 6MB
-      max-request-size: 8MB
+      max-file-size: 200MB
+      max-request-size: 210MB
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://${DB_HOST:localhost}:3306/bookkeep?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai

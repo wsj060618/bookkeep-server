@@ -42,7 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * 票据接口集成测试（PLAN §10.9）。
  * <p>白盒关注点：归属校验（越权必须 404 而不是 403）、魔数识别（改扩展名的假图要拒）、
- * 上限（5MB / 9 张）、归档账本只读、删除时连文件一起删。
+ * 上限（10MB / 9 张）、归档账本只读、删除时连文件一起删。
  * <p>文件落在 {@code target/test-receipts}：测试回滚只回滚数据库，磁盘上的文件不会自己消失，
  * 放在 target 下才不会污染仓库（每次 {@code mvn clean} 一起清掉）。
  */
@@ -154,15 +154,15 @@ class ReceiptApiTest {
     }
 
     @Test
-    @DisplayName("单张超 5MB → 400")
+    @DisplayName("单张超 10MB → 400")
     void rejectOversizedFile() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("rcp"));
         long txId = income(token, "100.00", "2026-09-05");
-        byte[] tooBig = png(5 * 1024 * 1024 + 1);
+        byte[] tooBig = png(10 * 1024 * 1024 + 1);
 
         JsonNode body = json(upload(token, txId, "big.png", tooBig, null), objectMapper);
         assertEquals(400, body.path("code").asInt());
-        assertTrue(body.path("message").asText().contains("5MB"), body.path("message").asText());
+        assertTrue(body.path("message").asText().contains("10MB"), body.path("message").asText());
     }
 
     @Test

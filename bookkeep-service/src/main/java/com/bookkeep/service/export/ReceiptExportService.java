@@ -38,7 +38,7 @@ import java.util.zip.ZipOutputStream;
  * 票据/账本的 zip 导出。
  * <p>账本导出（format=zip）= 流水.csv + manifest.csv + 图片，可再导入；
  * 票据导出（receipts/export）= 只要图片。
- * <p>上限（≤200 张、≤100MB）在写响应前校验，超了还能返回正常的 200+JSON 信封。
+ * <p>上限（≤200 张、≤200MB）在写响应前校验，超了还能返回正常的 200+JSON 信封。
  */
 @Slf4j
 @Service
@@ -47,7 +47,7 @@ public class ReceiptExportService {
 
     private static final int MAX_RECEIPTS = 200;
 
-    private static final long MAX_BYTES = 100L * 1024 * 1024;
+    private static final long MAX_BYTES = 200L * 1024 * 1024;
 
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter COMPACT = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -191,7 +191,7 @@ public class ReceiptExportService {
         }
         long total = receipts.stream().mapToLong(r -> r.getSizeBytes() == null ? 0 : r.getSizeBytes()).sum();
         if (total > MAX_BYTES) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "票据总大小超过 100MB，请缩小日期范围后再导出");
+            throw new BusinessException(ResultCode.BAD_REQUEST, "票据总大小超过 200MB，请缩小日期范围后再导出");
         }
     }
 
