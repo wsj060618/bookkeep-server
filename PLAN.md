@@ -404,12 +404,12 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/statistics/summary?startMonth=2026-09&endMonth=2026-11` | `{startMonth, endMonth, income, expense, balance}`（两端口径，`balance` = **区间末那天的账户余额**） |
-| GET | `/api/statistics/category?startMonth=&endMonth=&type=expense` | 分类占比 `[{categoryId, categoryName, categoryIcon, categoryColor, amount, percent}]`；`type` 传 `income` 就是收入占比 |
+| GET | `/api/statistics/summary?startDate=2026-09-01&endDate=2026-11-11` | `{startDate, endDate, income, expense, balance}`（两端口径，`balance` = **区间末那天的账户余额**） |
+| GET | `/api/statistics/category?startDate=&endDate=&type=expense` | 分类占比 `[{categoryId, categoryName, categoryIcon, categoryColor, amount, percent}]`；`type` 传 `income` 就是收入占比 |
 
-- 区间两端都可空：都不传 = 全部时间；只传一端 = 该端不限。格式必须是 `yyyy-MM`，格式错 / 开始晚于结束都返回 400
+- 区间两端都可空：都不传 = 全部时间；只传一端 = 该端不限。格式必须是 `yyyy-MM-dd`（**精确到天**），格式错 / 开始晚于结束都返回 400
   （静默返回空数据会被误读成「这段时间没记账」）
-- `balance` 不是「区间收支差」，而是「截至结束月最后一天的余额」，前端卡片标题就叫「结余」
+- `balance` 不是「区间收支差」，而是「截至结束日当天的余额」，前端卡片标题就叫「结余」
 - `percent` 保留两位小数、四舍五入，**各项相加可能不等于 100.00**（例：三项各 33.33），前端别用它反算金额
 - 分类项带上 `categoryId/icon/color` 是为了饼图图例直接出图标（§5.0 第 5 条），不是允许前端再查分类
 - 统计口径只在 `StatisticCalculator` 实现一次：登录态统计与免登录公示页共用，避免两处数字不一致
@@ -440,7 +440,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 
 响应体：`{expiresAt, books:[{bookId, bookName, startDate, endDate, income, expense, balance, expenseCategories:[…], incomeCategories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}]}`
 
-> 口径与统计页**完全一致**（同一份 `StatisticCalculator`，只是公示页用日区间 `DateRange`、统计页用月区间 `MonthRange`）：
+> 口径与统计页**完全一致**（同一份 `StatisticCalculator`，两边都是日区间 `DateRange`）：
 > 收入/支出只算区间内，`balance` 是结束日当天的账户余额，
 > 不存在「累计结余」这个字段（两个结余并排只会让人对不上数）。
 > 分类占比给**两个方向**：`expenseCategories`（钱花哪了）与 `incomeCategories`（钱从哪来）。

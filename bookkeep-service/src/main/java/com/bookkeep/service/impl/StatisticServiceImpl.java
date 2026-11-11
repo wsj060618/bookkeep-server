@@ -25,16 +25,16 @@ public class StatisticServiceImpl implements StatisticService {
 
     @Override
     @Transactional(readOnly = true)
-    public RangeSummaryResp summary(String startMonth, String endMonth) {
+    public RangeSummaryResp summary(String startDate, String endDate) {
         return calculator.summaryBetween(currentBookService.currentBookId(),
-                StatisticCalculator.resolveRange(startMonth, endMonth));
+                StatisticCalculator.resolveDateRange(startDate, endDate));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<CategoryStatResp> category(String startMonth, String endMonth, String type) {
+    public List<CategoryStatResp> category(String startDate, String endDate, String type) {
         return calculator.categoriesBetween(currentBookService.currentBookId(),
-                StatisticCalculator.resolveRange(startMonth, endMonth),
+                StatisticCalculator.resolveDateRange(startDate, endDate),
                 resolveType(type));
     }
 

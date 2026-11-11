@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 统计接口集成测试（/api/statistics）。
- * <p>口径要点：区间两端可空（都不传 = 全部）、结余是「截止结束月份最后一天」的余额、
+ * <p>口径要点：区间两端可空（都不传 = 全部）、**精确到天**、结余是「截止结束日当天」的余额、
  * 金额必须是两位小数的字符串。
  */
 @SpringBootTest
@@ -40,7 +40,7 @@ class StatisticApiTest {
     private ObjectMapper objectMapper;
 
     @Test
-    @DisplayName("区间汇总：收入/支出只算区间内，结余是区间末（结束月最后一天）的余额")
+    @DisplayName("区间汇总：收入/支出只算区间内，结余是区间末（结束日当天）的余额，粒度到天")
     void summaryByRangeMatchesHandCalculation() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("stat"));
 
@@ -48,26 +48,39 @@ class StatisticApiTest {
         record(token, "聚餐", "expense", "620.00", "2026-10-12");
         record(token, "活动经费", "expense", "86.50", "2026-11-08");
 
-        // 只看 10 月：支出 620，结余 = 9~10 月底的累计 1280
+        // 只看 10 月：支出 620，结余 = 截至 10-31 的累计 1280
         JsonNode october = getJson(mockMvc, objectMapper,
-                "/api/statistics/summary?startMonth=2026-10&endMonth=2026-10", token).path("data");
-        assertEquals("2026-10", october.path("startMonth").asText());
-        assertEquals("2026-10", october.path("endMonth").asText());
+                "/api/statistics/summary?startDate=2026-10-01&endDate=2026-10-31", token).path("data");
+        assertEquals("2026-10-01", october.path("startDate").asText());
+        assertEquals("2026-10-31", october.path("endDate").asText());
         assertEquals("0.00", october.path("income").asText());
         assertEquals("620.00", october.path("expense").asText());
         assertEquals("1280.00", october.path("balance").asText());
 
-        // 9~11 月：全部三笔
+        // 天数粒度：10-13 起就看不到 10-12 那笔（按月筛的话它会跟着 10 月出来）
+        JsonNode afterTwelfth = getJson(mockMvc, objectMapper,
+                "/api/statistics/summary?startDate=2026-10-13&endDate=2026-10-31", token).path("data");
+        assertEquals("0.00", afterTwelfth.path("expense").asText());
+        // 结余是「截至结束日」的累计，不看开始日：10-12 那笔仍然算在余额里
+        assertEquals("1280.00", afterTwelfth.path("balance").asText());
+
+        // 单日区间也成立
+        JsonNode oneDay = getJson(mockMvc, objectMapper,
+                "/api/statistics/summary?startDate=2026-10-12&endDate=2026-10-12", token).path("data");
+        assertEquals("620.00", oneDay.path("expense").asText());
+        assertEquals("1280.00", oneDay.path("balance").asText());
+
+        // 9-01 ~ 11-30：全部三笔
         JsonNode range = getJson(mockMvc, objectMapper,
-                "/api/statistics/summary?startMonth=2026-09&endMonth=2026-11", token).path("data");
+                "/api/statistics/summary?startDate=2026-09-01&endDate=2026-11-30", token).path("data");
         assertEquals("1900.00", range.path("income").asText());
         assertEquals("706.50", range.path("expense").asText());
         assertEquals("1193.50", range.path("balance").asText());
 
-        // 只给结束月份：结余同样截止 10 月底
+        // 只给结束日：结余同样截止 10-31
         JsonNode onlyEnd = getJson(mockMvc, objectMapper,
-                "/api/statistics/summary?endMonth=2026-10", token).path("data");
-        assertTrue(onlyEnd.path("startMonth").isNull());
+                "/api/statistics/summary?endDate=2026-10-31", token).path("data");
+        assertTrue(onlyEnd.path("startDate").isNull());
         assertEquals("620.00", onlyEnd.path("expense").asText());
         assertEquals("1280.00", onlyEnd.path("balance").asText());
     }
@@ -78,8 +91,8 @@ class StatisticApiTest {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("stat"));
 
         JsonNode empty = getJson(mockMvc, objectMapper, "/api/statistics/summary", token).path("data");
-        assertTrue(empty.path("startMonth").isNull());
-        assertTrue(empty.path("endMonth").isNull());
+        assertTrue(empty.path("startDate").isNull());
+        assertTrue(empty.path("endDate").isNull());
         assertEquals("0.00", empty.path("income").asText());
         assertEquals("0.00", empty.path("expense").asText());
         assertEquals("0.00", empty.path("balance").asText());
@@ -104,7 +117,7 @@ class StatisticApiTest {
         record(token, "聚餐", "expense", "500.00", "2026-08-01");
 
         JsonNode expenses = getJson(mockMvc, objectMapper,
-                "/api/statistics/category?startMonth=2026-11&endMonth=2026-11", token).path("data");
+                "/api/statistics/category?startDate=2026-11-01&endDate=2026-11-30", token).path("data");
         assertEquals(2, expenses.size());
         // 总额 706.50：620 / 706.50 = 87.76%，86.50 / 706.50 = 12.24%
         assertEquals("聚餐", expenses.get(0).path("categoryName").asText());
@@ -127,29 +140,29 @@ class StatisticApiTest {
 
         // 没有数据的月份：空数组，不是 400 也不是 null
         JsonNode empty = getJson(mockMvc, objectMapper,
-                "/api/statistics/category?startMonth=2026-01&endMonth=2026-01", token).path("data");
+                "/api/statistics/category?startDate=2026-01-01&endDate=2026-01-31", token).path("data");
         assertEquals(0, empty.size());
     }
 
     @Test
-    @DisplayName("参数校验：月份必须 yyyy-MM、开始不能晚于结束、类型只能是 income/expense")
+    @DisplayName("参数校验：日期必须 yyyy-MM-dd、开始不能晚于结束、类型只能是 income/expense")
     void invalidParamsRejected() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("stat"));
 
-        mockMvc.perform(get("/api/statistics/summary?startMonth=2026-8")
+        mockMvc.perform(get("/api/statistics/summary?startDate=2026-8-1")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())                    // 业务错误：HTTP 200 + body.code
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("月份格式应为 yyyy-MM，例如 2026-08"));
+                .andExpect(jsonPath("$.message").value("日期格式应为 yyyy-MM-dd，例如 2026-08-01"));
 
-        mockMvc.perform(get("/api/statistics/summary?startMonth=2026-13")
+        mockMvc.perform(get("/api/statistics/summary?startDate=2026-13-01")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(jsonPath("$.code").value(400));
 
-        mockMvc.perform(get("/api/statistics/summary?startMonth=2026-11&endMonth=2026-09")
+        mockMvc.perform(get("/api/statistics/summary?startDate=2026-11-01&endDate=2026-09-30")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("开始月份不能晚于结束月份"));
+                .andExpect(jsonPath("$.message").value("开始日期不能晚于结束日期"));
 
         mockMvc.perform(get("/api/statistics/category?type=all")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))

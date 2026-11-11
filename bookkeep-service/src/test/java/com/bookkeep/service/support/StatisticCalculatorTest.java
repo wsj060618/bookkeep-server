@@ -21,7 +21,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * 统计口径的纯单元测试（不起 Spring、不碰数据库）。
- * <p>钉住：金额两位小数、占比两位小数且不除零、区间两端可空、期末结余取「结束月份最后一天」。
+ * <p>钉住：金额两位小数、占比两位小数且不除零、区间两端可空、期末结余取「结束日当天」。
  */
 class StatisticCalculatorTest {
 
@@ -31,52 +31,33 @@ class StatisticCalculatorTest {
 
     @Test
     @DisplayName("区间两端都可空；开始晚于结束 → 400；格式错 → 400")
-    void resolveRange() {
-        StatisticCalculator.MonthRange all = StatisticCalculator.resolveRange(null, null);
-        assertNull(all.start());
-        assertNull(all.end());
-        assertNull(all.startDate());
-        assertNull(all.endDate());
-
-        StatisticCalculator.MonthRange onlyEnd = StatisticCalculator.resolveRange(null, "2026-10");
-        assertNull(onlyEnd.startDate());
-        assertEquals(LocalDate.of(2026, 10, 31), onlyEnd.endDate());
-
-        StatisticCalculator.MonthRange range =
-                StatisticCalculator.resolveRange("2026-09", "2026-11");
-        assertEquals(LocalDate.of(2026, 9, 1), range.startDate());
-        assertEquals(LocalDate.of(2026, 11, 30), range.endDate());
-
-        BusinessException e = assertThrows(BusinessException.class,
-                () -> StatisticCalculator.resolveRange("2026-11", "2026-09"));
-        assertEquals("开始月份不能晚于结束月份", e.getMessage());
-
-        BusinessException format = assertThrows(BusinessException.class,
-                () -> StatisticCalculator.resolveRange("2026-9", null));
-        assertEquals("月份格式应为 yyyy-MM，例如 2026-08", format.getMessage());
-        assertThrows(BusinessException.class, () -> StatisticCalculator.resolveRange(null, "2026-13"));
-    }
-
-    @Test
-    @DisplayName("日区间：两端可空；开始晚于结束 / 格式错 → 400；金额按日边界取")
-    void resolveDateRangeAndAmounts() {
+    void resolveDateRange() {
         StatisticCalculator.DateRange all = StatisticCalculator.resolveDateRange(null, null);
         assertNull(all.startDate());
         assertNull(all.endDate());
+
+        StatisticCalculator.DateRange onlyEnd = StatisticCalculator.resolveDateRange(null, "2026-10-31");
+        assertNull(onlyEnd.startDate());
+        assertEquals(LocalDate.of(2026, 10, 31), onlyEnd.endDate());
 
         StatisticCalculator.DateRange oneDay =
                 StatisticCalculator.resolveDateRange("2026-10-12", "2026-10-12");
         assertEquals(LocalDate.of(2026, 10, 12), oneDay.startDate());
         assertEquals(LocalDate.of(2026, 10, 12), oneDay.endDate());
 
-        BusinessException reversed = assertThrows(BusinessException.class,
+        BusinessException e = assertThrows(BusinessException.class,
                 () -> StatisticCalculator.resolveDateRange("2026-11-01", "2026-10-31"));
-        assertEquals("开始日期不能晚于结束日期", reversed.getMessage());
+        assertEquals("开始日期不能晚于结束日期", e.getMessage());
 
         BusinessException format = assertThrows(BusinessException.class,
                 () -> StatisticCalculator.resolveDateRange("2026-9-1", null));
         assertEquals("日期格式应为 yyyy-MM-dd，例如 2026-08-01", format.getMessage());
+        assertThrows(BusinessException.class, () -> StatisticCalculator.resolveDateRange(null, "2026-13-01"));
+    }
 
+    @Test
+    @DisplayName("区间金额：按日边界取；空集的 0 要补成 0.00")
+    void amountsBetween() {
         MonthSumRow row = new MonthSumRow();
         row.setIncome(new BigDecimal("0"));
         row.setExpense(new BigDecimal("620.00"));
@@ -94,21 +75,21 @@ class StatisticCalculatorTest {
     }
 
     @Test
-    @DisplayName("区间汇总：结余取结束月份最后一天；结束月份不限时取当前余额")
+    @DisplayName("区间汇总：结余取结束日当天；结束日不限时取当前余额")
     void summaryBetween() {
         MonthSumRow row = new MonthSumRow();
         row.setIncome(new BigDecimal("1900.00"));
         row.setExpense(new BigDecimal("620.00"));
-        when(transactionMapper.sumRange(1L, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 11, 30)))
+        when(transactionMapper.sumRange(1L, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 11, 11)))
                 .thenReturn(row);
-        when(transactionMapper.sumBalanceUpTo(1L, LocalDate.of(2026, 11, 30)))
+        when(transactionMapper.sumBalanceUpTo(1L, LocalDate.of(2026, 11, 11)))
                 .thenReturn(new BigDecimal("1280.00"));
 
         RangeSummaryResp summary = calculator.summaryBetween(1L,
-                StatisticCalculator.resolveRange("2026-09", "2026-11"));
+                StatisticCalculator.resolveDateRange("2026-09-01", "2026-11-11"));
 
-        assertEquals("2026-09", summary.startMonth());
-        assertEquals("2026-11", summary.endMonth());
+        assertEquals("2026-09-01", summary.startDate());
+        assertEquals("2026-11-11", summary.endDate());
         assertEquals("1900.00", summary.income().toPlainString());
         assertEquals("620.00", summary.expense().toPlainString());
         assertEquals("1280.00", summary.balance().toPlainString());
@@ -116,9 +97,9 @@ class StatisticCalculatorTest {
         // 不传区间 = 全部：收入支出用无限定查询，结余取当前余额
         when(transactionMapper.sumRange(1L, null, null)).thenReturn(null);
         when(transactionMapper.sumBalance(1L)).thenReturn(new BigDecimal("2560.00"));
-        RangeSummaryResp all = calculator.summaryBetween(1L, StatisticCalculator.resolveRange(null, null));
-        assertNull(all.startMonth());
-        assertNull(all.endMonth());
+        RangeSummaryResp all = calculator.summaryBetween(1L, StatisticCalculator.resolveDateRange(null, null));
+        assertNull(all.startDate());
+        assertNull(all.endDate());
         assertEquals("0.00", all.income().toPlainString());
         assertEquals("0.00", all.expense().toPlainString());
         assertEquals("2560.00", all.balance().toPlainString());
@@ -134,7 +115,7 @@ class StatisticCalculatorTest {
                 .thenReturn(List.of(dining, activity));
 
         List<CategoryStatResp> stats = calculator.categoriesBetween(1L,
-                StatisticCalculator.resolveRange("2026-11", "2026-11"), "expense");
+                StatisticCalculator.resolveDateRange("2026-11-01", "2026-11-30"), "expense");
 
         assertEquals(2, stats.size());
         assertEquals("聚餐", stats.get(0).categoryName());
@@ -146,7 +127,7 @@ class StatisticCalculatorTest {
         when(transactionMapper.selectCategoryAmountsRange(1L, null, null, "expense"))
                 .thenReturn(List.of(categoryRow(3L, "聚餐", BigDecimal.ZERO)));
         assertEquals("0.00", calculator.categoriesBetween(1L,
-                StatisticCalculator.resolveRange(null, null), "expense").get(0).percent().toPlainString());
+                StatisticCalculator.resolveDateRange(null, null), "expense").get(0).percent().toPlainString());
     }
 
     private static CategoryAmountRow categoryRow(Long id, String name, BigDecimal amount) {

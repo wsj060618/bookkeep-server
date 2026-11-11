@@ -14,7 +14,7 @@ import java.util.List;
 
 /**
  * 统计接口（按当前账本）。
- * <p>{@code startMonth}/{@code endMonth} 都是 {@code yyyy-MM}，都可空：都不传 = 全部时间。
+ * <p>{@code startDate}/{@code endDate} 都是 {@code yyyy-MM-dd}，都可空：都不传 = 全部时间。
  */
 @RestController
 @RequestMapping("/api/statistics")
@@ -23,18 +23,18 @@ public class StatisticController {
 
     private final StatisticService statisticService;
 
-    /** 区间收入 / 支出 / 期末结余：{@code GET /api/statistics/summary?startMonth=2026-09&endMonth=2026-11} */
+    /** 区间收入 / 支出 / 期末结余：{@code GET /api/statistics/summary?startDate=2026-09-01&endDate=2026-11-11} */
     @GetMapping("/summary")
-    public Result<RangeSummaryResp> summary(@RequestParam(required = false) String startMonth,
-                                            @RequestParam(required = false) String endMonth) {
-        return Result.success(statisticService.summary(startMonth, endMonth));
+    public Result<RangeSummaryResp> summary(@RequestParam(required = false) String startDate,
+                                            @RequestParam(required = false) String endDate) {
+        return Result.success(statisticService.summary(startDate, endDate));
     }
 
     /** 区间分类占比；type 默认 expense：{@code /api/statistics/category?type=income} */
     @GetMapping("/category")
-    public Result<List<CategoryStatResp>> category(@RequestParam(required = false) String startMonth,
-                                                   @RequestParam(required = false) String endMonth,
+    public Result<List<CategoryStatResp>> category(@RequestParam(required = false) String startDate,
+                                                   @RequestParam(required = false) String endDate,
                                                    @RequestParam(required = false) String type) {
-        return Result.success(statisticService.category(startMonth, endMonth, type));
+        return Result.success(statisticService.category(startDate, endDate, type));
     }
 }
