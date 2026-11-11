@@ -15,6 +15,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 
@@ -88,6 +91,29 @@ class PublicReceiptApiTest {
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
                 .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
                         org.hamcrest.Matchers.startsWith("inline")));
+    }
+
+    @Test
+    @DisplayName("公示页缩略图：匿名可用，但只缓存 10 分钟（链接 3 天就失效）")
+    void anonymousThumbnail() throws Exception {
+        String username = nextUsername("pubr");
+        String token = registerAndLogin(mockMvc, objectMapper, username);
+        long txId = income(token, "1900.00");
+        long receiptId = uploadImage(token, txId, "大图.jpg", ReceiptApiTest.realJpeg(1200, 900));
+        String share = shareToken(mockMvc, objectMapper, username);
+
+        MvcResult result = mockMvc.perform(get("/api/public/report/" + share + "/receipts/" + receiptId)
+                        .param("size", "thumb"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "image/jpeg"))
+                .andReturn();
+
+        String cache = result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL);
+        assertTrue(cache.contains("max-age=600"), "匿名图片不能比分享链接活得更久：" + cache);
+        BufferedImage image = ImageIO.read(new ByteArrayInputStream(
+                result.getResponse().getContentAsByteArray()));
+        assertEquals(480, image.getWidth());
+        assertEquals(360, image.getHeight());
     }
 
     @Test
@@ -169,9 +195,18 @@ class PublicReceiptApiTest {
     }
 
     private long upload(String token, long txId, String filename, String title) throws Exception {
+        return upload(token, txId, filename, title, ReceiptApiTest.png(32));
+    }
+
+    private long uploadImage(String token, long txId, String filename, byte[] bytes) throws Exception {
+        return upload(token, txId, filename, null, bytes);
+    }
+
+    private long upload(String token, long txId, String filename, String title, byte[] bytes) throws Exception {
+        String contentType = filename.toLowerCase(java.util.Locale.ROOT).endsWith(".jpg") ? "image/jpeg" : "image/png";
         var builder = (org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder)
                 multipart("/api/transactions/" + txId + "/receipts")
-                        .file(new MockMultipartFile("file", filename, "image/png", ReceiptApiTest.png(32)))
+                        .file(new MockMultipartFile("file", filename, contentType, bytes))
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
         if (title != null) {
             builder.param("title", title);

@@ -1130,6 +1130,15 @@ LangGraph 只用来表达「校验失败 → 重试 → 降级」的条件状态
 > （上传是「先落盘、后插库」，minAge 就是为了不误删正在上传的那张）。
 > 前端看图必须走 blob（登录态接口不能 `<img src>`），所以 nginx 的 CSP `img-src` 必须含 `blob:`。
 
+> **缩略图（2026-11-12 加）**：`?size=thumb` 返回最长边 480 的 JPEG（q0.78，约 45KB），
+> 因为云服务器出网只有 2Mbps——一张 2.3MB 原图要 10 秒，一笔 9 张要一分半，缩略图能把画廊压到 2 秒内，
+> 并且**这是并发下唯一有效的杠杆**（20 人同时看，原图每张 200 秒，缩略图 4 秒）。
+> 三个必须记住的约束：① **上传时生成 + 老图懒生成**（`Semaphore(2)` 限流，抢不到就回原图，
+> 别为了缩略图把 2 核 CPU 打满）；② `ReceiptStorage.pruneOrphans` **必须把 `_thumb.jpg` 当原图的
+> 附带文件保留**（它没有数据库记录，不改就是每天 4:20 全清一次）；③ 解码失败（假图/CMYK/异常 JPEG）
+> **一律退回原图**，缩略图永远不是「打不开图」的理由。EXIF Orientation 必须转（`metadata-extractor`），
+> 否则手机竖拍的缩略图躺倒，而原图是正的，极易被误判成前端 bug。
+
 记一笔时可以给这笔账挂多张票据照片，支持打包导出，**也支持在公示页免登录查看**。**不做 OCR**（§10.8 已明确排除），只做「存图 + 看 + 导出」。
 
 #### 数据与存储
@@ -1161,7 +1170,7 @@ LangGraph 只用来表达「校验失败 → 重试 → 降级」的条件状态
 |---|---|---|
 | POST | `/api/transactions/{id}/receipts` | multipart（单文件 + `title?`）；返回 `{id, title, size}`。多选时前端逐张调用 |
 | GET | `/api/transactions/{id}/receipts` | 该笔的票据列表（id/title/原始名/大小/时间，不含内容） |
-| GET | `/api/transactions/{id}/receipts/{receiptId}` | 下载/预览单张（inline，需登录 + 账本归属校验） |
+| GET | `/api/transactions/{id}/receipts/{receiptId}` | 下载/预览单张（inline，需登录 + 账本归属校验）；`?size=thumb` 给 480px 缩略图 |
 | PUT | `/api/transactions/{id}/receipts/{receiptId}` | 只改 `title`（≤30 字，空则回落原始名） |
 | DELETE | `/api/transactions/{id}/receipts/{receiptId}` | 删除单张（同时删文件，失败只记日志不阻断） |
 | GET | `/api/transactions/receipts/export?start&end` | **票据导出**：按区间导出 zip，**只有图片**（无 manifest / CSV） |

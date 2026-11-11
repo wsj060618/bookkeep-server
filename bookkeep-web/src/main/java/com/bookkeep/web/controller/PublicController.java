@@ -38,9 +38,12 @@ public class PublicController {
         return Result.success(publicReportService.report(shareToken, startDate, endDate));
     }
 
+    /** {@code ?size=thumb} 给公示页画廊用的 480px 缩略图（匿名只缓存 10 分钟） */
     @GetMapping("/report/{shareToken}/receipts/{receiptId}")
     public ResponseEntity<Resource> receipt(@PathVariable String shareToken,
-                                            @PathVariable Long receiptId) {
-        return ReceiptController.image(receiptService.loadPublic(shareToken, receiptId));
+                                            @PathVariable Long receiptId,
+                                            @RequestParam(required = false) String size) {
+        boolean thumb = ReceiptController.isThumb(size);
+        return ReceiptController.image(receiptService.loadPublic(shareToken, receiptId, thumb), thumb, true);
     }
 }

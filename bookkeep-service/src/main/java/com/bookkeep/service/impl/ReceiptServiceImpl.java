@@ -15,6 +15,7 @@ import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
 import com.bookkeep.service.mapper.TransactionReceiptMapper;
 import com.bookkeep.service.support.ReceiptStorage;
+import com.bookkeep.service.support.ReceiptThumbnailer;
 import com.bookkeep.service.support.ShareLinkResolver;
 import com.bookkeep.service.support.ZipExtractor;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.Semaphore;
 
 /**
  * 票据业务实现。
@@ -43,7 +45,11 @@ public class ReceiptServiceImpl implements ReceiptService {
     private final BookMapper bookMapper;
     private final CurrentBookService currentBookService;
     private final ReceiptStorage storage;
+    private final ReceiptThumbnailer thumbnailer;
     private final ShareLinkResolver shareLinkResolver;
+
+    /** 懒生成缩略图最多 2 个并发：2 核机器上跟 MySQL 抢 CPU 的下场比"慢"难看多了 */
+    private final Semaphore thumbWorkers = new Semaphore(2);
 
     @Override
     @Transactional(readOnly = true)
@@ -133,6 +139,8 @@ public class ReceiptServiceImpl implements ReceiptService {
         // 先写文件再插库：插库失败会回滚，多出来的孤儿文件由每日清理兜底；
         // 反过来（先插库后写盘）一旦写盘失败，库里会留一条打不开的记录。
         storage.write(relative, bytes);
+        // 上传时就顺手生成缩略图：正常路径不依赖懒生成，也不用跟并发抢 CPU
+        writeThumb(relative, bytes);
         receiptMapper.insert(receipt);
 
         log.info("上传票据：bookId={}, transactionId={}, receiptId={}, type={}, size={}",
@@ -171,16 +179,16 @@ public class ReceiptServiceImpl implements ReceiptService {
 
     @Override
     @Transactional(readOnly = true)
-    public ReceiptFile load(Long transactionId, Long receiptId) {
+    public ReceiptFile load(Long transactionId, Long receiptId, boolean thumb) {
         Long bookId = currentBookService.currentBookId();
         requireOwnedTransaction(transactionId, bookId);
         TransactionReceipt receipt = requireOwnedReceipt(transactionId, receiptId);
-        return toFile(receipt);
+        return toFile(receipt, thumb);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public ReceiptFile loadPublic(String shareToken, Long receiptId) {
+    public ReceiptFile loadPublic(String shareToken, Long receiptId, boolean thumb) {
         // token 有效 + 账本成员：两条任一不满足都 404（不区分「存在但无权」，避免枚举）
         var link = shareLinkResolver.requireValid(shareToken);
         List<Long> bookIds = shareLinkResolver.bookIds(link.getId());
@@ -198,7 +206,7 @@ public class ReceiptServiceImpl implements ReceiptService {
         if (bookMapper.selectById(transaction.getBookId()) == null) {
             throw new BusinessException(ResultCode.NOT_FOUND, "票据不存在");
         }
-        return toFile(receipt);
+        return toFile(receipt, thumb);
     }
 
     @Override
@@ -243,14 +251,52 @@ public class ReceiptServiceImpl implements ReceiptService {
         return receipt;
     }
 
-    private ReceiptFile toFile(TransactionReceipt receipt) {
-        Path path = storage.resolve(receipt.getStoredPath());
-        if (!Files.isReadable(path)) {
-            log.warn("票据文件缺失：receiptId={}, path={}", receipt.getId(), receipt.getStoredPath());
+    private ReceiptFile toFile(TransactionReceipt receipt, boolean thumb) {
+        String storedPath = receipt.getStoredPath();
+        Path original = storage.resolve(storedPath);
+        if (!Files.isReadable(original)) {
+            log.warn("票据文件缺失：receiptId={}, path={}", receipt.getId(), storedPath);
             throw new BusinessException(ResultCode.NOT_FOUND, "票据文件已丢失");
         }
-        String filename = receipt.getTitle() + "." + extOf(receipt.getContentType());
-        return new ReceiptFile(path, receipt.getContentType(), filename);
+        if (!thumb) {
+            return new ReceiptFile(original, receipt.getContentType(),
+                    receipt.getTitle() + "." + extOf(receipt.getContentType()));
+        }
+        Path thumbnail = storage.thumbOf(storedPath);
+        if (!Files.isReadable(thumbnail) && !regenerateThumb(original, storedPath)) {
+            // 历史图解码不了（或此刻抢不到生成名额）就退回原图：宁可慢，不能让图打不开
+            return new ReceiptFile(original, receipt.getContentType(),
+                    receipt.getTitle() + "." + extOf(receipt.getContentType()));
+        }
+        return new ReceiptFile(thumbnail, "image/jpeg", receipt.getTitle() + ".jpg");
+    }
+
+    /** 生成缩略图并按相对路径落盘；任何失败都只记日志（缩略图是优化，不该影响上传/预览） */
+    private void writeThumb(String storedPath, byte[] bytes) {
+        try {
+            byte[] thumbnail = thumbnailer.render(bytes);
+            if (thumbnail != null) {
+                storage.writeThumbQuietly(storedPath, thumbnail);
+            }
+        } catch (RuntimeException e) {
+            log.warn("票据缩略图生成失败（忽略）：{}，原因：{}", storedPath, e.getMessage());
+        }
+    }
+
+    /** 历史票据的懒生成：抢不到名额就直接走原图，排队等一等反而会把所有人一起拖慢 */
+    private boolean regenerateThumb(Path original, String storedPath) {
+        if (!thumbWorkers.tryAcquire()) {
+            return false;
+        }
+        try {
+            writeThumb(storedPath, Files.readAllBytes(original));
+            return Files.isReadable(storage.thumbOf(storedPath));
+        } catch (IOException e) {
+            log.warn("读取票据失败，无法生成缩略图：{}，原因：{}", storedPath, e.getMessage());
+            return false;
+        } finally {
+            thumbWorkers.release();
+        }
     }
 
     private static String extOf(String contentType) {

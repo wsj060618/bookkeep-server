@@ -16,10 +16,17 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.imageio.ImageIO;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Random;
 
 import static com.bookkeep.web.support.AuthHelper.getJson;
 import static com.bookkeep.web.support.AuthHelper.json;
@@ -106,9 +113,77 @@ class ReceiptApiTest {
         assertArrayEquals(bytes, result.getResponse().getContentAsByteArray());
     }
 
+    /* ---------- 缩略图（2Mbps 小水管下画廊能不能用的关键） ---------- */
+
     @Test
-    @DisplayName("自定义标题 + 改名：超 30 字与空标题都 400")
-    void renameValidatesTitle() throws Exception {
+    @DisplayName("缩略图：?size=thumb 返回 480px JPEG，字节数远小于原图，带 7 天缓存")
+    void thumbnailIsSmallJpeg() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("rcp"));
+        long txId = income(token, "100.00", "2026-09-05");
+        byte[] original = realJpeg(1600, 1200);
+        long receiptId = json(upload(token, txId, "大图.jpg", original, "班服收据"), objectMapper)
+                .path("data").path("id").asLong();
+
+        MvcResult result = mockMvc.perform(get("/api/transactions/" + txId + "/receipts/" + receiptId)
+                        .param("size", "thumb")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "image/jpeg"))
+                .andReturn();
+
+        byte[] thumb = result.getResponse().getContentAsByteArray();
+        assertTrue(thumb.length * 4 < original.length,
+                "缩略图应远小于原图：" + thumb.length + " vs " + original.length);
+        BufferedImage image = ImageIO.read(new ByteArrayInputStream(thumb));
+        assertEquals(480, image.getWidth());
+        assertEquals(360, image.getHeight());
+        assertTrue(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL).contains("max-age=604800"),
+                "缩略图缓存 7 天，关掉弹窗再打开不该重新下载");
+    }
+
+    @Test
+    @DisplayName("缩略图缺失（升级前的老数据）时懒生成：第一次请求补上并落盘")
+    void thumbnailIsGeneratedLazilyForOldReceipts() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("rcp"));
+        long txId = income(token, "100.00", "2026-09-05");
+        long receiptId = json(upload(token, txId, "老图.jpg", realJpeg(1200, 800), null), objectMapper)
+                .path("data").path("id").asLong();
+        String storedPath = jdbcTemplate.queryForObject(
+                "SELECT stored_path FROM transaction_receipt WHERE id = ?", String.class, receiptId);
+        Path thumbFile = ROOT.resolve(com.bookkeep.service.support.ReceiptStorage.thumbPath(storedPath));
+        assertTrue(Files.exists(thumbFile), "上传时就该生成好缩略图：" + thumbFile);
+
+        // 模拟「缩略图上线之前就存在的票据」：把文件删掉，第一次请求应当就地补回来
+        Files.delete(thumbFile);
+
+        mockMvc.perform(get("/api/transactions/" + txId + "/receipts/" + receiptId)
+                        .param("size", "thumb")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "image/jpeg"));
+        assertTrue(Files.exists(thumbFile), "懒生成后应落盘，下次直接命中");
+    }
+
+    @Test
+    @DisplayName("解码不了的图要 ?size=thumb 也不报错：退回原图（宁可慢，不能打不开）")
+    void thumbnailFallsBackToOriginalWhenUndecodable() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("rcp"));
+        long txId = income(token, "100.00", "2026-09-05");
+        byte[] bytes = png(200);   // 只有 PNG 魔数，ImageIO 解不开
+        long receiptId = json(upload(token, txId, "假图.png", bytes, null), objectMapper)
+                .path("data").path("id").asLong();
+
+        MvcResult result = mockMvc.perform(get("/api/transactions/" + txId + "/receipts/" + receiptId)
+                        .param("size", "thumb")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "image/png"))
+                .andReturn();
+        assertArrayEquals(bytes, result.getResponse().getContentAsByteArray());
+    }
+
+    @Test
+    @DisplayName("自定义标题 + 改名：超 30 字与空标题都 400")    void renameValidatesTitle() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("rcp"));
         long txId = income(token, "100.00", "2026-09-05");
         long receiptId = json(upload(token, txId, "a.png", png(32), "自定义标题"), objectMapper)
@@ -306,8 +381,9 @@ class ReceiptApiTest {
 
     private MvcResult upload(String token, long txId, String filename, byte[] bytes, String title)
             throws Exception {
+        String contentType = filename.toLowerCase(java.util.Locale.ROOT).endsWith(".jpg") ? "image/jpeg" : "image/png";
         var builder = multipartUpload(token, txId)
-                .file(new MockMultipartFile("file", filename, "image/png", bytes));
+                .file(new MockMultipartFile("file", filename, contentType, bytes));
         if (title != null) {
             builder.param("title", title);
         }
@@ -323,6 +399,26 @@ class ReceiptApiTest {
                                 + "\",\"transDate\":\"" + date + "\"}"))
                 .andReturn();
         return json(result, objectMapper).path("data").path("id").asLong();
+    }
+
+    /** 真能解码的 JPEG（缩略图走的是真解码，假图测不出来） */
+    static byte[] realJpeg(int width, int height) throws Exception {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        g.setColor(Color.WHITE);
+        g.fillRect(0, 0, width, height);
+        g.setColor(Color.RED);
+        g.fillRect(0, 0, width / 4, height / 4);
+        g.dispose();
+        Random random = new Random(7);
+        for (int y = 0; y < height; y += 4) {
+            for (int x = 0; x < width; x += 4) {
+                image.setRGB(x, y, random.nextInt(0xFFFFFF));
+            }
+        }
+        var out = new ByteArrayOutputStream();
+        ImageIO.write(image, "jpg", out);
+        return out.toByteArray();
     }
 
     /** 合法 PNG 头 + 填充；接口只按魔数判断，不需要真的能解码 */

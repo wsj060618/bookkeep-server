@@ -62,11 +62,16 @@ public class ReceiptController {
         return Result.success(receiptService.list(transactionId));
     }
 
-    /** 预览/下载单张（inline，浏览器里直接看图） */
+    /**
+     * 预览/下载单张（inline，浏览器里直接看图）。
+     * <p>{@code ?size=thumb} 给画廊用的 480px 缩略图；不传 = 原图。
+     */
     @GetMapping("/{transactionId}/receipts/{receiptId}")
     public ResponseEntity<Resource> download(@PathVariable Long transactionId,
-                                             @PathVariable Long receiptId) {
-        return image(receiptService.load(transactionId, receiptId));
+                                             @PathVariable Long receiptId,
+                                             @RequestParam(required = false) String size) {
+        boolean thumb = isThumb(size);
+        return image(receiptService.load(transactionId, receiptId, thumb), thumb, false);
     }
 
     @PutMapping("/{transactionId}/receipts/{receiptId}")
@@ -118,15 +123,37 @@ public class ReceiptController {
     }
 
     static ResponseEntity<Resource> image(ReceiptService.ReceiptFile file) {
+        return image(file, false, false);
+    }
+
+    static boolean isThumb(String size) {
+        return "thumb".equalsIgnoreCase(size);
+    }
+
+    /**
+     * 图片响应：inline + 长缓存。
+     * <p>长缓存是安全的：票据 id 的字节永不改变（只有上传/改名/删除，没有「替换图片」），
+     * 所以同一个地址的内容不会变；改名只动标题不动 URL 里的字节。
+     * <p>匿名公示页只给 10 分钟：分享链接 3 天就失效，浏览器不能比链接活得久。
+     */
+    static ResponseEntity<Resource> image(ReceiptService.ReceiptFile file, boolean thumb, boolean anonymous) {
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(file.contentType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline()
                         .filename(file.filename(), StandardCharsets.UTF_8)
                         .build()
                         .toString())
-                // 图片不大、链接可能 3 天过期；不设 public，避免中间缓存留存
                 // nosniff 由 Spring Security 的默认安全头统一输出，这里不要再写一遍（会变成两个同名头）
-                .cacheControl(CacheControl.maxAge(5, TimeUnit.MINUTES).cachePrivate())
+                .cacheControl(cacheControl(thumb, anonymous))
                 .body(new FileSystemResource(file.path()));
+    }
+
+    private static CacheControl cacheControl(boolean thumb, boolean anonymous) {
+        if (anonymous) {
+            return CacheControl.maxAge(10, TimeUnit.MINUTES).cachePrivate();
+        }
+        return thumb
+                ? CacheControl.maxAge(7, TimeUnit.DAYS).cachePrivate()
+                : CacheControl.maxAge(1, TimeUnit.DAYS).cachePrivate();
     }
 }

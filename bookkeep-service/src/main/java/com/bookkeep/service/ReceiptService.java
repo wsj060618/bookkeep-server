@@ -23,10 +23,11 @@ public interface ReceiptService {
     /** 单笔票据导入：逐张处理，失败不阻塞其它张 */
     com.bookkeep.model.dto.resp.ReceiptImportResp importZip(Long transactionId, String filename, byte[] bytes);
 
-    ReceiptFile load(Long transactionId, Long receiptId);
+    /** {@code thumb=true} 时给 480px 缩略图；没有（或解码不了）就退回原图，绝不因为缩略图打不开图 */
+    ReceiptFile load(Long transactionId, Long receiptId, boolean thumb);
 
     /** 公示页匿名取图，任一校验不过一律 404 */
-    ReceiptFile loadPublic(String shareToken, Long receiptId);
+    ReceiptFile loadPublic(String shareToken, Long receiptId, boolean thumb);
 
     void purgeBookQuietly(Long bookId, String bookName);
 

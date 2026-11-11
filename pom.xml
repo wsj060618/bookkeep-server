@@ -31,6 +31,9 @@
         <jjwt.version>0.12.7</jjwt.version>
         <!-- xlsx 读写 + 表格内画统计图（POI 的 XDDF） -->
         <poi.version>5.4.1</poi.version>
+        <!-- 票据缩略图：EXIF 方向 + ImageIO 的 jpeg/webp 解码补丁 -->
+        <metadata-extractor.version>2.19.0</metadata-extractor.version>
+        <twelvemonkeys.version>3.12.0</twelvemonkeys.version>
     </properties>
 
     <dependencyManagement>
@@ -92,6 +95,23 @@
                 <groupId>io.jsonwebtoken</groupId>
                 <artifactId>jjwt-jackson</artifactId>
                 <version>${jjwt.version}</version>
+            </dependency>
+            <!-- 读 EXIF Orientation（手机竖拍照片的旋转就靠这一位；ImageIO 自己不认） -->
+            <dependency>
+                <groupId>com.drewnoakes</groupId>
+                <artifactId>metadata-extractor</artifactId>
+                <version>${metadata-extractor.version}</version>
+            </dependency>
+            <!-- ImageIO 的补丁：JDK 不认 CMYK/渐进式 JPEG，也根本不解码 webp -->
+            <dependency>
+                <groupId>com.twelvemonkeys.imageio</groupId>
+                <artifactId>imageio-jpeg</artifactId>
+                <version>${twelvemonkeys.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.twelvemonkeys.imageio</groupId>
+                <artifactId>imageio-webp</artifactId>
+                <version>${twelvemonkeys.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

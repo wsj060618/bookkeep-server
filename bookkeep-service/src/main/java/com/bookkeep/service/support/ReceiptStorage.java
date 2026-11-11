@@ -11,8 +11,10 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -127,6 +129,23 @@ public class ReceiptStorage {
                 + "." + ext;
     }
 
+    /**
+     * 缩略图相对路径：与原始文件同目录，文件名后缀 {@code _thumb.jpg}。
+     * <p>永远是 JPEG（原图可能是 png/webp），所以扩展名固定。库里不存这条路径——它是派生物，
+     * 由原始文件名推导，「原图在库 → 缩略图也算在库」。
+     */
+    public static String thumbPath(String storedPath) {
+        int slash = storedPath.lastIndexOf('/');
+        int dot = storedPath.lastIndexOf('.');
+        int cut = dot > slash ? dot : storedPath.length();
+        return storedPath.substring(0, cut) + "_thumb.jpg";
+    }
+
+    /** 缩略图绝对路径 */
+    public Path thumbOf(String storedPath) {
+        return resolve(thumbPath(storedPath));
+    }
+
     /** 把库里的相对路径解析成本机绝对路径，并挡住越界（理论上不会发生，但这是最后一道闸） */
     public Path resolve(String storedPath) {
         Path path = root.resolve(storedPath).normalize();
@@ -156,8 +175,36 @@ public class ReceiptStorage {
         }
         try {
             Files.deleteIfExists(resolve(storedPath));
+            // 缩略图是派生物，跟着原图一起走，否则会留成每天清理任务才发现的孤儿
+            Files.deleteIfExists(thumbOf(storedPath));
         } catch (RuntimeException | IOException e) {
             log.warn("删除票据文件失败（忽略）：{}，原因：{}", storedPath, e.getMessage());
+        }
+    }
+
+    /**
+     * 写缩略图：失败只记日志——缩略图是优化，不能让它把上传或预览带崩。
+     * <p>先写临时文件再原子重命名：并发生成同一张时，读者要么看不到、要么看到完整的那份。
+     */
+    public void writeThumbQuietly(String storedPath, byte[] bytes) {
+        Path target = thumbOf(storedPath);
+        Path tmp = null;
+        try {
+            Files.createDirectories(target.getParent());
+            tmp = Files.createTempFile(target.getParent(), "thumb", ".tmp");
+            Files.write(tmp, bytes);
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            tmp = null;
+        } catch (IOException | RuntimeException e) {
+            log.warn("缩略图写入失败（忽略）：{}，原因：{}", target, e.getMessage());
+        } finally {
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp);
+                } catch (IOException ignored) {
+                    // 清理失败无所谓，临时文件也是孤儿清理的活儿
+                }
+            }
         }
     }
 
@@ -200,6 +247,11 @@ public class ReceiptStorage {
         if (!Files.isDirectory(root)) {
             return 0;
         }
+        // 缩略图在库里没有记录：原图在库，它的 _thumb.jpg 就算在库（否则每天 4:20 全部缩略图被清空）
+        Set<String> keep = new HashSet<>(keepPaths);
+        for (String storedPath : keepPaths) {
+            keep.add(thumbPath(storedPath));
+        }
         long cutoff = System.currentTimeMillis() - minAge.toMillis();
         int removed = 0;
         try (var walk = Files.walk(root)) {
@@ -208,7 +260,7 @@ public class ReceiptStorage {
                     continue;
                 }
                 String relative = root.relativize(path).toString().replace('\\', '/');
-                if (keepPaths.contains(relative)) {
+                if (keep.contains(relative)) {
                     continue;
                 }
                 try {
