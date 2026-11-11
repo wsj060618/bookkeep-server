@@ -363,13 +363,14 @@ public class BookServiceImpl implements BookService {
     private void hardDeleteBookCascade(Long bookId) {
         // 目录名要账本名，必须在删 book 之前取；否则只能用 book_{id} 兜底，图片目录会变成孤儿
         Book book = bookMapper.selectById(bookId);
+        // 票据必须**先**删：hardDeleteByBook 是 join `transaction` 定位的，
+        // 先把流水删掉它就一行都匹配不到，记录会永远留成孤儿（文件也再没人回收）
+        receiptService.purgeBookQuietly(bookId, book == null ? null : book.getName());
         bookMapper.hardDeleteTransactions(bookId);
         bookMapper.hardDeleteCategories(bookId);
         bookMapper.hardDeleteBook(bookId);
         shareLinkMapper.deleteBookshipsByBook(bookId);
         shareLinkMapper.deleteOrphanLinks();
-        // 票据：先删库记录，再删整本目录（文件删失败只记日志，不回滚已完成的删除）
-        receiptService.purgeBookQuietly(bookId, book == null ? null : book.getName());
     }
 
     private List<BookResp> doList() {

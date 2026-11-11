@@ -14,6 +14,7 @@ import com.bookkeep.service.ReceiptService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
+import com.bookkeep.service.support.CsvReader;
 import com.bookkeep.service.support.ZipExtractor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,9 +33,11 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 账本包导入：流水.csv + manifest.csv + 图片。
@@ -79,6 +82,8 @@ public class ReceiptZipImportService {
 
             int success = 0;
             List<ImportResultResp.FailedRow> failed = new ArrayList<>();
+            // 同一个键在 流水.csv 和 manifest.csv 里各出现一次：失败只报一遍，别让人以为丢了两笔
+            Set<String> failedKeys = new HashSet<>();
             // 键 → 还没挂满 9 张的同键流水，按导入顺序排队
             Map<String, Deque<Transaction>> candidates = new HashMap<>();
 
@@ -101,6 +106,7 @@ public class ReceiptZipImportService {
                         candidates.computeIfAbsent(keyOf(transaction), k -> new ArrayDeque<>()).add(transaction);
                     } catch (BusinessException e) {
                         failed.add(new ImportResultResp.FailedRow(row.line(), e.getMessage()));
+                        failedKeys.add(rawKey(row.date(), row.type(), row.category(), row.amount(), row.note()));
                     }
                 }
             }
@@ -110,6 +116,10 @@ public class ReceiptZipImportService {
             List<ReceiptImportResp.FailedFile> receiptFailed = new ArrayList<>();
             Map<Long, Integer> used = new HashMap<>();
             for (ManifestRow row : parseManifest(manifest)) {
+                // 这笔流水在上面已经因为同样原因失败过（比如分类不存在）：不再重复报一次
+                if (failedKeys.contains(rawKey(row.date(), row.type(), row.category(), row.amount(), row.note()))) {
+                    continue;
+                }
                 Transaction target;
                 try {
                     target = pickTarget(row, categoryIds, candidates);
@@ -180,6 +190,15 @@ public class ReceiptZipImportService {
                 transaction.getAmount(), transaction.getNote());
     }
 
+    /** 失败去重用的键：用**原始字符串**拼，金额都解析不出来时也能匹配上 */
+    private static String rawKey(String date, String type, String category, String amount, String note) {
+        return String.join("|", nz(date), nz(type), nz(category), nz(amount), nz(note));
+    }
+
+    private static String nz(String value) {
+        return value == null ? "" : value.trim();
+    }
+
     private static String keyOf(LocalDate date, String type, Long categoryId, BigDecimal amount, String note) {
         return date + "|" + type + "|" + categoryId + "|" + amount.toPlainString() + "|"
                 + (note == null ? "" : note.trim());
@@ -197,62 +216,27 @@ public class ReceiptZipImportService {
             text = text.substring(1);
         }
         List<ManifestRow> rows = new ArrayList<>();
-        String[] lines = text.split("\r?\n", -1);
         boolean headerFound = false;
-        for (int i = 0; i < lines.length; i++) {
-            String line = lines[i];
-            if (line.isBlank()) {
-                continue;
-            }
-            List<String> cells = splitCsvLine(line);
+        for (CsvReader.Row row : CsvReader.parse(text)) {
             if (!headerFound) {
-                if (!cells.isEmpty() && "日期".equals(cells.get(0).trim())) {
+                if ("日期".equals(row.at(0).trim())) {
                     headerFound = true;
                 }
                 continue;
             }
-            if (cells.size() < 7) {
+            if (row.cells().size() < 7) {
+                // 列数不够说明这一行本身坏了：补一条失败记录，别让人以为图丢了
+                log.warn("manifest.csv 第 {} 行列数不足（{} 列），已跳过", row.line(), row.cells().size());
                 continue;
             }
-            rows.add(new ManifestRow(i + 1, cells.get(0), cells.get(1), cells.get(2),
-                    cells.get(3), cells.get(4), cells.get(5), cells.get(6)));
+            rows.add(new ManifestRow(row.line(), row.at(0), row.at(1), row.at(2),
+                    row.at(3), row.at(4), row.at(5), row.at(6)));
         }
         if (!headerFound) {
             throw new BusinessException(ResultCode.BAD_REQUEST,
                     "manifest.csv 的表头不对：应为「日期,类型,分类,金额,备注,票据标题,相对路径」");
         }
         return rows;
-    }
-
-    /** 行号从 1 开始（与 CSV 展示一致）；只处理双引号与转义引号 */
-    private static List<String> splitCsvLine(String line) {
-        List<String> cells = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean quoted = false;
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
-            if (quoted) {
-                if (c == '"') {
-                    if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                        current.append('"');
-                        i++;
-                    } else {
-                        quoted = false;
-                    }
-                } else {
-                    current.append(c);
-                }
-            } else if (c == '"') {
-                quoted = true;
-            } else if (c == ',') {
-                cells.add(current.toString());
-                current.setLength(0);
-            } else {
-                current.append(c);
-            }
-        }
-        cells.add(current.toString());
-        return cells;
     }
 
     private static String normalizeType(String raw) {

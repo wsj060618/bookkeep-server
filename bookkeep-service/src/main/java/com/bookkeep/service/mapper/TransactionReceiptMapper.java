@@ -67,6 +67,11 @@ public interface TransactionReceiptMapper extends BaseMapper<TransactionReceipt>
             + "JOIN `transaction` t ON t.id = r.transaction_id WHERE t.book_id = #{bookId}")
     int hardDeleteByBook(@Param("bookId") Long bookId);
 
+    /** 某账本下所有票据的磁盘路径（彻底删除账本时逐个删文件，账本改过名也不会漏） */
+    @Select("SELECT r.stored_path FROM transaction_receipt r "
+            + "JOIN `transaction` t ON t.id = r.transaction_id WHERE t.book_id = #{bookId}")
+    List<String> selectStoredPathsByBook(@Param("bookId") Long bookId);
+
     /** 全部在库的相对路径（孤儿文件清理用：磁盘上有、库里没有的就是孤儿） */
     @Select("SELECT stored_path FROM transaction_receipt")
     List<String> selectAllStoredPaths();

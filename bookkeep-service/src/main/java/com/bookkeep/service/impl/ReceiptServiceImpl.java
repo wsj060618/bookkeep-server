@@ -203,7 +203,13 @@ public class ReceiptServiceImpl implements ReceiptService {
 
     @Override
     public void purgeBookQuietly(Long bookId, String bookName) {
+        // 按每条票据的 stored_path 删文件，不靠「账本名 + id」推目录：
+        // 账本改过名、或者走到这里时 selectById 已经被逻辑删除过滤成 null，推出来的目录名就对不上了
+        for (String storedPath : receiptMapper.selectStoredPathsByBook(bookId)) {
+            storage.deleteQuietly(storedPath);
+        }
         receiptMapper.hardDeleteByBook(bookId);
+        // 兜底：文件都删干净后整夹可能还剩空目录（或历史遗留的旧名字目录）
         storage.deleteBookDirQuietly(bookId, bookName);
     }
 

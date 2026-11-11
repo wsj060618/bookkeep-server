@@ -248,6 +248,36 @@ class ImportExportApiTest {
     }
 
     @Test
+    @DisplayName("备注里有换行（导出时的引号内换行）也能整行导入，不会被劈成两半")
+    void importCsvWithMultilineNote() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("imp"));
+
+        // 本系统导出格式：备注里的换行是引号内的真实换行
+        String csv = "日期,分类,摘要,收入,支出,结余\n"
+                + "2024-10-22,收取班费,\"全班共40\n人均班费50\",2000.00,,2000.00\n"
+                + "2024-12-12,打印复印,\"英语听力资料打印\n数量：40\n单价：0.4\",,16.00,1984.00\n"
+                + "2024-12-20,奖品,班级人员奖励,,201.00,1783.00\n";
+
+        JsonNode data = upload(token, "流水.csv", csv).path("data");
+        assertEquals(3, data.path("success").asInt(), "三笔都要进来，失败：" + data.path("failed"));
+        assertEquals(0, data.path("failed").size());
+
+        JsonNode list = getJson(mockMvc, objectMapper, "/api/transactions?size=10", token)
+                .path("data").path("list");
+        assertEquals(3, list.size());
+        // 备注里的换行要原样保留（列表里靠 pre-wrap / 省略号展示）
+        JsonNode printed = null;
+        for (JsonNode item : list) {
+            if ("2024-12-12".equals(item.path("transDate").asText())) {
+                printed = item;
+            }
+        }
+        assertTrue(printed != null, "2024-12-12 那笔应该导入成功");
+        assertEquals("英语听力资料打印\n数量：40\n单价：0.4", printed.path("note").asText());
+        assertEquals("16.00", printed.path("amount").asText());
+    }
+
+    @Test
     @DisplayName("空文件 / 只有表头：400，不会写库")
     void emptyImportRejected() throws Exception {
         String token = registerAndLogin(mockMvc, objectMapper, nextUsername("imp"));

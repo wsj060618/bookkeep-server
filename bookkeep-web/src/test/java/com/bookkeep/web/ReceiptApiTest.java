@@ -264,6 +264,39 @@ class ReceiptApiTest {
         assertFalse(Files.exists(file), "删除后文件也应消失：" + file);
     }
 
+    @Test
+    @DisplayName("彻底删除账本：票据库记录与文件一起删，不留 join 不到的孤儿行")
+    void purgingBookDeletesItsReceipts() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("rcp"));
+        long txId = income(token, "100.00", "2026-09-05");
+        long receiptId = json(upload(token, txId, "孤儿.png", png(32), null), objectMapper)
+                .path("data").path("id").asLong();
+        String storedPath = jdbcTemplate.queryForObject(
+                "SELECT stored_path FROM transaction_receipt WHERE id = ?", String.class, receiptId);
+        long oldBookId = json(mockMvc.perform(get("/api/books")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)).andReturn(), objectMapper)
+                .path("data").get(0).path("id").asLong();
+
+        // 新建一本（自动切过去）→ 把原来那本删进回收站 → 彻底删除
+        mockMvc.perform(post("/api/books")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType("application/json")
+                        .content("{\"name\":\"新账本\"}"))
+                .andExpect(jsonPath("$.code").value(200));
+        mockMvc.perform(delete("/api/books/" + oldBookId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(jsonPath("$.code").value(200));
+        mockMvc.perform(delete("/api/books/" + oldBookId + "/permanent")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(jsonPath("$.code").value(200));
+
+        // hardDeleteByBook 是 join `transaction` 定位的，删流水之前不删票据就永远是孤儿行
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM transaction_receipt WHERE transaction_id = ?", Integer.class, txId),
+                "账本彻底删除后，它名下流水的票据记录也要一起删");
+        assertFalse(Files.exists(ROOT.resolve(storedPath)), "票据文件也应随之删除");
+    }
+
     /* ---------- 工具 ---------- */
 
     private MockMultipartHttpServletRequestBuilder multipartUpload(String token, long txId) {

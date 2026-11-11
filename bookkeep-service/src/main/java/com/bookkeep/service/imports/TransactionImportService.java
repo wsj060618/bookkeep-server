@@ -11,6 +11,7 @@ import com.bookkeep.service.CurrentBookService;
 import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
+import com.bookkeep.service.support.CsvReader;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -300,45 +301,9 @@ public class TransactionImportService {
             text = text.substring(1);
         }
         List<CellRow> rows = new ArrayList<>();
-        String[] lines = text.split("\r?\n", -1);
-        for (int i = 0; i < lines.length; i++) {
-            if (lines[i].isBlank()) {
-                continue;
-            }
-            List<String> cells = splitCsvLine(lines[i]);
-            rows.add(new CellRow(i + 1, cells.toArray(new String[0])));
+        for (CsvReader.Row row : CsvReader.parse(text)) {
+            rows.add(new CellRow(row.line(), row.cells().toArray(new String[0])));
         }
         return rows;
-    }
-
-    /** 手写 CSV 拆列：只处理双引号与转义的双引号，够用且不引入 commons-csv 依赖 */
-    private static List<String> splitCsvLine(String line) {
-        List<String> cells = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean quoted = false;
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
-            if (quoted) {
-                if (c == '"') {
-                    if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                        current.append('"');
-                        i++;
-                    } else {
-                        quoted = false;
-                    }
-                } else {
-                    current.append(c);
-                }
-            } else if (c == '"') {
-                quoted = true;
-            } else if (c == ',') {
-                cells.add(current.toString());
-                current.setLength(0);
-            } else {
-                current.append(c);
-            }
-        }
-        cells.add(current.toString());
-        return cells;
     }
 }
