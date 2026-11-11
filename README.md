@@ -13,19 +13,19 @@
 
 - **账号**：邮箱登录（用户名只是显示名）、注册即建账本、找回密码走邮件一次性 token
 - **账本**：多本、随时切换、可设学期截止日期、学期结束归档成只读、删除进 15 天回收站
-- **分类**：账号级分类模板，改模板会同步到用过它的账本（有流水的分类不允许删）
-- **流水**：增删改查、按日期/类型/分类/备注筛选、支出不能超过余额、逐行结余
-- **票据**：每笔最多 9 张、单张 5MB、图片落盘不入库，支持 zip 导入导出
-- **统计**：月度收支汇总、分类占比、收支对比
-- **导出**：CSV、带图表的 Excel、可再导入的账本 zip
+- **分类**：账号级分类模板，改模板会同步到用过它的账本（有流水的分类不允许删），模板可导出/导入 JSON
+- **流水**：增删改查、按日期/类型/分类/备注筛选、逐行结余（不做余额校验，账面可以为负）
+- **票据**：每笔最多 9 张、单张 10MB、图片落盘不入库，支持 zip 导入导出
+- **统计**：按天区间汇总、分类占比、收支对比
+- **导入导出**：CSV、带图表的 Excel、可再导入的账本 zip（流水 + 图片 + 分类模板）
 - **公示**：免登录只读页面，一条链接可带多本账本，3 天有效，可看票据
 - **安全**：登录限流、改密后旧 token 立即失效、prod 启动自检（弱密钥拒绝启动）
 
 ## 技术栈
 
-
-
-
+- **后端**：Spring Boot 3.5 / JDK 17 / MyBatis-Plus 3.5 / MySQL 8.4 / JJWT 0.12 / Apache POI（Excel）/ Caffeine（登录限流）
+- **前端**：Vue 3 + TypeScript / Vite / Element Plus / Pinia / vue-router / ECharts
+- **部署**：Nginx（静态站点 + `/api` 反代）/ Docker Compose
 ## 项目结构
 
 后端是一个 Maven 多模块工程，依赖方向单向：`web → service → model`，`service → common`。
@@ -61,7 +61,7 @@ bookkeep-server/
 ├── bookkeep-web/               唯一可运行的模块
 │   ├── com/bookkeep/web/
 │   │   ├── BookkeepApplication.java
-│   │   ├── controller/         7 个 REST 控制器
+│   │   ├── controller/         9 个 REST 控制器（Auth / Book / Category / CategoryTemplate / Transaction / Receipt / Statistic / Public / User）
 │   │   ├── config/             安全、Jackson、定时任务、启动自检
 │   │   ├── filter/             JWT 认证过滤器
 │   │   ├── handler/            全局异常 + 401/403 JSON
@@ -90,7 +90,7 @@ bookkeep-web/
     ├── router/         路由与登录守卫
     ├── stores/         Pinia（用户、账本列表、token）
     ├── types/          api.ts：与后端 DTO 一一对应的类型
-    ├── utils/          校验规则、图标/颜色映射、金额格式化
+    ├── utils/          校验规则、图标/颜色映射、金额格式化、分页条数、省略号判断
     └── views/          10 个页面（登录/注册/流水/统计/账本/分类/设置/公示…）
 ```
 
