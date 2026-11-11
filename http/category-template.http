@@ -109,3 +109,35 @@ Authorization: Bearer {{token}}
 ### 10. 应用模板到当前账本（界面已不露出，保留备用；账本有流水时 400）
 POST {{host}}/api/category-templates/0/apply
 Authorization: Bearer {{token}}
+
+### 11. 导出模板 JSON：含图标/颜色/排序（id=0 也能导），把 data 原样存成 .json 就是导入文件
+GET {{host}}/api/category-templates/{{templateId}}/export
+Authorization: Bearer {{token}}
+
+### 12. 导入模板：body 就是第 11 步的 data；永远是新建，重名自动加「（导入）」后缀
+POST {{host}}/api/category-templates/import
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "version": 1,
+  "name": "秋季学期",
+  "items": [
+    { "name": "打印费", "type": "expense", "icon": "print", "color": "cyan" },
+    { "name": "班费", "type": "收入", "icon": "fee", "color": "green" },
+    { "name": "  ", "type": "expense" }
+  ]
+}
+
+### 12b. 版本比系统新 → 400 模板文件版本（v9）比当前系统新
+POST {{host}}/api/category-templates/import
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "version": 9,
+  "name": "未来",
+  "items": [
+    { "name": "打印费", "type": "expense" }
+  ]
+}

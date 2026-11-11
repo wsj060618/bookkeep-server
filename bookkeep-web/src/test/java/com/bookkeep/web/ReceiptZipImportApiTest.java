@@ -186,9 +186,14 @@ class ReceiptZipImportApiTest {
                 + "2025-02-24,支出,班级物品购买,114.03,物理本子\n";
         String manifest = "日期,类型,分类,金额,备注,票据标题,相对路径\n"
                 + "2025-02-24,支出,班级物品购买,114.03,物理本子,本子小票,img/本子.png\n";
+        // 包里带的分类模板 JSON：新分类「班级物品购买」本来是紫色 + 奖品图标
+        String template = "{\"version\":1,\"name\":\"计科三班\",\"items\":["
+                + "{\"name\":\"班级物品购买\",\"type\":\"expense\",\"icon\":\"prize\",\"color\":\"purple\","
+                + "\"sortOrder\":1}]}";
         byte[] zip = zipOf(Map.of(
                 "流水.csv", flow.getBytes(StandardCharsets.UTF_8),
                 "manifest.csv", manifest.getBytes(StandardCharsets.UTF_8),
+                "分类模板.json", template.getBytes(StandardCharsets.UTF_8),
                 "img/本子.png", ReceiptApiTest.png(32)));
 
         // 1) 不确认：一行都不写，只回「缺哪个分类」
@@ -216,10 +221,19 @@ class ReceiptZipImportApiTest {
         assertEquals(2, second.path("success").asInt());
         assertEquals(1, second.path("receipts").path("success").asInt());
 
-        // 新建的分类进了分类列表（也补进了模板，所以以后新账本也有它）
+        // 新建的分类进了分类列表（也补进了模板，所以以后新账本也有它），样式取自包里的 分类模板.json
         JsonNode categories = com.bookkeep.web.support.AuthHelper
                 .getJson(mockMvc, objectMapper, "/api/categories?type=expense", token).path("data");
         assertTrue(categories.toString().contains("班级物品购买"), categories.toString());
+        JsonNode created = null;
+        for (JsonNode category : categories) {
+            if ("班级物品购买".equals(category.path("name").asText())) {
+                created = category;
+            }
+        }
+        assertTrue(created != null, categories.toString());
+        assertEquals("prize", created.path("icon").asText(), "图标来自包内的 分类模板.json");
+        assertEquals("purple", created.path("color").asText(), "颜色来自包内的 分类模板.json");
     }
 
     /* ---------- 工具 ---------- */

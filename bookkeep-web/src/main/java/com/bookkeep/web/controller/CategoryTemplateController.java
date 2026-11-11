@@ -1,6 +1,7 @@
 package com.bookkeep.web.controller;
 
 import com.bookkeep.common.result.Result;
+import com.bookkeep.model.dto.TemplateDoc;
 import com.bookkeep.model.dto.req.CategoryTemplateReq;
 import com.bookkeep.model.dto.resp.CategoryTemplateResp;
 import com.bookkeep.service.CategoryTemplateService;
@@ -67,5 +68,20 @@ public class CategoryTemplateController {
     public Result<Void> apply(@PathVariable Long id) {
         categoryTemplateService.apply(id);
         return Result.success();
+    }
+
+    /**
+     * 导出模板：返回文档本身（含图标/颜色/排序），前端存成 {@code 模板名_分类模板.json}。
+     * <p>不走文件流是刻意的：参数错误仍能返回正常的 200+JSON 信封。
+     */
+    @GetMapping("/{id}/export")
+    public Result<TemplateDoc> export(@PathVariable Long id) {
+        return Result.success(categoryTemplateService.exportDoc(id));
+    }
+
+    /** 导入模板：JSON 文档 → **新模板**（重名自动加「（导入）」后缀），不改任何账本 */
+    @PostMapping("/import")
+    public Result<CategoryTemplateResp> importDoc(@RequestBody TemplateDoc doc) {
+        return Result.success(categoryTemplateService.importDoc(doc));
     }
 }

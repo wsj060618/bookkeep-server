@@ -336,6 +336,13 @@ D:\coding\bookkeep-server\                父工程（packaging=pom，只管模�
 | PUT | `/api/category-templates/{id}` | 改名；带 `items` 时**按 id 增量替换**条目（内置模板 400），并把差异同步到用过这套模板的账本 |
 | DELETE | `/api/category-templates/{id}` | 物理删除；引用它的账本 `categoryTemplateId` 清空（回落到内置），账本里的分类保留、来源标记清空 |
 | POST | `/api/category-templates/{id}/apply` | 应用到当前账本（`id=0` = 内置）；**账本有流水时 400**。界面已不露出，保留备用 |
+| GET | `/api/category-templates/{id}/export` | 导出成 JSON 文档（含图标/颜色/排序，**不含 id**）；内置模板 `id=0` 也能导 |
+| POST | `/api/category-templates/import` | 导入 JSON → **新模板**（重名自动加「（导入）」后缀），不改任何账本 |
+
+- 模板 JSON 文档：`{version:1, name, items:[{name,type,icon,color,sortOrder}]}`，同一份结构
+  也是账本包里的 `分类模板.json`（见 §10.9）。**没有 id**：跨账号/跨机器时主键无意义，
+  图标颜色都靠语义 key；导入时方向接受 `income/expense` 与 `收入/支出`，空名丢弃、同方向同名只留一条、
+  `sortOrder` 按数组顺序重排。`version` 比系统新 → 400
 
 - 内置模板**不入库**：内容取自 `CategoryPresets.classCategories()`，与注册时预置的 11 条同源，`book.category_template_id` 为 `NULL` 即表示内置
 - **新建账本就选模板**：`POST /api/books` 的 `templateId`（省略 / 0 = 内置）决定这本账本预置哪套分类，`book.category_template_id` 一并写入。这是唯一的主力入口——建好之后再换模板要满足「没有流水」，所以模板应该在新建时一次选对
@@ -1168,6 +1175,7 @@ LangGraph 只用来表达「校验失败 → 重试 → 降级」的条件状态
   {账本名}_账本_全部.zip
     ├── 流水.csv                      全部流水（与「导出 CSV」同一套内容）
     ├── manifest.csv                  有票据的流水：日期/类型/分类/金额/备注/标题/相对路径
+    ├── 分类模板.json                 分类的图标/颜色/排序（模板文档，见 §5.4.1）
     └── 计科2301班费_12/
         ├── 2026-11/
         │   ├── 超市小票.jpg
@@ -1175,10 +1183,14 @@ LangGraph 只用来表达「校验失败 → 重试 → 降级」的条件状态
         └── 2026-12/…
   ```
   没有票据也照样能导（就是一份流水备份），只有「这个范围内没有流水」才 400。
+  **分类的图标/颜色只能在 JSON 里表达**（CSV 只有名字），所以这份文档必须带上：
+  导入时新建的分类按它取 `icon`/`color`，缺这份文件就退回 `other`/`gray`。
 - **票据导出**（`/api/transactions/receipts/export`）= 只要图片，目录同上但**没有** manifest.csv / 流水.csv；
   文件名 = `{票据标题}.{ext}`（同目录重名自动 `_2`、`_3`），zip 名 `{账本名}_票据_{全部|部分_起-止}.zip`
 - **单笔导出**：zip 名 `{账本名}_{日期}_{分类}_{金额}.zip`，图片全放 `图片/`，文件名带 `{日期}_{标题}`（文件夹本身没有日期）
 - `manifest.csv` 列：日期 / 类型 / 分类 / 金额 / 备注 / 票据标题 / 相对路径
+- `分类模板.json`：`{version, name, items:[{name,type,icon,color,sortOrder}]}`，**不含 id**；
+  解析失败只记日志、退回默认样式，不因此拒绝整个包
 - 区间导出只导**当前账本**（和 CSV 导出一致）；要跨账本分别导两次
 - 上限：一次 ≤200 张、≤200MB；超了返回 400 并提示缩小范围（避免把试用机内存打满）
 - zip 用 `java.util.zip` 流式写，不把全部图片读进内存

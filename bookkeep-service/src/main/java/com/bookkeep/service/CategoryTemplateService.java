@@ -1,5 +1,6 @@
 package com.bookkeep.service;
 
+import com.bookkeep.model.dto.TemplateDoc;
 import com.bookkeep.model.dto.req.CategoryTemplateReq;
 import com.bookkeep.model.dto.resp.CategoryTemplateResp;
 
@@ -27,4 +28,13 @@ public interface CategoryTemplateService {
 
     /** 取模板条目（新建账本时预置分类用）；null / 0 = 内置 */
     List<CategoryTemplateResp.Item> itemsOf(Long templateId);
+
+    /** 导出成 JSON 文档（含图标/颜色/排序）；内置模板也能导出 */
+    TemplateDoc exportDoc(Long id);
+
+    /** 从 JSON 文档导入成**新模板**（重名自动加后缀），不碰任何账本 */
+    CategoryTemplateResp importDoc(TemplateDoc doc);
+
+    /** 账本用的那套模板（没有模板指针时用账本分类兜底），随账本包一起导出 */
+    TemplateDoc docOfBook(Long bookId);
 }

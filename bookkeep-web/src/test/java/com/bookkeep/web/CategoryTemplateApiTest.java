@@ -448,4 +448,76 @@ class CategoryTemplateApiTest {
 
         assertEquals(1, getJson(mockMvc, objectMapper, "/api/books", tokenB).path("data").size());
     }
+
+    @Test
+    @DisplayName("模板导出带图标/颜色/排序；再导回来是新模板（重名自动加后缀），账本分类不受影响")
+    void exportThenImportRoundTrip() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
+        long templateId = getJson(mockMvc, objectMapper, "/api/category-templates", token)
+                .path("data").get(0).path("id").asLong();
+
+        JsonNode doc = getJson(mockMvc, objectMapper, "/api/category-templates/" + templateId + "/export", token)
+                .path("data");
+        assertEquals(1, doc.path("version").asInt());
+        assertEquals("班级班费", doc.path("name").asText());
+        assertEquals(11, doc.path("items").size());
+        // 颜色/图标就是导出的重点：只带名字的话换个账号导入会全变成灰色
+        assertEquals("班会物资", doc.path("items").get(0).path("name").asText());
+        assertEquals("supplies", doc.path("items").get(0).path("icon").asText());
+        assertEquals("orange", doc.path("items").get(0).path("color").asText());
+        assertEquals(1, doc.path("items").get(0).path("sortOrder").asInt());
+
+        JsonNode first = importDoc(token, doc.toString()).path("data");
+        assertEquals("班级班费（导入）", first.path("name").asText());
+        assertTrue(first.path("id").asLong() > 0, "导入的是新模板，不是覆盖原来那套");
+        assertEquals(11, first.path("items").size());
+        assertEquals("orange", first.path("items").get(0).path("color").asText());
+        assertEquals("cyan", first.path("items").get(3).path("color").asText());
+
+        // 再导一次：前缀一样也要能导进去
+        JsonNode second = importDoc(token, doc.toString()).path("data");
+        assertEquals("班级班费（导入 2）", second.path("name").asText());
+
+        assertEquals(3, getJson(mockMvc, objectMapper, "/api/category-templates", token).path("data").size());
+        // 导入是纯「加一套模板」，当前账本的分类一个不动
+        assertEquals(11, getJson(mockMvc, objectMapper, "/api/categories", token).path("data").size());
+    }
+
+    @Test
+    @DisplayName("导入模板的兜底：方向认中英文、缺图标颜色给默认值、脏条目丢掉、版本太新拒绝")
+    void importTemplateToleratesDirtyDoc() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("tpl"));
+
+        String dirty = "{\"version\":1,\"name\":\"手写的\",\"items\":["
+                + "{\"name\":\" 打印费 \",\"type\":\"支出\"},"
+                + "{\"name\":\"\",\"type\":\"expense\"},"
+                + "{\"name\":\"班费\",\"type\":\"income\",\"icon\":\"fee\",\"color\":\"green\"},"
+                + "{\"name\":\"打印费\",\"type\":\"expense\"}]}";
+        JsonNode created = importDoc(token, dirty).path("data");
+        assertEquals("手写的", created.path("name").asText());
+        // 空名丢掉、同方向同名只留第一条
+        assertEquals(2, created.path("items").size(), created.toString());
+        assertEquals("打印费", created.path("items").get(0).path("name").asText());
+        assertEquals("expense", created.path("items").get(0).path("type").asText());
+        assertEquals("other", created.path("items").get(0).path("icon").asText());
+        assertEquals("gray", created.path("items").get(0).path("color").asText());
+        assertEquals("income", created.path("items").get(1).path("type").asText());
+        assertEquals("green", created.path("items").get(1).path("color").asText());
+
+        // 版本比系统新：直接拒绝，别猜字段
+        assertTrue(importDoc(token, "{\"version\":99,\"name\":\"未来\",\"items\":["
+                + "{\"name\":\"打印费\",\"type\":\"expense\"}]}")
+                .path("message").asText().contains("版本"));
+        // 一条可用分类都没有
+        assertTrue(importDoc(token, "{\"version\":1,\"name\":\"空\",\"items\":[]}")
+                .path("message").asText().contains("没有可导入的分类"));
+    }
+
+    private JsonNode importDoc(String token, String body) throws Exception {
+        return json(mockMvc.perform(post("/api/category-templates/import")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andReturn(), objectMapper);
+    }
 }

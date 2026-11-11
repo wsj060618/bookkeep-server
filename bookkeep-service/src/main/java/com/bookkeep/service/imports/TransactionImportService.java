@@ -3,6 +3,7 @@ package com.bookkeep.service.imports;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
+import com.bookkeep.model.dto.TemplateDoc;
 import com.bookkeep.model.dto.resp.ImportResultResp;
 import com.bookkeep.model.dto.req.CategoryReq;
 import com.bookkeep.model.entity.Category;
@@ -14,6 +15,7 @@ import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
 import com.bookkeep.service.support.CsvReader;
+import com.bookkeep.service.support.TemplateDocs;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,8 +35,8 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 流水导入（CSV / xlsx，列固定为 日期,类型,分类,金额,备注）。
- * <p>行级失败不阻塞其它行；分类不存在直接报错，不自动建。
+ * 流水导入（CSV，列固定为 日期,类型,分类,金额,备注）。
+ * <p>行级失败不阻塞其它行；文件里用到账本没有的分类时先停下等用户确认，不悄悄建也不导一半。
  */
 @Slf4j
 @Service
@@ -122,8 +124,19 @@ public class TransactionImportService {
     /** 走 CategoryService 建：和「分类」页新建一样，会同步补进这个账本用的分类模板 */
     void createCategories(List<ImportResultResp.MissingCategory> missing, Map<String, Long> categoryIds,
                           Long bookId) {
+        createCategories(missing, categoryIds, bookId, Map.of());
+    }
+
+    /**
+     * @param props 来自账本包里的 {@code 分类模板.json}：拿得到就用它的图标/颜色新建，
+     *              否则退化成默认的 other / gray（CSV 导入没有这份文件）
+     */
+    void createCategories(List<ImportResultResp.MissingCategory> missing, Map<String, Long> categoryIds,
+                          Long bookId, Map<String, TemplateDoc.Item> props) {
         for (ImportResultResp.MissingCategory item : missing) {
-            categoryService.create(new CategoryReq(item.name(), item.type(), null, null));
+            TemplateDoc.Item prop = props.get(TemplateDocs.key(item.type(), item.name()));
+            categoryService.create(new CategoryReq(item.name(), item.type(),
+                    prop == null ? null : prop.icon(), prop == null ? null : prop.color()));
             log.info("导入时新建分类：{}（{}）", item.name(), item.type());
         }
         // 重建映射：新建的分类要能被后面的行认出来

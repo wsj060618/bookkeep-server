@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.common.util.SecurityUtil;
+import com.bookkeep.model.dto.TemplateDoc;
 import com.bookkeep.model.dto.req.CategoryTemplateReq;
 import com.bookkeep.model.dto.resp.CategoryTemplateResp;
 import com.bookkeep.model.entity.Book;
@@ -20,6 +21,7 @@ import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.CategoryTemplateItemMapper;
 import com.bookkeep.service.mapper.CategoryTemplateMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
+import com.bookkeep.service.support.TemplateDocs;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -235,7 +237,98 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
         return resolveItems(resolved, SecurityUtil.getUserId());
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public TemplateDoc exportDoc(Long id) {
+        Long userId = SecurityUtil.getUserId();
+        List<CategoryTemplateResp.Item> items = resolveItems(id, userId);
+        String name = Objects.equals(id, CategoryPresets.BUILTIN_ID)
+                ? CategoryPresets.BUILTIN_NAME
+                : requireOwned(id, userId).getName();
+        return toDoc(name, items);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CategoryTemplateResp importDoc(TemplateDoc doc) {
+        Long userId = SecurityUtil.getUserId();
+        TemplateDoc clean = TemplateDocs.normalize(doc);
+        String name = uniqueName(userId, clean.name());
+        CategoryTemplateReq req = new CategoryTemplateReq(name, clean.items().stream()
+                // 文档里没有 id：导入永远是「新建条目」，不能拿来改已有模板
+                .map(item -> new CategoryTemplateReq.Item(
+                        null, item.name(), item.type(), item.icon(), item.color()))
+                .toList());
+        CategoryTemplateResp created = create(req);
+        log.info("导入模板：userId={}, templateId={}, name={}, items={}",
+                userId, created.id(), created.name(), created.items().size());
+        return created;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public TemplateDoc docOfBook(Long bookId) {
+        Book book = bookMapper.selectById(bookId);
+        Long templateId = book == null ? null : book.getCategoryTemplateId();
+        String name = CategoryPresets.BUILTIN_NAME;
+        Set<String> seen = new HashSet<>();
+        List<TemplateDoc.Item> items = new ArrayList<>();
+
+        CategoryTemplate template = templateId == null ? null : templateMapper.selectById(templateId);
+        if (template != null) {
+            name = template.getName();
+            for (CategoryTemplateItem item : loadItems(templateId)) {
+                if (seen.add(TemplateDocs.key(item.getType(), item.getName()))) {
+                    items.add(new TemplateDoc.Item(item.getName(), item.getType(),
+                            item.getIcon(), item.getColor(), items.size() + 1));
+                }
+            }
+        }
+        // 账本里自己建的分类（不在模板里的）也要带上，否则换个账号导入会掉图标颜色
+        List<Category> categories = categoryMapper.selectList(Wrappers.<Category>query()
+                .eq("book_id", bookId)
+                .orderByAsc("sort_order", "id"));
+        for (Category category : categories) {
+            if (seen.add(TemplateDocs.key(category.getType(), category.getName()))) {
+                items.add(new TemplateDoc.Item(category.getName(), category.getType(),
+                        category.getIcon(), category.getColor(), items.size() + 1));
+            }
+        }
+        return new TemplateDoc(TemplateDoc.VERSION, name, items);
+    }
+
     /* ---------- 内部 ---------- */
+
+    private static TemplateDoc toDoc(String name, List<CategoryTemplateResp.Item> items) {
+        List<TemplateDoc.Item> docItems = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            CategoryTemplateResp.Item item = items.get(i);
+            docItems.add(new TemplateDoc.Item(item.name(), item.type(), item.icon(), item.color(), i + 1));
+        }
+        return new TemplateDoc(TemplateDoc.VERSION, name, docItems);
+    }
+
+    /** 导入时的模板名：重名就依次试「（导入）」「（导入 2）」…，保证一句话就能导两次 */
+    private String uniqueName(Long userId, String base) {
+        Set<String> taken = new HashSet<>(templateMapper.selectList(Wrappers.<CategoryTemplate>query()
+                        .eq("user_id", userId))
+                .stream().map(CategoryTemplate::getName).toList());
+        if (!taken.contains(base)) {
+            return base;
+        }
+        for (int i = 1; i <= 999; i++) {
+            String suffix = i == 1 ? "（导入）" : "（导入 " + i + "）";
+            String candidate = cut(base, 50 - suffix.length()) + suffix;
+            if (!taken.contains(candidate)) {
+                return candidate;
+            }
+        }
+        throw new BusinessException(ResultCode.BAD_REQUEST, "同名模板太多了，先清理一下再导入");
+    }
+
+    private static String cut(String value, int max) {
+        return value.length() <= max ? value : value.substring(0, Math.max(max, 1));
+    }
 
     private CategoryTemplateResp builtinResp() {
         List<CategoryTemplateResp.Item> items = CategoryPresets.classCategories().stream()

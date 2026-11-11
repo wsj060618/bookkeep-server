@@ -3,16 +3,20 @@ package com.bookkeep.service.export;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
+import com.bookkeep.model.dto.TemplateDoc;
 import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.Category;
 import com.bookkeep.model.entity.Transaction;
 import com.bookkeep.model.entity.TransactionReceipt;
+import com.bookkeep.service.CategoryTemplateService;
 import com.bookkeep.service.CurrentBookService;
 import com.bookkeep.service.mapper.BookMapper;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
 import com.bookkeep.service.mapper.TransactionReceiptMapper;
 import com.bookkeep.service.support.ReceiptStorage;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -36,7 +40,7 @@ import java.util.zip.ZipOutputStream;
 
 /**
  * 票据/账本的 zip 导出。
- * <p>账本导出（format=zip）= 流水.csv + manifest.csv + 图片，可再导入；
+ * <p>账本导出（format=zip）= 流水.csv + manifest.csv + 分类模板.json + 图片，可再导入；
  * 票据导出（receipts/export）= 只要图片。
  * <p>上限（≤200 张、≤200MB）在写响应前校验，超了还能返回正常的 200+JSON 信封。
  */
@@ -60,6 +64,8 @@ public class ReceiptExportService {
     private final TransactionReceiptMapper receiptMapper;
     private final ReceiptStorage storage;
     private final TransactionExportService transactionExportService;
+    private final CategoryTemplateService categoryTemplateService;
+    private final ObjectMapper objectMapper;
 
     /** 账本导出包：流水.csv + manifest.csv + 图片；没有票据也能导，只是没有图片 */
     @Transactional(readOnly = true)
@@ -81,10 +87,12 @@ public class ReceiptExportService {
 
         // 包里那份流水 CSV：manifest 只记「有票据的流水」，带上它才是「一个包 = 完整备份」
         TransactionExportService.ExportPlan flowPlan = transactionExportService.prepare(startDate, endDate);
+        // 分类的图标/颜色/排序只在 JSON 里能完整表达（CSV 只有名字），换账号导入才不会退化成默认样式
+        String templateJson = toJson(categoryTemplateService.docOfBook(bookId));
         return build(safeName + "_账本_" + rangeSuffix(startDate, endDate) + ".zip",
                 transactions, receipts, flowPlan,
                 transaction -> safeName + "_" + bookId + "/" + MONTH.format(transaction.getTransDate()) + "/",
-                false, true);
+                false, true, templateJson);
     }
 
     /** 票据导出：只要图片，不带 manifest / 流水 CSV */
@@ -111,7 +119,7 @@ public class ReceiptExportService {
         return build(safeName + "_票据_" + rangeSuffix(startDate, endDate) + ".zip",
                 transactions, receipts, null,
                 transaction -> safeName + "_" + bookId + "/" + MONTH.format(transaction.getTransDate()) + "/",
-                false, false);
+                false, false, null);
     }
 
     /** 单笔导出：只要图片，统一放「图片/」文件夹 */
@@ -134,7 +142,7 @@ public class ReceiptExportService {
         String categoryName = category == null ? "已删除分类" : category.getName();
         String filename = safeFileName(bookName) + "_" + COMPACT.format(transaction.getTransDate())
                 + "_" + safeFileName(categoryName) + "_" + transaction.getAmount().toPlainString() + ".zip";
-        return build(filename, List.of(transaction), receipts, null, one -> "图片/", true, false);
+        return build(filename, List.of(transaction), receipts, null, one -> "图片/", true, false, null);
     }
 
     /** 逐个文件 copy，不把图片读进内存 */
@@ -153,6 +161,13 @@ public class ReceiptExportService {
                 java.io.Writer writer = new java.io.OutputStreamWriter(zip, StandardCharsets.UTF_8);
                 transactionExportService.writeCsv(plan.flowPlan(), writer);
                 writer.flush();   // 不能 close：那会把整个 zip 关掉
+                zip.closeEntry();
+            }
+
+            if (plan.templateJson() != null) {
+                // 不写 BOM：BOM 会让 JSON.parse / 别的解析器直接报错
+                zip.putNextEntry(new ZipEntry("分类模板.json"));
+                zip.write(plan.templateJson().getBytes(StandardCharsets.UTF_8));
                 zip.closeEntry();
             }
 
@@ -199,7 +214,7 @@ public class ReceiptExportService {
                              List<Transaction> transactions, List<TransactionReceipt> receipts,
                              TransactionExportService.ExportPlan flowPlan,
                              Function<Transaction, String> dirOf, boolean dateInName,
-                             boolean withManifest) {
+                             boolean withManifest, String templateJson) {
         Map<Long, Transaction> byId = transactions.stream()
                 .collect(Collectors.toMap(Transaction::getId, Function.identity()));
         Map<Long, String> categoryNames = loadCategoryNames(transactions);
@@ -247,7 +262,16 @@ public class ReceiptExportService {
                         .append(csv(readable ? pathInZip : pathInZip + "（文件缺失，未打包）")).append('\n');
             }
         }
-        return new ExportPlan(filename, entries, manifest == null ? null : manifest.toString(), flowPlan);
+        return new ExportPlan(filename, entries, manifest == null ? null : manifest.toString(), flowPlan,
+                templateJson);
+    }
+
+    private String toJson(TemplateDoc doc) {
+        try {
+            return objectMapper.writeValueAsString(doc);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ResultCode.ERROR, "生成分类模板 JSON 失败");
+        }
     }
 
     private Path storagePath(String storedPath) {
@@ -295,8 +319,8 @@ public class ReceiptExportService {
     public record Entry(String pathInZip, Path file) {
     }
 
-    /** manifest / flowPlan 只有账本导出包才有，票据导出为 null */
+    /** manifest / flowPlan / templateJson 只有账本导出包才有，票据导出为 null */
     public record ExportPlan(String filename, List<Entry> entries, String manifest,
-                             TransactionExportService.ExportPlan flowPlan) {
+                             TransactionExportService.ExportPlan flowPlan, String templateJson) {
     }
 }

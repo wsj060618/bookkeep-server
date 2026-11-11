@@ -3,6 +3,7 @@ package com.bookkeep.service.imports;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bookkeep.common.exception.BusinessException;
 import com.bookkeep.common.result.ResultCode;
+import com.bookkeep.model.dto.TemplateDoc;
 import com.bookkeep.model.dto.resp.ImportResultResp;
 import com.bookkeep.model.dto.resp.ReceiptImportResp;
 import com.bookkeep.model.dto.resp.ZipImportResp;
@@ -15,7 +16,9 @@ import com.bookkeep.service.constant.CategoryPresets;
 import com.bookkeep.service.mapper.CategoryMapper;
 import com.bookkeep.service.mapper.TransactionMapper;
 import com.bookkeep.service.support.CsvReader;
+import com.bookkeep.service.support.TemplateDocs;
 import com.bookkeep.service.support.ZipExtractor;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -51,11 +54,15 @@ public class ReceiptZipImportService {
 
     private static final String MANIFEST = "manifest.csv";
 
+    /** 账本包里记录分类图标/颜色的 JSON（没有也行，退化成默认样式） */
+    private static final String TEMPLATE_JSON = "分类模板.json";
+
     private final CurrentBookService currentBookService;
     private final TransactionMapper transactionMapper;
     private final CategoryMapper categoryMapper;
     private final TransactionImportService transactionImportService;
     private final ReceiptService receiptService;
+    private final ObjectMapper objectMapper;
 
     /** manifest 的一行（已展开成可直接建流水的字段） */
     private record ManifestRow(int line, String date, String type, String category,
@@ -79,6 +86,7 @@ public class ReceiptZipImportService {
             Path flowCsv = findFlowCsv(files, dir);
             List<ManifestRow> manifestRows = parseManifest(manifest);
             List<TransactionImportService.RawRow> flowRows = readFlowRows(dir, flowCsv);
+            Map<String, TemplateDoc.Item> props = readTemplateProps(files, dir);
 
             Map<String, Long> categoryIds = loadCategoryIds(bookId);
 
@@ -95,7 +103,7 @@ public class ReceiptZipImportService {
                 if (!createMissing) {
                     return new ZipImportResp(0, List.of(), new ReceiptImportResp(0, List.of()), missing);
                 }
-                transactionImportService.createCategories(missing, categoryIds, bookId);
+                transactionImportService.createCategories(missing, categoryIds, bookId, props);
             }
 
             int success = 0;
@@ -191,6 +199,24 @@ public class ReceiptZipImportService {
             throw new BusinessException(ResultCode.BAD_REQUEST, "读不到包内的流水 CSV");
         }
         return transactionImportService.parse(ZipExtractor.relative(dir, flowCsv), flowBytes);
+    }
+
+    /**
+     * 包里那份「分类模板.json」：只用来给新建分类补图标/颜色。
+     * <p>缺失或解析失败都只记一条日志 —— 它决定不了导入成败，包能导进来才是正事。
+     */
+    private Map<String, TemplateDoc.Item> readTemplateProps(List<Path> files, Path dir) {
+        Path json = find(files, dir, TEMPLATE_JSON);
+        if (json == null) {
+            return Map.of();
+        }
+        try {
+            TemplateDoc doc = objectMapper.readValue(Files.readAllBytes(json), TemplateDoc.class);
+            return TemplateDocs.index(doc.items());
+        } catch (IOException e) {
+            log.warn("包内的 {} 解析失败，分类样式用默认值：{}", TEMPLATE_JSON, e.getMessage());
+            return Map.of();
+        }
     }
 
     /** 找与 manifest 同键、且还没挂满的流水；没有就返回 null（由调用方补建） */

@@ -135,10 +135,18 @@ class ReceiptExportApiTest {
 
         MvcResult result = download("/api/transactions/export?format=zip", f.token);
         Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
-        assertEquals(2, entries.size(), "没票据时 = 流水.csv + manifest 表头：" + entries.keySet());
+        assertEquals(3, entries.size(),
+                "没票据时 = 流水.csv + manifest 表头 + 分类模板.json：" + entries.keySet());
         assertTrue(entries.containsKey("流水.csv"), entries.keySet().toString());
         String manifest = new String(entries.get("manifest.csv"), StandardCharsets.UTF_8);
         assertEquals(1, manifest.replace("\uFEFF", "").trim().split("\n").length, "只有表头");
+
+        // 分类的图标/颜色只在 JSON 里，账本包必须带上，否则换账号导入全变灰
+        JsonNode doc = objectMapper.readTree(entries.get("分类模板.json"));
+        assertEquals(1, doc.path("version").asInt());
+        assertEquals(11, doc.path("items").size(), doc.toString());
+        assertEquals("orange", doc.path("items").get(0).path("color").asText());
+        assertEquals("supplies", doc.path("items").get(0).path("icon").asText());
     }
 
     @Test
@@ -180,7 +188,8 @@ class ReceiptExportApiTest {
         MvcResult result = download("/api/transactions/export?format=zip", f.token);
         Map<String, byte[]> entries = unzip(result.getResponse().getContentAsByteArray());
 
-        assertEquals(3, entries.size(), "manifest + 流水.csv + 剩下那一张，实际：" + entries.keySet());
+        assertEquals(4, entries.size(),
+                "manifest + 流水.csv + 分类模板.json + 剩下那一张，实际：" + entries.keySet());
         String manifest = new String(entries.get("manifest.csv"), StandardCharsets.UTF_8);
         assertTrue(manifest.contains("文件缺失"), "manifest 要标出缺了哪个：" + manifest);
         assertEquals(2, manifest.replace("\uFEFF", "").trim().split("\n").length - 1,
