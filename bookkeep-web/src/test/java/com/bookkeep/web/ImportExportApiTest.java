@@ -104,6 +104,18 @@ class ImportExportApiTest {
             assertEquals(1900.00, sheet.getRow(13).getCell(5).getNumericCellValue(), 0.001);
             assertEquals(620.00, sheet.getRow(14).getCell(4).getNumericCellValue(), 0.001);
 
+            // 空着的那一侧也要有单元格：没有 cell 就没有边框，那一列会缺一排横线
+            var incomeRowExpense = sheet.getRow(13).getCell(4);
+            assertNotNull(incomeRowExpense, "收入行的「支出」格也要存在，否则支出列断线");
+            assertEquals(org.apache.poi.ss.usermodel.BorderStyle.THIN,
+                    incomeRowExpense.getCellStyle().getBorderBottom());
+            assertEquals("", incomeRowExpense.getStringCellValue());
+            var expenseRowIncome = sheet.getRow(14).getCell(3);
+            assertNotNull(expenseRowIncome, "支出行的「收入」格也要存在，否则收入列断线");
+            assertEquals(org.apache.poi.ss.usermodel.BorderStyle.THIN,
+                    expenseRowIncome.getCellStyle().getBorderBottom());
+            assertEquals("", expenseRowIncome.getStringCellValue());
+
             // 两张图并排：柱状图（3 根竖柱）+ 环形图，且必须关掉 plotVisOnly，
             // 否则 Excel 会丢掉隐藏 J/K 列里的数据、整条序列消失（只剩坐标轴）
             var drawing = ((org.apache.poi.xssf.usermodel.XSSFSheet) sheet).getDrawingPatriarch();
@@ -124,6 +136,24 @@ class ImportExportApiTest {
             var pieSeries = doughnut.getSerArray(0);
             assertEquals("10B981", hex(pieSeries.getDPtArray(0)));
             assertEquals("EF4444", hex(pieSeries.getDPtArray(1)));
+        }
+    }
+
+    @Test
+    @DisplayName("备注列按最长备注自适应：长备注不再溢出到表格外")
+    void noteColumnWidthFitsLongestNote() throws Exception {
+        String token = registerAndLogin(mockMvc, objectMapper, nextUsername("xls"));
+        long diningId = categoryIdOf(token, "聚餐");
+        String longNote = "英语听力资料打印 数量: 40 单价: 0.4";
+        record(token, diningId, "expense", "10.00", "2026-09-20", longNote);
+
+        try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(downloadXlsx(token)))) {
+            var sheet = workbook.getSheetAt(0);
+            int noteWidth = sheet.getColumnWidth(6) / 256;
+            // 中文/全角按 2 个字符宽，+2 是两侧留白（和导出服务的算法一致）
+            int expected = longNote.codePoints().map(c -> c <= 0x7F ? 1 : 2).sum() + 2;
+            assertEquals(expected, noteWidth, "备注列宽应等于最长备注的显示宽度");
+            assertTrue(noteWidth > 34, "长备注应该把默认的 34 撑宽，实际 " + noteWidth);
         }
     }
 

@@ -69,8 +69,11 @@ public class TransactionExcelExportService {
     private static final int COL_BALANCE = 5;
     private static final int COL_NOTE = 6;
 
-    /** 表格列宽（字符数）：A 序号 / B 日期 / C 摘要 / D 收入 / E 支出 / F 班费结余 / G 备注 */
+    /** 表格列宽（字符数）：A 序号 / B 日期 / C 摘要 / D 收入 / E 支出 / F 班费结余 / G 备注（备注按内容自适应） */
     private static final int[] COL_WIDTHS = {7, 14, 30, 16, 16, 16, 34};
+
+    /** 备注列最宽 255（Excel 列宽上限），再长就让它去，宁可宽也不截断 */
+    private static final int NOTE_MAX_WIDTH = 255;
 
     /** 图表数据区：J/K 两列，放完就隐藏，不污染表面 */
     private static final int COL_DATA_LABEL = 9;
@@ -91,11 +94,13 @@ public class TransactionExcelExportService {
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
             Styles styles = new Styles(workbook);
             XSSFSheet sheet = workbook.createSheet("收支明细");
+            // 备注列按最长备注定宽：否则长备注会溢出到表格外面（G 列右边没有内容，Excel 就让字飘出去）
+            int[] widths = widthsFor(plan);
 
-            writeSummary(sheet, plan, styles);
+            writeSummary(sheet, plan, styles, widths);
             writeChartData(sheet, plan);
-            drawBarChart(sheet);
-            drawDoughnutChart(sheet);
+            drawBarChart(sheet, widths);
+            drawDoughnutChart(sheet, widths);
             writeHeader(sheet, styles);
             writeRows(sheet, plan, styles);
 
@@ -105,9 +110,32 @@ public class TransactionExcelExportService {
         log.info("导出 xlsx：{}，明细 {} 条", plan.filename(), plan.rows().size());
     }
 
+    /** 列宽基线 + 备注列自适应（中文/全角算 2 个字符宽，否则列宽永远对不上） */
+    private int[] widthsFor(ExportPlan plan) {
+        int[] widths = COL_WIDTHS.clone();
+        int longest = 0;
+        for (var row : plan.rows()) {
+            longest = Math.max(longest, displayWidth(row.getNote()));
+        }
+        // +2 是两侧留白；列宽上限 255 是 Excel 自己的硬限制
+        widths[COL_NOTE] = Math.max(COL_WIDTHS[COL_NOTE], Math.min(longest + 2, NOTE_MAX_WIDTH));
+        return widths;
+    }
+
+    private static int displayWidth(String text) {
+        if (text == null) {
+            return 0;
+        }
+        int width = 0;
+        for (int i = 0; i < text.length(); i++) {
+            width += text.charAt(i) <= 0x7F ? 1 : 2;
+        }
+        return width;
+    }
+
     /* ---------- 顶部汇总（A..C，带底色） ---------- */
 
-    private void writeSummary(XSSFSheet sheet, ExportPlan plan, Styles styles) {
+    private void writeSummary(XSSFSheet sheet, ExportPlan plan, Styles styles, int[] widths) {
         XSSFRow title = sheet.createRow(0);
         title.setHeightInPoints(26); // 14 磅标题要留够行高，否则被裁成一条线
         cell(title, COL_SEQ, plan.title(), styles.title);
@@ -121,8 +149,8 @@ public class TransactionExcelExportService {
         summaryRow(sheet, 5, "结余", plan.closing(), styles);
 
         // 表格拉宽：图表并排一行要靠这些列宽撑出足够空间
-        for (int c = 0; c < COL_WIDTHS.length; c++) {
-            sheet.setColumnWidth(c, COL_WIDTHS[c] * 256);
+        for (int c = 0; c < widths.length; c++) {
+            sheet.setColumnWidth(c, widths[c] * 256);
         }
 
         // 图表数据列用完就藏起来，别让表面多出两列数字
@@ -159,11 +187,12 @@ public class TransactionExcelExportService {
 
     /* ---------- 柱状图：收入 / 支出 / 结余（竖着的三根柱子） ---------- */
 
-    private void drawBarChart(XSSFSheet sheet) {
+    private void drawBarChart(XSSFSheet sheet, int[] widths) {
         XSSFDrawing drawing = sheet.createDrawingPatriarch();
         // 两张图并排一行、各占 D..G 的一半宽度（按 EMU 均分，不受列边界限制）
-        int[] from = posIn(0);
-        int[] mid = posIn(BLOCK_EMU / 2);
+        long block = blockEmu(widths);
+        int[] from = posIn(widths, 0);
+        int[] mid = posIn(widths, block / 2);
         XSSFClientAnchor anchor = new XSSFClientAnchor(0, 0, mid[1], 0,
                 from[0], 1, mid[0], HEADER_ROW - 1);
         XSSFChart chart = drawing.createChart(anchor);
@@ -201,10 +230,11 @@ public class TransactionExcelExportService {
 
     /* ---------- 环形图：收入 vs 支出 ---------- */
 
-    private void drawDoughnutChart(XSSFSheet sheet) {
+    private void drawDoughnutChart(XSSFSheet sheet, int[] widths) {
         XSSFDrawing drawing = sheet.createDrawingPatriarch();
-        int[] mid = posIn(BLOCK_EMU / 2);
-        int[] to = posIn(BLOCK_EMU);
+        long block = blockEmu(widths);
+        int[] mid = posIn(widths, block / 2);
+        int[] to = posIn(widths, block);
         XSSFClientAnchor anchor = new XSSFClientAnchor(mid[1], 0, 0, 0,
                 mid[0], 1, to[0], HEADER_ROW - 1);
         XSSFChart chart = drawing.createChart(anchor);
@@ -234,16 +264,20 @@ public class TransactionExcelExportService {
      * D..G 四列的总宽（EMU），图表按它均分两半。列宽→像素用的是 POI 的 7px/字符 + 5px 边距
      */
     private static final long EMU_PER_PIXEL = 9525L;
-    private static final long BLOCK_EMU = java.util.stream.IntStream
-            .rangeClosed(COL_INCOME, COL_NOTE)
-            .mapToLong(c -> (COL_WIDTHS[c] * 7L + 5) * EMU_PER_PIXEL)
-            .sum();
+
+    private static long blockEmu(int[] widths) {
+        long total = 0;
+        for (int c = COL_INCOME; c <= COL_NOTE; c++) {
+            total += (widths[c] * 7L + 5) * EMU_PER_PIXEL;
+        }
+        return total;
+    }
 
     /** 把「D 列起算的偏移（EMU）」换算成 (列号, 列内偏移)，锚点才能落在列中间 */
-    private static int[] posIn(long offsetEmu) {
+    private static int[] posIn(int[] widths, long offsetEmu) {
         long acc = 0;
         for (int c = COL_INCOME; c <= COL_NOTE; c++) {
-            long width = (COL_WIDTHS[c] * 7L + 5) * EMU_PER_PIXEL;
+            long width = (widths[c] * 7L + 5) * EMU_PER_PIXEL;
             if (offsetEmu < acc + width) {
                 return new int[]{c, (int) (offsetEmu - acc)};
             }
@@ -352,9 +386,12 @@ public class TransactionExcelExportService {
             // 摘要放分类名，备注放流水备注（和纸质表的分工一致）
             cell(excel, COL_SUMMARY, row.getCategoryName(), styles.text);
             boolean income = "income".equals(row.getType());
+            // 空着的那一侧也要建单元格：没有 cell 就没有边框，那一列会缺一排横线
             if (income) {
                 moneyCell(excel, COL_INCOME, row.getAmount(), styles.money);
+                blankCell(excel, COL_EXPENSE, styles.money);
             } else {
+                blankCell(excel, COL_INCOME, styles.money);
                 moneyCell(excel, COL_EXPENSE, row.getAmount(), styles.money);
             }
             moneyCell(excel, COL_BALANCE, row.getBalanceAfter(), styles.money);
@@ -456,6 +493,11 @@ public class TransactionExcelExportService {
         var cell = row.createCell(col);
         cell.setCellValue(value == null ? 0 : value.doubleValue());
         cell.setCellStyle(style);
+    }
+
+    /** 只为了带边框占位：金额格空着不写值（写了 0 会显示成 ¥0.00） */
+    private static void blankCell(XSSFRow row, int col, CellStyle style) {
+        row.createCell(col).setCellStyle(style);
     }
 
     private static void dateCell(XSSFRow row, int col, java.time.LocalDate value, Styles styles) {
