@@ -7,6 +7,6 @@ import com.bookkeep.model.dto.resp.PublicReportResp;
  */
 public interface PublicReportService {
 
-    /** startMonth / endMonth 为 yyyy-MM，都可空（都不传 = 全部时间） */
-    PublicReportResp report(String shareToken, String startMonth, String endMonth);
+    /** startDate / endDate 为 yyyy-MM-dd，都可空（都不传 = 全部时间） */
+    PublicReportResp report(String shareToken, String startDate, String endDate);
 }

@@ -436,11 +436,12 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
 |---|---|---|
 | POST | `/api/books/share` | 生成**一条**公示链接 `{ids:[1,2]}` → `{token, expiresAt, books:[{id,name}]}`；一条链接可含多本账本 |
 | POST | `/api/books/{id}/share` | 单本分享（等价于只选一本），返回 `{token, expiresAt}` |
-| GET | `/api/public/report/{shareToken}?startMonth=2026-09&endMonth=2026-11` | 免登录只读：链接里**每本账本**在区间内的收入/支出/区间末余额 + 支出与收入两份分类占比 + 明细（含逐行结余）；两端都可空 = 全部时间 |
+| GET | `/api/public/report/{shareToken}?startDate=2026-09-01&endDate=2026-11-11` | 免登录只读：链接里**每本账本**在区间内的收入/支出/区间末余额 + 支出与收入两份分类占比 + 明细（含逐行结余）；两端都可空 = 全部时间；**精确到天** |
 
-响应体：`{expiresAt, books:[{bookId, bookName, startMonth, endMonth, income, expense, balance, expenseCategories:[…], incomeCategories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}]}`
+响应体：`{expiresAt, books:[{bookId, bookName, startDate, endDate, income, expense, balance, expenseCategories:[…], incomeCategories:[…], transactions:[{transDate, type, amount, note, categoryName, categoryIcon, categoryColor, balanceAfter, receiptCount, receipts:[{id, title}]}]}]}`
 
-> 口径与统计页**完全一致**（同一份 `StatisticCalculator`）：收入/支出只算区间内，`balance` 是结束月最后一天的账户余额，
+> 口径与统计页**完全一致**（同一份 `StatisticCalculator`，只是公示页用日区间 `DateRange`、统计页用月区间 `MonthRange`）：
+> 收入/支出只算区间内，`balance` 是结束日当天的账户余额，
 > 不存在「累计结余」这个字段（两个结余并排只会让人对不上数）。
 > 分类占比给**两个方向**：`expenseCategories`（钱花哪了）与 `incomeCategories`（钱从哪来）。
 > 公示页**收入在左、支出在右并排**，图形可切柱状图 / 饼图 / 环形图（与统计页同一个组件）。
@@ -533,7 +534,7 @@ SELECT * FROM running ORDER BY trans_date DESC, id DESC LIMIT #{size} OFFSET #{o
   **流式**：`prepare()` 先校验+取数（此时响应未提交，出错还是正常信封），之后 `StreamingResponseBody`
   逐行写出去，不再把整份 CSV 拼成 `byte[]`
 - `GET /api/public/report/{shareToken}`（`PublicController` + `PublicReportService`）：免登录只读，
-  区间与统计页同参（`startMonth`/`endMonth`，都可空），`SecurityConfig` 只放行这一条路径；
+  区间**按天**（`startDate`/`endDate`，都可空；统计页仍按月），`SecurityConfig` 只放行这一条路径；
   账本从 token 反查，**且必须未过期**，查不到 404
 - 契约补充：`POST /api/books/{id}/share` → `{token, expiresAt}`（3 天有效，每次分享重新生成），
   登录响应里的 `books[].shareToken` 只是「当前链接」的快照，可能为 null

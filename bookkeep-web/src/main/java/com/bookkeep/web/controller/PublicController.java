@@ -30,12 +30,12 @@ public class PublicController {
     private final PublicReportService publicReportService;
     private final ReceiptService receiptService;
 
-    /** 区间两端可空（都不传 = 全部时间）：{@code ?startMonth=2026-09&endMonth=2026-11} */
+    /** 区间两端可空（都不传 = 全部时间）：{@code ?startDate=2026-09-01&endDate=2026-11-11} */
     @GetMapping("/report/{shareToken}")
     public Result<PublicReportResp> report(@PathVariable String shareToken,
-                                          @RequestParam(required = false) String startMonth,
-                                          @RequestParam(required = false) String endMonth) {
-        return Result.success(publicReportService.report(shareToken, startMonth, endMonth));
+                                          @RequestParam(required = false) String startDate,
+                                          @RequestParam(required = false) String endDate) {
+        return Result.success(publicReportService.report(shareToken, startDate, endDate));
     }
 
     @GetMapping("/report/{shareToken}/receipts/{receiptId}")

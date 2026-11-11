@@ -6,7 +6,6 @@ import com.bookkeep.common.result.ResultCode;
 import com.bookkeep.model.dto.resp.CategoryStatResp;
 import com.bookkeep.model.dto.resp.PublicReceiptResp;
 import com.bookkeep.model.dto.resp.PublicReportResp;
-import com.bookkeep.model.dto.resp.RangeSummaryResp;
 import com.bookkeep.model.dto.resp.ReportTransactionResp;
 import com.bookkeep.model.entity.Book;
 import com.bookkeep.model.entity.ShareLink;
@@ -55,7 +54,7 @@ public class PublicReportServiceImpl implements PublicReportService {
 
     @Override
     @Transactional(readOnly = true)
-    public PublicReportResp report(String shareToken, String startMonth, String endMonth) {
+    public PublicReportResp report(String shareToken, String startDate, String endDate) {
         // 过期 / 不存在都按同一个 404，不暴露「token 曾经存在过」（逻辑在 ShareLinkResolver 里只写一次）
         ShareLink link = shareLinkResolver.requireValid(shareToken);
         List<Long> bookIds = shareLinkResolver.bookIds(link.getId());
@@ -68,7 +67,8 @@ public class PublicReportServiceImpl implements PublicReportService {
             throw new BusinessException(ResultCode.NOT_FOUND, "公示页不存在或已失效");
         }
 
-        StatisticCalculator.MonthRange range = StatisticCalculator.resolveRange(startMonth, endMonth);
+        // 公示页精确到天：同学关心的是「这几天花了多少」，不是整月
+        StatisticCalculator.DateRange range = StatisticCalculator.resolveDateRange(startDate, endDate);
         List<PublicReportResp.BookReport> reports = new ArrayList<>(books.size());
         for (Book book : books) {
             reports.add(buildBookReport(book, range));
@@ -76,8 +76,8 @@ public class PublicReportServiceImpl implements PublicReportService {
         return new PublicReportResp(DATE_TIME.format(link.getExpiresAt()), reports);
     }
 
-    private PublicReportResp.BookReport buildBookReport(Book book, StatisticCalculator.MonthRange range) {
-        RangeSummaryResp summary = calculator.summaryBetween(book.getId(), range);
+    private PublicReportResp.BookReport buildBookReport(Book book, StatisticCalculator.DateRange range) {
+        StatisticCalculator.Amounts amounts = calculator.amountsBetween(book.getId(), range);
         // 收支两个方向都给：公示页要把「钱花哪了」和「钱从哪来」一起摆给同学看
         List<CategoryStatResp> expenseCategories = calculator.categoriesBetween(
                 book.getId(), range, CategoryPresets.TYPE_EXPENSE);
@@ -96,11 +96,11 @@ public class PublicReportServiceImpl implements PublicReportService {
         return new PublicReportResp.BookReport(
                 book.getId(),
                 book.getName(),
-                summary.startMonth(),
-                summary.endMonth(),
-                summary.income(),
-                summary.expense(),
-                summary.balance(),
+                range.startDate() == null ? null : range.startDate().toString(),
+                range.endDate() == null ? null : range.endDate().toString(),
+                amounts.income(),
+                amounts.expense(),
+                amounts.balance(),
                 expenseCategories,
                 incomeCategories,
                 transactions);

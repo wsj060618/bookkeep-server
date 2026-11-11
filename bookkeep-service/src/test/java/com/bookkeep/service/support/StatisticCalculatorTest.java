@@ -58,6 +58,42 @@ class StatisticCalculatorTest {
     }
 
     @Test
+    @DisplayName("日区间：两端可空；开始晚于结束 / 格式错 → 400；金额按日边界取")
+    void resolveDateRangeAndAmounts() {
+        StatisticCalculator.DateRange all = StatisticCalculator.resolveDateRange(null, null);
+        assertNull(all.startDate());
+        assertNull(all.endDate());
+
+        StatisticCalculator.DateRange oneDay =
+                StatisticCalculator.resolveDateRange("2026-10-12", "2026-10-12");
+        assertEquals(LocalDate.of(2026, 10, 12), oneDay.startDate());
+        assertEquals(LocalDate.of(2026, 10, 12), oneDay.endDate());
+
+        BusinessException reversed = assertThrows(BusinessException.class,
+                () -> StatisticCalculator.resolveDateRange("2026-11-01", "2026-10-31"));
+        assertEquals("开始日期不能晚于结束日期", reversed.getMessage());
+
+        BusinessException format = assertThrows(BusinessException.class,
+                () -> StatisticCalculator.resolveDateRange("2026-9-1", null));
+        assertEquals("日期格式应为 yyyy-MM-dd，例如 2026-08-01", format.getMessage());
+
+        MonthSumRow row = new MonthSumRow();
+        row.setIncome(new BigDecimal("0"));
+        row.setExpense(new BigDecimal("620.00"));
+        when(transactionMapper.sumRange(1L, LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31)))
+                .thenReturn(row);
+        when(transactionMapper.sumBalanceUpTo(1L, LocalDate.of(2026, 10, 31)))
+                .thenReturn(new BigDecimal("1280.00"));
+
+        StatisticCalculator.Amounts amounts = calculator.amountsBetween(1L,
+                StatisticCalculator.resolveDateRange("2026-10-01", "2026-10-31"));
+        // SUM 空集返回 scale=0 的 0，必须补成 0.00，否则前端一个地方 "0" 一个地方 "0.00"
+        assertEquals("0.00", amounts.income().toPlainString());
+        assertEquals("620.00", amounts.expense().toPlainString());
+        assertEquals("1280.00", amounts.balance().toPlainString());
+    }
+
+    @Test
     @DisplayName("区间汇总：结余取结束月份最后一天；结束月份不限时取当前余额")
     void summaryBetween() {
         MonthSumRow row = new MonthSumRow();

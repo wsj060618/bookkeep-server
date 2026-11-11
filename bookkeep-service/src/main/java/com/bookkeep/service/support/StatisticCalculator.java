@@ -20,14 +20,15 @@ import java.time.format.DateTimeParseException;
 import java.util.List;
 
 /**
- * 统计口径的唯一实现点。统计接口和公示页都走这里，只是 bookId 来源不同。
- * <p>区间两端都可以为空（不限），月份粒度到 {@code yyyy-MM}。
+ * 统计口径的唯一实现点。统计接口和公示页都走这里，只是 bookId 来源不同、区间粒度不同
+ * （统计页按月 {@link MonthRange}，公示页按天 {@link DateRange}）。
  */
 @Component
 @RequiredArgsConstructor
 public class StatisticCalculator {
 
     private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("uuuu-MM");
+    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("uuuu-MM-dd");
 
     private static final BigDecimal ZERO = new BigDecimal("0.00");
 
@@ -45,6 +46,22 @@ public class StatisticCalculator {
         }
     }
 
+    /** 日区间（公示页）；两端可空，null 表示该端不限。 */
+    public record DateRange(LocalDate start, LocalDate end) {
+
+        public LocalDate startDate() {
+            return start;
+        }
+
+        public LocalDate endDate() {
+            return end;
+        }
+    }
+
+    /** 区间金额：公示页只要数字，不需要月份回显，所以和 {@link RangeSummaryResp} 分开。 */
+    public record Amounts(BigDecimal income, BigDecimal expense, BigDecimal balance) {
+    }
+
     /**
      * 解析 {@code startMonth} / {@code endMonth}（{@code yyyy-MM}，都可空）。
      * <p>格式错或开始晚于结束都抛 400，绝不静默返回空数据。
@@ -58,6 +75,19 @@ public class StatisticCalculator {
         return new MonthRange(start, end);
     }
 
+    /**
+     * 解析 {@code startDate} / {@code endDate}（{@code yyyy-MM-dd}，都可空）。
+     * <p>格式错或开始晚于结束都抛 400，绝不静默返回空数据。
+     */
+    public static DateRange resolveDateRange(String startDate, String endDate) {
+        LocalDate start = parseDate(startDate);
+        LocalDate end = parseDate(endDate);
+        if (start != null && end != null && start.isAfter(end)) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "开始日期不能晚于结束日期");
+        }
+        return new DateRange(start, end);
+    }
+
     private static YearMonth parseMonth(String month) {
         if (!StringUtils.hasText(month)) {
             return null;
@@ -69,26 +99,55 @@ public class StatisticCalculator {
         }
     }
 
+    private static LocalDate parseDate(String date) {
+        if (!StringUtils.hasText(date)) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(date.trim(), DATE_FORMAT);
+        } catch (DateTimeParseException e) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "日期格式应为 yyyy-MM-dd，例如 2026-08-01");
+        }
+    }
+
     /** 区间收入 / 支出 / 期末结余（结束月份不限时 = 当前余额）。 */
     public RangeSummaryResp summaryBetween(Long bookId, MonthRange range) {
-        MonthSumRow row = transactionMapper.sumRange(bookId, range.startDate(), range.endDate());
-        BigDecimal income = money(row == null ? null : row.getIncome());
-        BigDecimal expense = money(row == null ? null : row.getExpense());
-        BigDecimal balance = money(range.endDate() == null
-                ? transactionMapper.sumBalance(bookId)
-                : transactionMapper.sumBalanceUpTo(bookId, range.endDate()));
+        Amounts amounts = amountsBetween(bookId, range.startDate(), range.endDate());
         return new RangeSummaryResp(
                 range.start() == null ? null : range.start().format(MONTH_FORMAT),
                 range.end() == null ? null : range.end().format(MONTH_FORMAT),
-                income,
-                expense,
-                balance);
+                amounts.income(),
+                amounts.expense(),
+                amounts.balance());
+    }
+
+    public Amounts amountsBetween(Long bookId, DateRange range) {
+        return amountsBetween(bookId, range.startDate(), range.endDate());
+    }
+
+    private Amounts amountsBetween(Long bookId, LocalDate startDate, LocalDate endDate) {
+        MonthSumRow row = transactionMapper.sumRange(bookId, startDate, endDate);
+        BigDecimal income = money(row == null ? null : row.getIncome());
+        BigDecimal expense = money(row == null ? null : row.getExpense());
+        // 结余取「截至结束日」的全账本余额；结束日不限 = 当前余额
+        BigDecimal balance = money(endDate == null
+                ? transactionMapper.sumBalance(bookId)
+                : transactionMapper.sumBalanceUpTo(bookId, endDate));
+        return new Amounts(income, expense, balance);
     }
 
     /** 区间的分类占比，金额降序；总金额为 0 时占比一律 0.00。 */
     public List<CategoryStatResp> categoriesBetween(Long bookId, MonthRange range, String type) {
-        List<CategoryAmountRow> rows = transactionMapper.selectCategoryAmountsRange(
-                bookId, range.startDate(), range.endDate(), type);
+        return categoriesBetween(bookId, range.startDate(), range.endDate(), type);
+    }
+
+    public List<CategoryStatResp> categoriesBetween(Long bookId, DateRange range, String type) {
+        return categoriesBetween(bookId, range.startDate(), range.endDate(), type);
+    }
+
+    private List<CategoryStatResp> categoriesBetween(Long bookId, LocalDate startDate, LocalDate endDate,
+                                                     String type) {
+        List<CategoryAmountRow> rows = transactionMapper.selectCategoryAmountsRange(bookId, startDate, endDate, type);
         return toCategoryStats(rows);
     }
 

@@ -8,20 +8,20 @@
 ### 1. 全部时间（不传区间）
 GET {{host}}/api/public/report/{{shareToken}}
 
-### 2. 指定区间：收支、分类占比、明细都只算区间内，balance 是结束月最后一天的余额
-GET {{host}}/api/public/report/{{shareToken}}?startMonth=2026-09&endMonth=2026-11
+### 2. 指定区间（精确到天）：收支、分类占比、明细都只算区间内，balance 是结束日当天的余额
+GET {{host}}/api/public/report/{{shareToken}}?startDate=2026-09-01&endDate=2026-11-11
 
-### 3. 只给结束月份（开始不限）
-GET {{host}}/api/public/report/{{shareToken}}?endMonth=2026-09
+### 3. 只给结束日期（开始不限）
+GET {{host}}/api/public/report/{{shareToken}}?endDate=2026-09-30
 
 ### 4. 未知 token：预期 code=404「公示页不存在或已失效」
 GET {{host}}/api/public/report/ffffffffffffffffffffffffffffffff
 
-### 5. 区间格式错：预期 code=400「月份格式应为 yyyy-MM，例如 2026-08」
-GET {{host}}/api/public/report/{{shareToken}}?startMonth=2026-9
+### 5. 日期格式错：预期 code=400「日期格式应为 yyyy-MM-dd，例如 2026-08-01」
+GET {{host}}/api/public/report/{{shareToken}}?startDate=2026-9-1
 
-### 6. 开始晚于结束：预期 code=400「开始月份不能晚于结束月份」
-GET {{host}}/api/public/report/{{shareToken}}?startMonth=2026-11&endMonth=2026-09
+### 6. 开始晚于结束：预期 code=400「开始日期不能晚于结束日期」
+GET {{host}}/api/public/report/{{shareToken}}?startDate=2026-11-01&endDate=2026-09-30
 
 ### 7. 对照：公示路径之外仍然是登录态（预期真实 401）
 GET {{host}}/api/transactions
