@@ -27,8 +27,15 @@ import java.io.IOException;
 @Component
 public class ReceiptThumbnailer {
 
-    /** 480 够画廊卡片看，再大就失去省流量的意义 */
-    public static final int MAX_EDGE = 480;
+    /**
+     * 480 够画廊卡片看，再大就失去省流量的意义。
+     * <p><b>按宽度缩，不是按长边缩</b>：手机长截图（聊天记录、长小票）可能是 1084×17703，
+     * 按长边缩到 480 会变成 29×480 的竖条，卡片上糊成一坨 —— 2026-11-12 真实踩到过。
+     */
+    public static final int MAX_WIDTH = 480;
+
+    /** 长图的缩略图只保留顶部这一段（再长也没人会在卡片里看，截上头像 IM 的消息列表） */
+    public static final int MAX_HEIGHT = 1440;
 
     private static final float QUALITY = 0.78f;
 
@@ -45,7 +52,7 @@ public class ReceiptThumbnailer {
         if (decoded == null) {
             return null;
         }
-        byte[] jpeg = encode(orient(normalise(decoded, MAX_EDGE), orientation(source)));
+        byte[] jpeg = encode(orient(normalise(decoded), orientation(source)));
         // 原图本身就很小时缩略图反而更大，那就别用它
         return jpeg != null && jpeg.length < source.length ? jpeg : null;
     }
@@ -75,22 +82,29 @@ public class ReceiptThumbnailer {
         }
     }
 
-    /** 缩放到最长边 maxEdge，顺便统一成 RGB + 白底（PNG 的透明区直接画到 RGB 上会是黑的） */
-    private static BufferedImage normalise(BufferedImage source, int maxEdge) {
+    /**
+     * 缩略图规格：**宽度 ≤480**，高度超过 1440 就只截顶部那一段（长截图/长小票），
+     * 统一成 RGB + 白底（PNG 的透明区直接画到 RGB 上会是黑的）。从不放大。
+     */
+    private static BufferedImage normalise(BufferedImage source) {
         int w = source.getWidth();
         int h = source.getHeight();
-        double ratio = Math.min(1.0, (double) maxEdge / Math.max(w, h));
+        double ratio = Math.min(1.0, (double) MAX_WIDTH / w);
         int tw = Math.max(1, (int) Math.round(w * ratio));
         int th = Math.max(1, (int) Math.round(h * ratio));
+        int visibleHeight = Math.min(th, MAX_HEIGHT);
+        // 只画源图顶部 visibleHeight/ratio 那一截
+        double srcHeight = Math.min(h, visibleHeight / ratio);
 
-        BufferedImage out = new BufferedImage(tw, th, BufferedImage.TYPE_INT_RGB);
+        BufferedImage out = new BufferedImage(tw, visibleHeight, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = out.createGraphics();
         try {
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
             g.setColor(Color.WHITE);
-            g.fillRect(0, 0, tw, th);
-            g.drawImage(source, 0, 0, tw, th, null);
+            g.fillRect(0, 0, tw, visibleHeight);
+            g.drawImage(source, 0, 0, tw, visibleHeight,
+                    0, 0, w, (int) Math.round(srcHeight), null);
         } finally {
             g.dispose();
         }

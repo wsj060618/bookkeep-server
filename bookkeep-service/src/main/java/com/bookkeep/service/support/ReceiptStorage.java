@@ -130,15 +130,18 @@ public class ReceiptStorage {
     }
 
     /**
-     * 缩略图相对路径：与原始文件同目录，文件名后缀 {@code _thumb.jpg}。
+     * 缩略图相对路径：与原始文件同目录，文件名后缀 {@code _thumb2.jpg}。
      * <p>永远是 JPEG（原图可能是 png/webp），所以扩展名固定。库里不存这条路径——它是派生物，
      * 由原始文件名推导，「原图在库 → 缩略图也算在库」。
+     * <p><b>2 这个后缀是规格版本号</b>：2026-11-12 之前按「长边 480」缩放，
+     * 手机长截图会被缩成 29px 宽的竖条；改成按宽度缩之后换文件名，
+     * 老缩略图自然失效、按需重生成，旧的孤儿文件由每日清理带走。
      */
     public static String thumbPath(String storedPath) {
         int slash = storedPath.lastIndexOf('/');
         int dot = storedPath.lastIndexOf('.');
         int cut = dot > slash ? dot : storedPath.length();
-        return storedPath.substring(0, cut) + "_thumb.jpg";
+        return storedPath.substring(0, cut) + "_thumb2.jpg";
     }
 
     /** 缩略图绝对路径 */

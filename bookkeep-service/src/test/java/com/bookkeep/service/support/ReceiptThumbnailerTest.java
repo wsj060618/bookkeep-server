@@ -41,14 +41,25 @@ class ReceiptThumbnailerTest {
     }
 
     @Test
-    @DisplayName("竖图：长边才是 480（拿宽边算会框错方向）")
-    void portraitUsesLongEdge() throws IOException {
-        byte[] thumb = thumbnailer.render(encode(scene(400, 1200, true), "png"));
+    @DisplayName("竖图：宽度缩到 480，高度跟着走（不按长边缩）")
+    void portraitKeepsWidthAt480() throws IOException {
+        byte[] thumb = thumbnailer.render(encode(scene(1200, 3000, true), "png"));
 
         assertTrue(thumb != null, "应生成缩略图");
         BufferedImage image = ImageIO.read(new ByteArrayInputStream(thumb));
-        assertEquals(160, image.getWidth());
-        assertEquals(480, image.getHeight());
+        assertEquals(480, image.getWidth());
+        assertEquals(1200, image.getHeight());
+    }
+
+    @Test
+    @DisplayName("手机长截图：宽度保住 480，高度只留顶部 1440（真实那张是 1084×17703）")
+    void longScreenshotKeepsReadableWidth() throws IOException {
+        byte[] thumb = thumbnailer.render(encode(scene(1084, 8000, false), "png"));
+
+        assertTrue(thumb != null, "应生成缩略图");
+        BufferedImage image = ImageIO.read(new ByteArrayInputStream(thumb));
+        assertEquals(480, image.getWidth(), "按长边缩会变成 29px 宽的竖条，卡片上糊成一坨");
+        assertEquals(1440, image.getHeight(), "再长也不给，只截顶部");
     }
 
     @Test
